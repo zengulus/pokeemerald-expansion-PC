@@ -704,6 +704,7 @@ static bool8 MainState_Exit(void)
             SetMainCallback2(sNamingScreen->returnCallback);
         DestroyTask(FindTaskIdByFunc(Task_NamingScreen));
         FreeAllWindowBuffers();
+        SetVBlankCallback(NULL);
         FREE_AND_SET_NULL(sNamingScreen);
     }
     return FALSE;
@@ -2071,6 +2072,10 @@ static void PrintControls(void)
 static void CB2_NamingScreen(void)
 {
     RunTasks();
+    // The exit task changes callback2 and releases the screen's state.
+    // Its sprite and VBlank callbacks must stop using that state this frame.
+    if (gMain.callback2 != CB2_NamingScreen)
+        return;
     AnimateSprites();
     BuildOamBuffer();
     UpdatePaletteFade();

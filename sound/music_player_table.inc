@@ -1,4 +1,4 @@
-	.equiv TRACK_SIZE, 0x50
+	.equiv TRACK_SIZE, 48 + 8 * NATIVE_POINTER_SIZE
 	.equiv NUM_TRACKS_BGM, 10
 	.equiv NUM_TRACKS_SE1, 3
 	.equiv NUM_TRACKS_SE2, 9

@@ -1,4 +1,7 @@
 #include "global.h"
+#ifdef NATIVE
+#include "mods.h"
+#endif
 #include "clock.h"
 #include "new_game.h"
 #include "random.h"
@@ -181,6 +184,9 @@ void NewGameInitData(void)
     gSaveBlock2Ptr->specialSaveWarpFlags = 0;
     gSaveBlock2Ptr->gcnLinkFlags = 0;
     InitPlayerTrainerId();
+#ifdef NATIVE
+    ModsNewGame(GetTrainerId(gSaveBlock2Ptr->playerTrainerId));
+#endif
     PlayTimeCounter_Reset();
     ClearPokedexFlags();
     InitEventData();

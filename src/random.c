@@ -42,6 +42,12 @@ static void SFC32_Seed(struct Sfc32State *state, u32 seed, u8 stream)
 /*This ASM implementation uses some shortcuts and is generally faster on the GBA.
 * It's not necessarily faster if inlined, or on other platforms.
 * In addition, it's extremely non-portable. */
+#ifdef NATIVE
+u32 Random32(void)
+{
+    return _SFC32_Next_Stream(&gRngValue, STREAM1);
+}
+#else
 u32 NAKED Random32(void)
 {
     asm(".thumb\n\
@@ -69,6 +75,7 @@ u32 NAKED Random32(void)
     .ltorg"
     );
 }
+#endif
 
 u32 Random2_32(void)
 {
@@ -159,6 +166,12 @@ void ShuffleN(void *data, size_t n, size_t size)
     LOOP_RANDOM_END;
 }
 
+#if defined(NATIVE) && defined(_WIN32)
+u32 RandomUniform(enum RandomTag tag, u32 lo, u32 hi) { return RandomUniformDefault(tag, lo, hi); }
+u32 RandomUniformExcept(enum RandomTag tag, u32 lo, u32 hi, bool32 (*reject)(u32)) { return RandomUniformExceptDefault(tag, lo, hi, reject); }
+u32 RandomWeightedArray(enum RandomTag tag, u32 sum, u32 n, const u16 *weights) { return RandomWeightedArrayDefault(tag, sum, n, weights); }
+const void *RandomElementArray(enum RandomTag tag, const void *array, size_t size, size_t count) { return RandomElementArrayDefault(tag, array, size, count); }
+#else
 __attribute__((weak, alias("RandomUniformDefault")))
 u32 RandomUniform(enum RandomTag tag, u32 lo, u32 hi);
 
@@ -170,6 +183,7 @@ u32 RandomWeightedArray(enum RandomTag tag, u32 sum, u32 n, const u16 *weights);
 
 __attribute__((weak, alias("RandomElementArrayDefault")))
 const void *RandomElementArray(enum RandomTag tag, const void *array, size_t size, size_t count);
+#endif
 
 u32 RandomUniformDefault(enum RandomTag tag, u32 lo, u32 hi)
 {

@@ -586,7 +586,7 @@ static u32 CreateBerrySprite(const struct SpriteTemplate *sprTemplate, u32 berry
     dynamicGfx->images[0].relativeFrames = FALSE;
 
     spriteId = CreateSprite(&newSprTemplate, x, y, 0);
-    StoreWordInTwoHalfwords((u16 *) &gSprites[spriteId].data[BERRY_ICON_GFX_PTR_DATA_ID], (u32) dynamicGfx);
+    SetSpritePointerArg(&gSprites[spriteId], BERRY_ICON_GFX_PTR_DATA_ID, dynamicGfx);
     return spriteId;
 }
 
@@ -612,10 +612,7 @@ void DestroyBerryIconSprite(u32 spriteId, u32 berryId, bool32 freePal)
 
 void DestroyBerryIconSpritePtr(struct Sprite *sprite, u32 berryId, bool32 freePal)
 {
-    u32 gfxBuffer;
-
-    LoadWordFromTwoHalfwords((u16 *) &sprite->data[BERRY_ICON_GFX_PTR_DATA_ID], &gfxBuffer);
-    Free((void *)gfxBuffer);
+    Free(GetSpritePointerArg(sprite, BERRY_ICON_GFX_PTR_DATA_ID));
     DestroySprite(sprite);
     if (freePal)
         FreeBerryIconSpritePalette(berryId);

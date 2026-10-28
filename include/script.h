@@ -1,6 +1,13 @@
 #ifndef GUARD_SCRIPT_H
 #define GUARD_SCRIPT_H
 
+#ifdef NATIVE
+int NativeScriptIsInstrumented(uintptr_t function);
+#define SCRIPT_IS_INSTRUMENTED(func) NativeScriptIsInstrumented((uintptr_t)(func))
+#else
+#define SCRIPT_IS_INSTRUMENTED(func) ((((uintptr_t)(func)) & 0xE000000) == 0xA000000)
+#endif
+
 struct ScriptContext;
 
 typedef bool8 (*ScrCmdFunc)(struct ScriptContext *);
@@ -25,7 +32,11 @@ struct ScriptContext
     const u8 *stack[SCRIPT_STACK_SIZE];
     ScrCmdFunc *cmdTable;
     ScrCmdFunc *cmdTableEnd;
+#ifdef NATIVE
+    uintptr_t data[4];
+#else
     u32 data[4];
+#endif
 };
 
 #define ScriptReadByte(ctx) (*(ctx->scriptPtr++))
@@ -67,6 +78,8 @@ u16 ScriptReadHalfword(struct ScriptContext *ctx);
 u16 ScriptPeekHalfword(struct ScriptContext *ctx);
 u32 ScriptReadWord(struct ScriptContext *ctx);
 u32 ScriptPeekWord(struct ScriptContext *ctx);
+uintptr_t ScriptReadPointer(struct ScriptContext *ctx);
+uintptr_t ScriptPeekPointer(struct ScriptContext *ctx);
 void LockPlayerFieldControls(void);
 void UnlockPlayerFieldControls(void);
 bool8 ArePlayerFieldControlsLocked(void);
@@ -195,21 +208,21 @@ static inline void Script_CheckEffectInstrumentedSpecial(u32 specialId)
     typedef u16 (*SpecialFunc)(void);
     extern const SpecialFunc gSpecials[];
     // In ROM mirror 1.
-    if (Script_IsAnalyzingEffects() && (((uintptr_t)gSpecials[specialId]) & 0xE000000) != 0xA000000)
+    if (Script_IsAnalyzingEffects() && !SCRIPT_IS_INSTRUMENTED(gSpecials[specialId]))
         Script_GotoBreak_Internal();
 }
 
 static inline void Script_CheckEffectInstrumentedGotoNative(bool8 (*func)(void))
 {
     // In ROM mirror 1.
-    if (Script_IsAnalyzingEffects() && (((uintptr_t)func) & 0xE000000) != 0xA000000)
+    if (Script_IsAnalyzingEffects() && !SCRIPT_IS_INSTRUMENTED(func))
         Script_GotoBreak_Internal();
 }
 
 static inline void Script_CheckEffectInstrumentedCallNative(void (*func)(struct ScriptContext *))
 {
     // In ROM mirror 1.
-    if (Script_IsAnalyzingEffects() && (((uintptr_t)func) & 0xE000000) != 0xA000000)
+    if (Script_IsAnalyzingEffects() && !SCRIPT_IS_INSTRUMENTED(func))
         Script_GotoBreak_Internal();
 }
 

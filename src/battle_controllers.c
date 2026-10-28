@@ -1212,18 +1212,12 @@ void BtlController_EmitDataTransfer(enum BattlerId battler, u32 bufferId, u16 si
 
 static void UNUSED BtlController_EmitDMA3Transfer(enum BattlerId battler, u32 bufferId, void *dst, u16 size, void *data)
 {
-    s32 i;
-
     gBattleResources->transferBuffer[0] = CONTROLLER_DMA3TRANSFER;
-    gBattleResources->transferBuffer[1] = (u32)(dst);
-    gBattleResources->transferBuffer[2] = ((u32)(dst) & 0x0000FF00) >> 8;
-    gBattleResources->transferBuffer[3] = ((u32)(dst) & 0x00FF0000) >> 16;
-    gBattleResources->transferBuffer[4] = ((u32)(dst) & 0xFF000000) >> 24;
-    gBattleResources->transferBuffer[5] = size;
-    gBattleResources->transferBuffer[6] = (size & 0xFF00) >> 8;
-    for (i = 0; i < size; i++)
-        gBattleResources->transferBuffer[7 + i] = *(u8 *)(data++);
-    PrepareBufferDataTransfer(battler, bufferId, gBattleResources->transferBuffer, size + 7);
+    memcpy(gBattleResources->transferBuffer + 1, &dst, sizeof(dst));
+    gBattleResources->transferBuffer[1 + sizeof(dst)] = size;
+    gBattleResources->transferBuffer[2 + sizeof(dst)] = size >> 8;
+    memcpy(gBattleResources->transferBuffer + 3 + sizeof(dst), data, size);
+    PrepareBufferDataTransfer(battler, bufferId, gBattleResources->transferBuffer, size + 3 + sizeof(dst));
 }
 
 static void UNUSED BtlController_EmitPlayBGM(enum BattlerId battler, u32 bufferId, u16 songId, void *data)
@@ -2908,7 +2902,7 @@ void BtlController_HandleIntroTrainerBallThrow(enum BattlerId battler, u16 tagTr
     taskId = CreateTask(Task_StartSendOutAnim, 5);
     gTasks[taskId].tBattlerId = battler;
     gTasks[taskId].tFramesToWait = framesToWait;
-    SetWordTaskArg(taskId, tControllerFunc_1, (uint32_t)(controllerCallback));
+    SetTaskPointerArg(taskId, tControllerFunc_1, (const void *)(controllerCallback));
 
     if (gBattleSpritesDataPtr->healthBoxesData[battler].partyStatusSummaryShown)
         gTasks[gBattlerStatusSummaryTaskId[battler]].func = Task_HidePartyStatusSummary;
@@ -2965,7 +2959,7 @@ static void Task_StartSendOutAnim(u8 taskId)
             gBattleResources->bufferA[battler][1] = gBattlerPartyIndexes[battler];
             StartSendOutAnim(battler, FALSE, FALSE, ShouldDoSlideInAnim(battler));
         }
-        gBattlerControllerFuncs[battler] = (void*)(GetWordTaskArg(taskId, tControllerFunc_1));
+        gBattlerControllerFuncs[battler] = (void*)(GetTaskPointerArg(taskId, tControllerFunc_1));
         DestroyTask(taskId);
     }
 }

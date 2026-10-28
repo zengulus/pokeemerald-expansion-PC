@@ -1,4 +1,7 @@
 #include "global.h"
+#ifdef NATIVE
+#include "mods.h"
+#endif
 #include "malloc.h"
 #include "battle.h"
 #include "battle_anim.h"
@@ -2193,7 +2196,7 @@ void PartyMenuModifyHP(u8 taskId, u8 slot, s8 hpIncrement, s16 hpDifference, Tas
 
 // The usage of hp in this function is mostly nonsense
 // Because caseId is always passed 0, none of the other cases ever occur
-static void ResetHPTaskData(u8 taskId, u8 caseId, u32 hp)
+static void ResetHPTaskData(u8 taskId, u8 caseId, uintptr_t hp)
 {
     s16 *data = gTasks[taskId].data;
 
@@ -5005,7 +5008,7 @@ void Task_AbilityCapsule(u8 taskId)
             ClearStdWindowAndFrameToTransparent(6, 0);
             ClearWindowTilemap(6);
             DisplayPartyMenuStdMessage(5);
-            gTasks[taskId].func = (void *)GetWordTaskArg(taskId, tOldFunc);
+            gTasks[taskId].func = (void *)GetTaskPointerArg(taskId, tOldFunc);
             return;
         }
         break;
@@ -5036,7 +5039,7 @@ void ItemUseCB_AbilityCapsule(u8 taskId, TaskFunc task)
     tMonId = gPartyMenu.slotId;
     tSpecies = GetMonData(&gParties[B_TRAINER_PLAYER][tMonId], MON_DATA_SPECIES);
     tAbilityNum = GetMonData(&gParties[B_TRAINER_PLAYER][tMonId], MON_DATA_ABILITY_NUM) ^ 1;
-    SetWordTaskArg(taskId, tOldFunc, (uintptr_t)(gTasks[taskId].func));
+    SetTaskPointerArg(taskId, tOldFunc, (const void *)(gTasks[taskId].func));
     gTasks[taskId].func = Task_AbilityCapsule;
 }
 
@@ -5090,7 +5093,7 @@ void Task_AbilityPatch(u8 taskId)
             ClearStdWindowAndFrameToTransparent(6, 0);
             ClearWindowTilemap(6);
             DisplayPartyMenuStdMessage(5);
-            gTasks[taskId].func = (void *)GetWordTaskArg(taskId, tOldFunc);
+            gTasks[taskId].func = (void *)GetTaskPointerArg(taskId, tOldFunc);
             return;
         }
         break;
@@ -5124,7 +5127,7 @@ void ItemUseCB_AbilityPatch(u8 taskId, TaskFunc task)
         tAbilityNum = 0;
     else
         tAbilityNum = 2;
-    SetWordTaskArg(taskId, tOldFunc, (uintptr_t)(gTasks[taskId].func));
+    SetTaskPointerArg(taskId, tOldFunc, (const void *)(gTasks[taskId].func));
     gTasks[taskId].func = Task_AbilityPatch;
 }
 
@@ -5190,7 +5193,7 @@ void Task_Mint(u8 taskId)
             ClearStdWindowAndFrameToTransparent(6, 0);
             ClearWindowTilemap(6);
             DisplayPartyMenuStdMessage(5);
-            gTasks[taskId].func = (void *)GetWordTaskArg(taskId, tOldFunc);
+            gTasks[taskId].func = (void *)GetTaskPointerArg(taskId, tOldFunc);
             return;
         }
         break;
@@ -5222,7 +5225,7 @@ void ItemUseCB_Mint(u8 taskId, TaskFunc task)
     tMonId = gPartyMenu.slotId;
     tOldNature = GetMonData(&gParties[B_TRAINER_PLAYER][tMonId], MON_DATA_HIDDEN_NATURE);
     tNewNature = GetItemSecondaryId(gSpecialVar_ItemId);
-    SetWordTaskArg(taskId, tOldFunc, (uintptr_t)(gTasks[taskId].func));
+    SetTaskPointerArg(taskId, tOldFunc, (const void *)(gTasks[taskId].func));
     gTasks[taskId].func = Task_Mint;
 }
 
@@ -5826,7 +5829,11 @@ void ItemUseCB_RareCandy(u8 taskId, TaskFunc task)
     u8 holdEffectParam = GetItemHoldEffectParam(*itemPtr);
 
     sInitialLevel = GetMonData(mon, MON_DATA_LEVEL);
-    if (!(B_RARE_CANDY_CAP && sInitialLevel >= GetCurrentLevelCap()))
+    if (!((B_RARE_CANDY_CAP
+#ifdef NATIVE
+        || ModsHardCap()
+#endif
+        ) && sInitialLevel >= GetCurrentLevelCap()))
     {
         BufferMonStatsToTaskData(mon, arrayPtr);
         cannotUseEffect = ExecuteTableBasedItemEffect(mon, *itemPtr, gPartyMenu.slotId, 0);
@@ -6152,7 +6159,7 @@ void ItemUseCB_DynamaxCandy(u8 taskId, TaskFunc task)
     tState = 0;
     tMonId = gPartyMenu.slotId;
     tDynamaxLevel = GetMonData(&gParties[B_TRAINER_PLAYER][tMonId], MON_DATA_DYNAMAX_LEVEL);
-    SetWordTaskArg(taskId, tOldFunc, (uintptr_t)(gTasks[taskId].func));
+    SetTaskPointerArg(taskId, tOldFunc, (const void *)(gTasks[taskId].func));
     gTasks[taskId].func = Task_DynamaxCandy;
 }
 
@@ -6379,7 +6386,7 @@ bool32 TryItemUseFusionChange(u8 taskId, TaskFunc task)
     if (targetSpecies != SPECIES_NONE)
     {
         gPartyMenuUseExitCallback = TRUE;
-        SetWordTaskArg(taskId, tNextFunc, (u32)task);
+        SetTaskPointerArg(taskId, tNextFunc, (const void *)task);
         gTasks[taskId].func = Task_TryItemUseFusionChange;
         gTasks[taskId].tState = 0;
         gTasks[taskId].tTargetSpecies = targetSpecies;
@@ -6624,7 +6631,7 @@ static void Task_TryItemUseFusionChange(u8 taskId)
         }
         break;
     case 7:
-        gTasks[taskId].func = (void *)GetWordTaskArg(taskId, tNextFunc);
+        gTasks[taskId].func = (void *)GetTaskPointerArg(taskId, tNextFunc);
         break;
     }
 }
@@ -6820,7 +6827,7 @@ static void Task_TryItemUseFormChange(u8 taskId)
         }
         break;
     case 5:
-        gTasks[taskId].func = (void *)GetWordTaskArg(taskId, tNextFunc);
+        gTasks[taskId].func = (void *)GetTaskPointerArg(taskId, tNextFunc);
         break;
     }
 }
@@ -6832,7 +6839,7 @@ bool32 TryItemUseFormChange(u8 taskId, TaskFunc task)
     if (TryFormChange(mon, FORM_CHANGE_ITEM_USE, B_TRAINER_PLAYER))
     {
         gPartyMenuUseExitCallback = TRUE;
-        SetWordTaskArg(taskId, tNextFunc, (u32)task);
+        SetTaskPointerArg(taskId, tNextFunc, (const void *)task);
         gTasks[taskId].func = Task_TryItemUseFormChange;
         gTasks[taskId].tState = 0;
         gTasks[taskId].tTargetSpecies = GetMonData(mon, MON_DATA_SPECIES);
@@ -6882,7 +6889,7 @@ bool32 TryMultichoiceFormChange(u8 taskId)
     if (TryFormChange(mon, FORM_CHANGE_ITEM_USE_MULTICHOICE, B_TRAINER_PLAYER))
     {
         gPartyMenuUseExitCallback = TRUE;
-        SetWordTaskArg(taskId, tNextFunc, (u32)Task_ClosePartyMenuAfterText);
+        SetTaskPointerArg(taskId, tNextFunc, (const void *)Task_ClosePartyMenuAfterText);
         gTasks[taskId].func = Task_TryItemUseFormChange;
         gTasks[taskId].tState = 0;
         gTasks[taskId].tTargetSpecies = GetMonData(mon, MON_DATA_SPECIES);

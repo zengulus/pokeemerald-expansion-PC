@@ -82,6 +82,9 @@ void SetSaveBlocksPointers(u16 offset)
     struct SaveBlock1 **sav1_LocalVar = &gSaveBlock1Ptr;
 
     offset = (offset + Random()) & (SAVEBLOCK_MOVE_RANGE - 4);
+#ifdef NATIVE
+    offset &= ~(__alignof__(struct SaveBlock1) - 1);
+#endif
 
     gSaveBlock2Ptr = (void *)(&gSaveblock2) + offset;
     *sav1_LocalVar = (void *)(&gSaveblock1) + offset;

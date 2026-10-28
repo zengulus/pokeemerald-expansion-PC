@@ -781,8 +781,8 @@ static void Cmd_createsprite(void)
     s16 subpriority;
 
     sBattleAnimScriptPtr++;
-    template = (const struct SpriteTemplate *)(T2_READ_32(sBattleAnimScriptPtr));
-    sBattleAnimScriptPtr += 4;
+    template = (const struct SpriteTemplate *)(T2_READ_PTR(sBattleAnimScriptPtr));
+    sBattleAnimScriptPtr += sizeof(void *);
 
     argVar = sBattleAnimScriptPtr[0];
     sBattleAnimScriptPtr++;
@@ -858,8 +858,8 @@ static void Cmd_createspriteontargets_onpos(void)
     u8 battlerArgIndex;
 
     sBattleAnimScriptPtr++;
-    template = (const struct SpriteTemplate *)(T2_READ_32(sBattleAnimScriptPtr));
-    sBattleAnimScriptPtr += 4;
+    template = (const struct SpriteTemplate *)(T2_READ_PTR(sBattleAnimScriptPtr));
+    sBattleAnimScriptPtr += sizeof(void *);
 
     argVar = sBattleAnimScriptPtr[0];
     sBattleAnimScriptPtr++;
@@ -888,8 +888,8 @@ static void Cmd_createspriteontargets(void)
     u8 battlerArgIndex;
 
     sBattleAnimScriptPtr++;
-    template = (const struct SpriteTemplate *)(T2_READ_32(sBattleAnimScriptPtr));
-    sBattleAnimScriptPtr += 4;
+    template = (const struct SpriteTemplate *)(T2_READ_PTR(sBattleAnimScriptPtr));
+    sBattleAnimScriptPtr += sizeof(void *);
 
     argVar = sBattleAnimScriptPtr[0];
     sBattleAnimScriptPtr++;
@@ -919,8 +919,8 @@ static void Cmd_createvisualtask(void)
 
     sBattleAnimScriptPtr++;
 
-    taskFunc = (TaskFunc)T2_READ_32(sBattleAnimScriptPtr);
-    sBattleAnimScriptPtr += 4;
+    taskFunc = (TaskFunc)T2_READ_PTR(sBattleAnimScriptPtr);
+    sBattleAnimScriptPtr += sizeof(void *);
 
     taskPriority = sBattleAnimScriptPtr[0];
     sBattleAnimScriptPtr++;
@@ -951,8 +951,8 @@ static void Cmd_createvisualtaskontargets(void)
 
     sBattleAnimScriptPtr++;
 
-    taskFunc = (TaskFunc)T2_READ_32(sBattleAnimScriptPtr);
-    sBattleAnimScriptPtr += 4;
+    taskFunc = (TaskFunc)T2_READ_PTR(sBattleAnimScriptPtr);
+    sBattleAnimScriptPtr += sizeof(void *);
 
     taskPriority = sBattleAnimScriptPtr[0];
     sBattleAnimScriptPtr++;
@@ -1621,7 +1621,7 @@ static void Cmd_call(void)
 {
     assertf(sBattleAnimScriptCallDepth + 1 < MAX_ANIM_CALL_DEPTH, "Max animation call depth exceeded");
     sBattleAnimScriptPtr++;
-    sBattleAnimScriptRetAddr[sBattleAnimScriptCallDepth++] = sBattleAnimScriptPtr + 4;
+    sBattleAnimScriptRetAddr[sBattleAnimScriptCallDepth++] = sBattleAnimScriptPtr + sizeof(void *);
     sBattleAnimScriptPtr = T2_READ_PTR(sBattleAnimScriptPtr);
 }
 
@@ -1655,7 +1655,7 @@ static void Cmd_choosetwoturnanim(void)
 {
     sBattleAnimScriptPtr++;
     if (gAnimMoveTurn & 1)
-        sBattleAnimScriptPtr += 4;
+        sBattleAnimScriptPtr += sizeof(void *);
     sBattleAnimScriptPtr = T2_READ_PTR(sBattleAnimScriptPtr);
 }
 
@@ -1669,7 +1669,7 @@ static void Cmd_jumpifmoveturn(void)
     if (toCheck == gAnimMoveTurn)
         sBattleAnimScriptPtr = T2_READ_PTR(sBattleAnimScriptPtr);
     else
-        sBattleAnimScriptPtr += 4;
+        sBattleAnimScriptPtr += sizeof(void *);
 }
 
 static void Cmd_goto(void)
@@ -2196,8 +2196,8 @@ static void Cmd_createsoundtask(void)
     s32 i;
 
     sBattleAnimScriptPtr++;
-    func = (TaskFunc)T2_READ_32(sBattleAnimScriptPtr);
-    sBattleAnimScriptPtr += 4;
+    func = (TaskFunc)T2_READ_PTR(sBattleAnimScriptPtr);
+    sBattleAnimScriptPtr += sizeof(void *);
     numArgs = sBattleAnimScriptPtr[0];
     sBattleAnimScriptPtr++;
     for (i = 0; i < numArgs; i++)
@@ -2250,7 +2250,7 @@ static void Cmd_jumpargeq(void)
     if (valueToCheck == gBattleAnimArgs[argId])
         sBattleAnimScriptPtr = T2_READ_PTR(sBattleAnimScriptPtr + 3);
     else
-        sBattleAnimScriptPtr += 7;
+        sBattleAnimScriptPtr += 3 + sizeof(void *);
 }
 
 static void Cmd_jumpifcontest(void)
@@ -2259,7 +2259,7 @@ static void Cmd_jumpifcontest(void)
     if (IsContest())
         sBattleAnimScriptPtr = T2_READ_PTR(sBattleAnimScriptPtr);
     else
-        sBattleAnimScriptPtr += 4;
+        sBattleAnimScriptPtr += sizeof(void *);
 }
 
 static void Cmd_splitbgprio(void)
@@ -2420,7 +2420,7 @@ static void Cmd_jumpifmovetypeequal(void)
     const enum Type *type = sBattleAnimScriptPtr + 1;
     sBattleAnimScriptPtr += 2;
     if (*type != GetBattleMoveType(gCurrentMove))
-        sBattleAnimScriptPtr += 4;
+        sBattleAnimScriptPtr += sizeof(void *);
     else
         sBattleAnimScriptPtr = T2_READ_PTR(sBattleAnimScriptPtr);
 }

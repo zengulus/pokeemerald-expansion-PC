@@ -1,0 +1,240 @@
+# Native game build. Invoke from the repository root.
+.DEFAULT_GOAL := all
+SHELL := /bin/bash -o pipefail
+TARGET ?= linux64
+BITS := 32
+POINTER_BYTES := 4
+ifneq ($(filter windows32 windows64,$(TARGET)),)
+ifeq ($(TARGET),windows64)
+BITS := 64
+POINTER_BYTES := 8
+PREFIX := x86_64-w64-mingw32-
+ASM_FILTER_FLAGS := --windows --pointer-size 8
+SDL2_ROOT ?= native/deps/SDL2/x86_64-w64-mingw32
+else
+PREFIX := i686-w64-mingw32-
+ASM_FILTER_FLAGS := --windows
+DATA_POSTPROCESS = $(OBJCOPY) --prefix-symbols=_
+SDL2_ROOT ?= native/deps/SDL2/i686-w64-mingw32
+endif
+SUFFIX := .exe
+SDL_CFLAGS := -I$(SDL2_ROOT)/include
+SDL_LIBS := -L$(SDL2_ROOT)/lib -lmingw32 -lSDL2main -lSDL2
+SDL_DLL = $(OBJ_DIR)/SDL2.dll
+else ifeq ($(TARGET),linux32)
+PREFIX :=
+SUFFIX :=
+SDL_CFLAGS := $(shell sdl2-config --cflags)
+SDL_LIBS := -lSDL2
+else ifeq ($(TARGET),linux64)
+PREFIX :=
+SUFFIX :=
+BITS := 64
+POINTER_BYTES := 8
+ASM_FILTER_FLAGS := --pointer-size 8
+SDL_CFLAGS := $(shell sdl2-config --cflags)
+SDL_LIBS := -lSDL2
+else
+$(error Unsupported TARGET $(TARGET))
+endif
+CC := $(PREFIX)gcc
+CPP := $(CC) -E
+AS := $(PREFIX)as
+OBJCOPY := $(PREFIX)objcopy
+OBJ_DIR := build/native/$(TARGET)
+GAME := $(OBJ_DIR)/pokeemerald-expansion$(SUFFIX)
+ASSETS_DIR_NAME := build/assets
+CPPFLAGS := -iquote include -Inative/include -DMODERN=1 -DNATIVE -DPORTABLE -DRENDERER_EASY_DRAW -DTESTING=0 -DEMERALD -DNDEBUG -std=gnu17 $(SDL_CFLAGS)
+CPPFLAGS += -I$(OBJ_DIR)
+CFLAGS := -m$(BITS) -std=gnu17 -O2 -g -ffile-prefix-map=$(CURDIR)=. -fno-strict-aliasing -fwrapv -fno-pie -fno-toplevel-reorder -Wno-address-of-packed-member -mno-ms-bitfields -Werror=pointer-to-int-cast -Werror=int-to-pointer-cast
+LDFLAGS := -m$(BITS) -no-pie
+ifeq ($(TARGET),linux64)
+CFLAGS := $(filter-out -fno-pie,$(CFLAGS)) -fPIE
+LDFLAGS := -m64 -pie
+endif
+ifneq ($(filter windows32 windows64,$(TARGET)),)
+LDFLAGS += -Wl,--no-insert-timestamp
+else
+LDFLAGS += -Wl,-z,noexecstack
+endif
+ASFLAGS := --$(BITS) --defsym MODERN=1 --defsym EMERALD=1 --defsym NATIVE_POINTER_SIZE=$(POINTER_BYTES)
+
+TOOLS_DIR := tools
+GFX := tools/gbagfx/gbagfx
+PREPROC := tools/preproc/preproc
+SCANINC := tools/scaninc/scaninc
+MID := tools/mid2agb/mid2agb
+WAV2AGB := tools/wav2agb/wav2agb
+SMOL := tools/compresSmol/compresSmol
+SMOLTM := tools/compresSmol/compresSmolTilemap
+JSONPROC := tools/jsonproc/jsonproc
+MAPJSON := tools/mapjson/mapjson
+TRAINERPROC := tools/trainerproc/trainerproc
+C_SUBDIR := src
+DATA_SRC_SUBDIR := src/data
+DATA_ASM_SUBDIR := data
+MID_SUBDIR := sound/songs/midi
+SONG_SUBDIR := sound/songs
+C_BUILDDIR := $(OBJ_DIR)/src
+DATA_ASM_BUILDDIR := $(OBJ_DIR)/data
+MID_BUILDDIR := $(OBJ_DIR)/$(MID_SUBDIR)
+SONG_BUILDDIR := $(OBJ_DIR)/$(SONG_SUBDIR)
+MAP_VERSION := emerald
+AUTO_GEN_TARGETS :=
+
+# Platform replacements are explicit. Never link ARM entry points or ARM code.
+REPLACED := $(wildcard src/agb_flash*.c) src/siirtc.c src/assertf.c src/malloc.c
+C_SRCS := $(filter-out $(REPLACED),$(filter-out %.inc.c,$(wildcard src/*.c src/*/*.c)))
+NATIVE_SRCS := $(wildcard native/*.c native/mods/*.c)
+C_OBJS := $(addprefix $(OBJ_DIR)/,$(C_SRCS:.c=.o))
+NATIVE_OBJS := $(addprefix $(OBJ_DIR)/,$(NATIVE_SRCS:.c=.o))
+DATA_SRCS := $(wildcard data/*.s)
+DATA_OBJS := $(addprefix $(OBJ_DIR)/,$(DATA_SRCS:.s=.o))
+MID_OBJS := $(addprefix $(OBJ_DIR)/,$(patsubst %.mid,%.o,$(wildcard $(MID_SUBDIR)/*.mid)))
+OBJS := $(C_OBJS) $(NATIVE_OBJS) $(DATA_OBJS) $(MID_OBJS)
+SCRIPT_METADATA := $(OBJ_DIR)/script_metadata.c
+SCRIPT_METADATA_OBJ := $(OBJ_DIR)/script_metadata.o
+SCRIPT_METADATA_DEPS := $(wildcard asm/macros/*.inc data/*.inc data/scripts/*.inc)
+OBJS += $(SCRIPT_METADATA_OBJ)
+
+$(OBJ_DIR)/mod_content.inc: native/generate_mod_content.py $(wildcard include/constants/*.h)
+	python3 $< --output $@
+$(OBJ_DIR)/native/mod_game.o: $(OBJ_DIR)/mod_content.inc
+
+$(SCRIPT_METADATA): native/generate_script_metadata.py $(SCRIPT_METADATA_DEPS) $(C_OBJS)
+	python3 $< --nm $(PREFIX)nm $(if $(filter windows32,$(TARGET)),--windows) --output $@ $(C_OBJS)
+
+$(SCRIPT_METADATA_OBJ): $(SCRIPT_METADATA)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+# Changing target flags must invalidate objects, including successful objects
+# from a partially failed build. Never mix incompatible host data layouts.
+.PHONY: config-force
+$(OBJ_DIR)/config: config-force
+	@mkdir -p $(@D)
+	@printf '%s\n' '$(CC) $(CPPFLAGS) $(CFLAGS) $(ASFLAGS) $(LDFLAGS)' > $@.tmp
+	@cmp -s $@.tmp $@ || cp $@.tmp $@
+$(OBJS): $(OBJ_DIR)/config
+$(DATA_OBJS) $(MID_OBJS): native/asm_filter.py Makefile.native
+
+.PHONY: all prepare objects check gameplay-tests
+all: $(GAME) $(SDL_DLL) $(OBJ_DIR)/music/manifest.json
+EXAMPLE_MOD_SRCS := $(wildcard native/mods/*.c)
+ifneq ($(filter windows32 windows64,$(TARGET)),)
+MOD_SUFFIX := .dll
+MOD_SHARED_FLAGS := -shared -static-libgcc -Wl,--no-insert-timestamp
+else
+MOD_SUFFIX := .so
+MOD_SHARED_FLAGS := -shared -fPIC
+endif
+EXAMPLE_MOD_LIBS := $(patsubst native/mods/%.c,$(OBJ_DIR)/example-mods/%$(MOD_SUFFIX),$(EXAMPLE_MOD_SRCS))
+.PHONY: example-mods
+all: example-mods
+example-mods: $(EXAMPLE_MOD_LIBS)
+$(OBJ_DIR)/example-mods/%$(MOD_SUFFIX): native/mods/%.c native/mods/common.h include/mod_api.h $(OBJ_DIR)/config
+	@mkdir -p $(@D)
+	$(CC) -m$(BITS) -std=gnu17 -O2 -ffile-prefix-map=$(CURDIR)=. -Wall -Wextra -Werror -iquote include -DRHH_MOD_SHARED $(MOD_SHARED_FLAGS) $< -o $@
+$(OBJ_DIR)/music/manifest.json: native/copy_battle_music.py $(wildcard native/assets/music/*/*.mid native/assets/music/fonts/*.sf2 native/assets/music/manifest.json)
+	python3 native/copy_battle_music.py $(OBJ_DIR)/music
+objects: $(C_OBJS) $(NATIVE_OBJS)
+check:
+	python3 native/tests/run.py --target $(TARGET)
+gameplay-tests: $(OBJ_DIR)/gameplay-tests$(SUFFIX)
+
+$(OBJ_DIR)/native/platform-test.o: native/platform.c $(OBJ_DIR)/config Makefile.native
+	$(CC) $(CPPFLAGS) $(CFLAGS) -MMD -MP -Dmain=NativePlatformMain -c $< -o $@
+
+$(OBJ_DIR)/native/gameplay-test.o: native/tests/gameplay_test.c $(OBJ_DIR)/config Makefile.native
+	$(CC) $(CPPFLAGS) $(CFLAGS) -MMD -MP -c $< -o $@
+
+$(OBJ_DIR)/gameplay-tests$(SUFFIX): $(filter-out $(OBJ_DIR)/native/platform.o,$(OBJS)) $(OBJ_DIR)/native/platform-test.o $(OBJ_DIR)/native/gameplay-test.o
+	$(CC) $(LDFLAGS) -o $@ $^ $(SDL_LIBS) -lm
+prepare:
+	$(MAKE) -f make_tools.mk $(patsubst %/,%,$(sort $(dir $(GFX) $(PREPROC) $(SCANINC) $(MID) $(WAV2AGB) $(SMOL) $(JSONPROC) $(MAPJSON) $(TRAINERPROC))))
+	$(MAKE) NODEP=1 SETUP_PREREQS=0 NATIVE_ASSETS=1 generated
+	$(MAKE) NODEP=1 SETUP_PREREQS=0 NATIVE_ASSETS=1 src/data/pokemon/teachable_learnsets.h src/data/tutor_moves.h
+
+$(GAME): $(OBJS)
+	@echo "NATIVE LINK $@"
+	@$(CC) $(LDFLAGS) -o $@ $^ $(SDL_LIBS) -lm
+
+ifneq ($(filter windows32 windows64,$(TARGET)),)
+$(SDL_DLL): $(SDL2_ROOT)/bin/SDL2.dll
+	@mkdir -p $(@D)
+	cp $< $@
+endif
+
+$(OBJ_DIR)/src/%.o: src/%.c
+	@mkdir -p $(@D)
+	@echo "NATIVE CC $<"
+	@$(CPP) -m$(BITS) $(CPPFLAGS) $< | $(PREPROC) -ni -g $(ASSETS_DIR_NAME) $< charmap.txt | $(CC) $(CFLAGS) -x cpp-output -c - -o $@
+
+$(OBJ_DIR)/native/%.o: native/%.c
+	@mkdir -p $(@D)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -MMD -MP -c $< -o $@
+
+$(OBJ_DIR)/src/%.d: src/%.c
+	@mkdir -p $(@D)
+	@$(SCANINC) -M $@ -g $(ASSETS_DIR_NAME) -I include -I native/include $<
+
+$(OBJ_DIR)/data/%.d: data/%.s
+	@mkdir -p $(@D)
+	@$(SCANINC) -M $@ -g $(ASSETS_DIR_NAME) -I include $<
+
+$(OBJ_DIR)/data/%.o: data/%.s
+	@mkdir -p $(@D)
+	@echo "NATIVE DATA $<"
+	@$(PREPROC) $< charmap.txt | $(CPP) -m$(BITS) $(CPPFLAGS) -I include -x assembler-with-cpp - | $(PREPROC) -ie $< charmap.txt | python3 native/asm_filter.py $(ASM_FILTER_FLAGS) | $(AS) $(ASFLAGS) -o $@ -
+	$(if $(DATA_POSTPROCESS),@$(DATA_POSTPROCESS) $@)
+
+include graphics_file_rules.mk
+include spritesheet_rules.mk
+include json_data_rules.mk
+include map_data_rules.mk
+include audio_rules.mk
+
+$(DATA_ASM_BUILDDIR)/maps.o $(DATA_ASM_BUILDDIR)/map_events.o:
+	@mkdir -p $(@D)
+	@$(PREPROC) $< charmap.txt | $(CPP) -m$(BITS) $(CPPFLAGS) -I include -x assembler-with-cpp - | $(PREPROC) -ie $< charmap.txt | python3 native/asm_filter.py $(ASM_FILTER_FLAGS) | $(AS) $(ASFLAGS) -o $@ -
+	$(if $(DATA_POSTPROCESS),@$(DATA_POSTPROCESS) $@)
+
+# The song data is still assembled by the host; no ARM instructions are linked.
+$(MID_BUILDDIR)/%.o: $(MID_SUBDIR)/%.s
+	@mkdir -p $(@D)
+	@(cd sound && ../$(PREPROC) ../$< ../charmap.txt) | python3 native/asm_filter.py $(ASM_FILTER_FLAGS) --song | $(AS) $(ASFLAGS) -o $@ -
+	$(if $(DATA_POSTPROCESS),@$(DATA_POSTPROCESS) $@)
+
+$(SONG_BUILDDIR)/%.o: $(SONG_SUBDIR)/%.s
+	@mkdir -p $(@D)
+	@(cd sound && ../$(PREPROC) ../$< ../charmap.txt) | python3 native/asm_filter.py $(ASM_FILTER_FLAGS) --song | $(AS) $(ASFLAGS) -o $@ -
+	$(if $(DATA_POSTPROCESS),@$(DATA_POSTPROCESS) $@)
+
+%.1bpp: %.png
+	$(GFX) $< $@
+%.4bpp: %.png
+	$(GFX) $< $@
+%.8bpp: %.png
+	$(GFX) $< $@
+%.gbapal: %.pal
+	$(GFX) $< $@
+%.gbapal: %.png
+	$(GFX) $< $@
+%.lz: %
+	$(GFX) $< $@
+%.smol: %
+	$(SMOL) -w $< $@
+%.fastSmol: %
+	$(SMOL) -w $< $@ false false false
+%.smolTM: %
+	$(SMOLTM) $< $@
+%.rl: %
+	$(GFX) $< $@
+
+ifeq ($(filter prepare,$(MAKECMDGOALS)),)
+ifneq ($(NODEP),1)
+-include $(C_OBJS:.o=.d) $(DATA_OBJS:.o=.d) $(NATIVE_OBJS:.o=.d)
+-include $(OBJ_DIR)/native/platform-test.d $(OBJ_DIR)/native/gameplay-test.d
+endif
+endif
+.DELETE_ON_ERROR:
+.SECONDARY:

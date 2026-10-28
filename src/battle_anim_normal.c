@@ -934,8 +934,6 @@ void AnimTask_TintPalettes(u8 taskId)
 #define sTimer         data[3]
 #define sOriginalValue data[4]
 #define sType          data[5]
-#define sShakePtrLo    data[6]
-#define sShakePtrHi    data[7]
 
 static void AnimShakeMonOrBattlePlatforms(struct Sprite *sprite)
 {
@@ -950,20 +948,20 @@ static void AnimShakeMonOrBattlePlatforms(struct Sprite *sprite)
     switch (cmd->type)
     {
     case SHAKE_BG_X:
-        StoreSpriteCallbackInData6(sprite, (void *)&gBattle_BG3_X);
+        SetSpritePointerArg(sprite, 6, &gBattle_BG3_X);
         break;
     case SHAKE_BG_Y:
-        StoreSpriteCallbackInData6(sprite, (void *)&gBattle_BG3_Y);
+        SetSpritePointerArg(sprite, 6, &gBattle_BG3_Y);
         break;
     case SHAKE_MON_X:
-        StoreSpriteCallbackInData6(sprite, (void *)&gSpriteCoordOffsetX);
+        SetSpritePointerArg(sprite, 6, &gSpriteCoordOffsetX);
         break;
     default:
-        StoreSpriteCallbackInData6(sprite, (void *)&gSpriteCoordOffsetY);
+        SetSpritePointerArg(sprite, 6, &gSpriteCoordOffsetY);
         break;
     }
 
-    sprite->sOriginalValue = *(u16 *)(sprite->sShakePtrLo | (sprite->sShakePtrHi << 16));
+    sprite->sOriginalValue = *(u16 *)GetSpritePointerArg(sprite, 6);
     sprite->sType = cmd->type;
     if (sprite->sType == SHAKE_MON_X || sprite->sType == SHAKE_MON_Y)
         AnimShakeMonOrBattlePlatforms_UpdateCoordOffsetEnabled();
@@ -983,13 +981,13 @@ static void AnimShakeMonOrBattlePlatforms_Step(struct Sprite *sprite)
         else
         {
             sprite->sShakeTimer = sprite->sShakeDuration;
-            *(u16 *)(sprite->sShakePtrLo | (sprite->sShakePtrHi << 16)) += sprite->sShakeVelocity;
+            *(u16 *)GetSpritePointerArg(sprite, 6) += sprite->sShakeVelocity;
             sprite->sShakeVelocity = -sprite->sShakeVelocity;
         }
     }
     else
     {
-        *(u16 *)(sprite->sShakePtrLo | (sprite->sShakePtrHi << 16)) = sprite->sOriginalValue;
+        *(u16 *)GetSpritePointerArg(sprite, 6) = sprite->sOriginalValue;
         if (sprite->sType == SHAKE_MON_X || sprite->sType == SHAKE_MON_Y)
         {
             for (enum BattlerId i = 0; i < gBattlersCount; i++)
@@ -1028,8 +1026,6 @@ static void AnimShakeMonOrBattlePlatforms_UpdateCoordOffsetEnabled(void)
 #undef sTimer
 #undef sOriginalValue
 #undef sType
-#undef sShakePtrLo
-#undef sShakePtrHi
 
 // Task data for AnimTask_ShakeBattlePlatforms
 #define tXOffset     data[0]

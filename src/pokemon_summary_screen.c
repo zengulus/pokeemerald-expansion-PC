@@ -1262,7 +1262,7 @@ void ShowSelectMovePokemonSummaryScreen(struct Pokemon *mons, u8 monIndex, void 
     sMonSummaryScreen->newMove = newMove;
 }
 
-static void MainCB2(void)
+static void CB2_UpdateSummaryScreen(void)
 {
     RunTasks();
     AnimateSprites();
@@ -1405,7 +1405,7 @@ static bool8 LoadGraphics(void)
         break;
     default:
         SetVBlankCallback(VBlank);
-        SetMainCallback2(MainCB2);
+        SetMainCallback2(CB2_UpdateSummaryScreen);
         return TRUE;
     }
     return FALSE;

@@ -1,7 +1,12 @@
 #ifndef GUARD_GBA_FLASH_INTERNAL_H
 #define GUARD_GBA_FLASH_INTERNAL_H
 
+#ifdef NATIVE
+extern unsigned char gNativeFlash[131072];
+#define FLASH_BASE gNativeFlash
+#else
 #define FLASH_BASE ((u8 *)0xE000000)
+#endif
 
 #define FLASH_WRITE(addr, data) ((*(vu8 *)(FLASH_BASE + (addr))) = (data))
 

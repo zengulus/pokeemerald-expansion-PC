@@ -1,4 +1,8 @@
 #include "global.h"
+#ifdef NATIVE
+#include "mods.h"
+#include "main_menu.h"
+#endif
 #include "overworld.h"
 #include "battle_pyramid.h"
 #include "battle_setup.h"
@@ -570,7 +574,21 @@ void LoadSaveblockObjEventScripts(void)
     s32 i;
 
     for (i = 0; i < OBJECT_EVENT_TEMPLATES_COUNT; i++)
-        savObjTemplates[i].script = mapHeaderObjTemplates[i].script;
+    {
+        const struct ObjectEventTemplate *source = NULL;
+        if (i < gMapHeader.events->objectEventCount)
+        {
+            source = &mapHeaderObjTemplates[i];
+            if (source->kind == OBJ_KIND_CLONE)
+            {
+                const struct MapHeader *map = Overworld_GetMapHeaderByGroupAndId(source->targetMapGroup, source->targetMapNum);
+                u32 localId = source->targetLocalId;
+                source = localId && localId <= map->events->objectEventCount
+                    ? &map->events->objectEvents[localId - 1] : NULL;
+            }
+        }
+        savObjTemplates[i].script = source ? source->script : NULL;
+    }
 }
 
 static struct ObjectEventTemplate *GetObjectEventTemplate(u8 localId)
@@ -1956,6 +1974,15 @@ void CB2_NewGame(void)
 void CB2_WhiteOut(void)
 {
     u8 state;
+#ifdef NATIVE
+    ModsWhiteout();
+    if (ModsRunFailed())
+    {
+        SetMainCallback1(NULL);
+        ModsOpenRunEndedMenu(CB2_InitMainMenu);
+        return;
+    }
+#endif
 
     if (++gMain.state >= 120)
     {
@@ -2115,6 +2142,9 @@ static void FieldCB_FadeTryShowMapPopup(void)
 void CB2_ContinueSavedGame(void)
 {
     u8 trainerHillMapId;
+#ifdef NATIVE
+    if (ModsRunFailed()) { ModsOpenRunEndedMenu(CB2_InitMainMenu); return; }
+#endif
 
     FieldClearVBlankHBlankCallbacks();
     StopMapMusic();

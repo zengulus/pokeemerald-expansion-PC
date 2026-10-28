@@ -1172,13 +1172,13 @@ static void DebugNativeStep_CloseDebugWindow(u8 taskId)
 
 static void DebugSelection_SetData(u8 taskId, u32 index, u16 value)
 {
-    u16 *stepsData = (u16 *)GetWordTaskArg(taskId, STEPS_DATA_PTR_ARG);
+    u16 *stepsData = (u16 *)GetTaskPointerArg(taskId, STEPS_DATA_PTR_ARG);
     stepsData[index] = value;
 }
 
 static u16 DebugSelection_GetData(u8 taskId, u32 index)
 {
-    u16 *stepsData = (u16 *)GetWordTaskArg(taskId, STEPS_DATA_PTR_ARG);
+    u16 *stepsData = (u16 *)GetTaskPointerArg(taskId, STEPS_DATA_PTR_ARG);
     return stepsData[index];
 }
 
@@ -1207,11 +1207,11 @@ static void DebugAction_Selection_PrepareStep(u8 taskId, const struct DebugSelec
 
 static void DebugAction_Selection_Cancel(u8 taskId)
 {
-    struct DebugSelection *selection = (struct DebugSelection *)GetWordTaskArg(taskId, DEBUG_SELECTION_PTR_ARG);
+    struct DebugSelection *selection = (struct DebugSelection *)GetTaskPointerArg(taskId, DEBUG_SELECTION_PTR_ARG);
     if (gTasks[taskId].tStep == 0)
     {
         selection->onCancel(taskId);
-        Free((void *)GetWordTaskArg(taskId, STEPS_DATA_PTR_ARG));
+        Free((void *)GetTaskPointerArg(taskId, STEPS_DATA_PTR_ARG));
         return;
     }
     gTasks[taskId].tStep--;
@@ -1220,7 +1220,7 @@ static void DebugAction_Selection_Cancel(u8 taskId)
 
 static void DebugAction_Selection_StepUpdate(u8 taskId)
 {
-    SelectionStep selectionStep = ((struct DebugSelection *)GetWordTaskArg(taskId, DEBUG_SELECTION_PTR_ARG))->steps[gTasks[taskId].tStep];
+    SelectionStep selectionStep = ((struct DebugSelection *)GetTaskPointerArg(taskId, DEBUG_SELECTION_PTR_ARG))->steps[gTasks[taskId].tStep];
     if (JOY_NEW(A_BUTTON))
     {
         selectionStep->stepConfirm(taskId);
@@ -1266,13 +1266,13 @@ static void DebugAction_Selection_StepUpdate(u8 taskId)
 
 static void DebugAction_Selection_NextStep(u8 taskId)
 {
-    struct DebugSelection *selection = (struct DebugSelection *)GetWordTaskArg(taskId, DEBUG_SELECTION_PTR_ARG);
+    struct DebugSelection *selection = (struct DebugSelection *)GetTaskPointerArg(taskId, DEBUG_SELECTION_PTR_ARG);
     gTasks[taskId].tStep++;
     if (gTasks[taskId].tStep == selection->maxSteps)
     {
         if (selection->onComplete(taskId))
         {
-            Free((void *)GetWordTaskArg(taskId, STEPS_DATA_PTR_ARG));
+            Free((void *)GetTaskPointerArg(taskId, STEPS_DATA_PTR_ARG));
             return;
         }
     }
@@ -1290,14 +1290,14 @@ static void Debug_Selection_StepsDataInit(u8 taskId, const struct DebugSelection
             dataSize += 1;
     }
     u16 *stepsData = AllocZeroed(dataSize * sizeof(u16));
-    SetWordTaskArg(taskId, STEPS_DATA_PTR_ARG, (u32) stepsData);
+    SetTaskPointerArg(taskId, STEPS_DATA_PTR_ARG, (const void *) stepsData);
 }
 
 static void DebugAction_Selection_Init(u8 taskId, const void *params)
 {
     const struct DebugSelection *selection = (const struct DebugSelection *)params;
     gTasks[taskId].tStep = -1;
-    SetWordTaskArg(taskId, DEBUG_SELECTION_PTR_ARG, (u32) selection);
+    SetTaskPointerArg(taskId, DEBUG_SELECTION_PTR_ARG, (const void *) selection);
     Debug_Selection_StepsDataInit(taskId, selection);
     selection->onInit(taskId);
     gTasks[taskId].func = DebugAction_Selection_NextStep;
@@ -1919,12 +1919,17 @@ static u8 *ConvertQ22_10ToDecimalString(u8 *string, u32 q22_10, u32 decimalDigit
 
 void CheckROMSize(struct ScriptContext *ctx)
 {
+#ifdef NATIVE
+    StringCopy(gStringVar1, COMPOUND_STRING("Native"));
+    StringCopy(gStringVar2, COMPOUND_STRING("No ROM limit"));
+#else
     extern u8 __rom_end[];
     u32 currROMSizeB = __rom_end - (const u8 *)ROM_START;
     u32 currROMSizeKB = (currROMSizeB + 1023) / 1024;
     u32 currROMFreeKB = ((const u8 *)ROM_END - __rom_end) / 1024;
     ConvertQ22_10ToDecimalString(gStringVar1, currROMSizeKB, 2, ROUND_CEILING);
     ConvertQ22_10ToDecimalString(gStringVar2, currROMFreeKB, 2, ROUND_FLOOR);
+#endif
 }
 
 static void DebugSelectionStep_UpdateWeather(u8 taskId, u8 digits, u32 min, u32 max)
@@ -3417,7 +3422,7 @@ static const struct DebugSelectionStep sTeraTypeSelectionStep = {
 
 static bool32 DebugSelection_GiveComplexPokemon_OnComplete(u8 taskId)
 {
-    u16 *monData = (u16 *)GetWordTaskArg(taskId, STEPS_DATA_PTR_ARG);
+    u16 *monData = (u16 *)GetTaskPointerArg(taskId, STEPS_DATA_PTR_ARG);
     struct Pokemon mon;
     enum Species species = monData[0];
     u8 level = monData[1];
@@ -4643,7 +4648,7 @@ static void DebugNativeStep_InitAfterPartyMenu(u8 taskId)
 
 static void DebugNativeStep_DelayedSelection(u8 taskId)
 {
-    DebugAction_Selection_Init(taskId, (void *)GetWordTaskArg(taskId, 14));
+    DebugAction_Selection_Init(taskId, (void *)GetTaskPointerArg(taskId, 14));
 }
 
 static void DebugSelectionStep_UpdateFriendship(u8 taskId, u8 digits, u32 min, u32 max)
@@ -4691,7 +4696,7 @@ void DebugNative_Party_SetFriendship(void)
     if (gSpecialVar_0x8004 < PARTY_SIZE)
     {
         u32 taskId = CreateTask(DebugNativeStep_DelayedSelection, 1);
-        SetWordTaskArg(taskId, DEBUG_SELECTION_PTR_ARG, (u32) &sFriendshipSelection);
+        SetTaskPointerArg(taskId, DEBUG_SELECTION_PTR_ARG, (const void *) &sFriendshipSelection);
     }
 }
 
@@ -4767,7 +4772,7 @@ void DebugNative_Party_SetPokerus(void)
     if (gSpecialVar_0x8004 < PARTY_SIZE)
     {
         u32 taskId = CreateTask(DebugNativeStep_DelayedSelection, 1);
-        SetWordTaskArg(taskId, DEBUG_SELECTION_PTR_ARG, (u32) &sPokerusSelection);
+        SetTaskPointerArg(taskId, DEBUG_SELECTION_PTR_ARG, (const void *) &sPokerusSelection);
     }
 }
 

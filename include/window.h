@@ -70,8 +70,8 @@ void CopyToWindowPixelBuffer(u32 windowId, const void *src, u16 size, u16 tileOf
 void FillWindowPixelBuffer(u32 windowId, u8 fillValue);
 void ScrollWindow(u32 windowId, u8 direction, u8 distance, u8 fillValue);
 void CallWindowFunction(u32 windowId, void ( *func)(u8, u8, u8, u8, u8, u8));
-bool32 SetWindowAttribute(u32 windowId, u32 attributeId, u32 value);
-u32 GetWindowAttribute(u32 windowId, u32 attributeId);
+bool32 SetWindowAttribute(u32 windowId, u32 attributeId, uintptr_t value);
+uintptr_t GetWindowAttribute(u32 windowId, u32 attributeId);
 u32 AddWindow8Bit(const struct WindowTemplate *template);
 void FillWindowPixelBuffer8Bit(u32 windowId, u8 fillValue);
 void FillWindowPixelRect8Bit(u32 windowId, u8 fillValue, u16 x, u16 y, u16 width, u16 height);

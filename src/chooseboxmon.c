@@ -106,10 +106,10 @@ static u32 ChooseBoxMon_CanMonLearnMove(struct BoxPokemon *boxmon, enum Move mov
 }
 
 //super hacky way to exclude PC mons until I handle evolution for pc mon in a different PR
-static bool32 IsFromPC(u32 adress)
+static bool32 IsFromPC(uintptr_t adress)
 {
-    u32 pcMonStart = (u32)&gPokemonStoragePtr->boxes;
-    u32 pcMonEnd = pcMonStart + sizeof(struct BoxPokemon) * TOTAL_BOXES_COUNT * IN_BOX_COUNT;
+    uintptr_t pcMonStart = (uintptr_t)&gPokemonStoragePtr->boxes;
+    uintptr_t pcMonEnd = pcMonStart + sizeof(struct BoxPokemon) * TOTAL_BOXES_COUNT * IN_BOX_COUNT;
     return (pcMonStart <= adress && adress <= pcMonEnd);
 }
 static u32 ChooseBoxMon_CanEvolve(struct BoxPokemon *boxmon)
@@ -117,7 +117,7 @@ static u32 ChooseBoxMon_CanEvolve(struct BoxPokemon *boxmon)
     struct Pokemon *mon = Alloc(sizeof(struct Pokemon));
     u32 result;
 
-    if (IsFromPC((u32)boxmon))
+    if (IsFromPC((uintptr_t)boxmon))
         return INVALID_MON;
     BoxMonToMon(boxmon, mon);
     if (GetEvolutionTargetSpecies(mon, EVO_MODE_SCRIPT_TRIGGER, gSpecialVar_0x8005, NULL, NULL, CHECK_EVO))

@@ -3,10 +3,16 @@
 #include "event_data.h"
 #include "caps.h"
 #include "pokemon.h"
+#ifdef NATIVE
+#include "mods.h"
+#endif
 
 
 u32 GetCurrentLevelCap(void)
 {
+#ifdef NATIVE
+    if (ModsHardCap()) return ModsLevelCap();
+#endif
     static const u32 sLevelCapFlagMap[][2] =
     {
         {FLAG_BADGE01_GET, 15},
@@ -45,6 +51,10 @@ u32 GetSoftLevelCapExpValue(u32 level, u32 expValue)
 
     u32 levelDifference;
     u32 currentLevelCap = GetCurrentLevelCap();
+
+#ifdef NATIVE
+    if (ModsHardCap()) return level >= currentLevelCap ? 0 : expValue;
+#endif
 
     if (B_EXP_CAP_TYPE == EXP_CAP_NONE)
         return expValue;

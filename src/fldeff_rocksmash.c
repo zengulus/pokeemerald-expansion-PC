@@ -109,8 +109,7 @@ static void Task_DoFieldMove_WaitForMon(u8 taskId)
 
 static void Task_DoFieldMove_RunFunc(u8 taskId)
 {
-    // The function for the field move to do is stored in halves across data[8] and data[9]
-    void (*fieldMoveFunc)(void) = (void (*)(void))(((u16)gTasks[taskId].data[8] << 16) | (u16)gTasks[taskId].data[9]);
+    void (*fieldMoveFunc)(void) = GetTaskPointerArg(taskId, 8);
 
     fieldMoveFunc();
     gPlayerAvatar.preventStep = FALSE;
@@ -152,8 +151,7 @@ bool8 FldEff_UseRockSmash(void)
 {
     u8 taskId = CreateFieldMoveTask();
 
-    gTasks[taskId].data[8] = (u32)FieldMove_RockSmash >> 16;
-    gTasks[taskId].data[9] = (u32)FieldMove_RockSmash;
+    SetTaskPointerArg(taskId, 8, FieldMove_RockSmash);
     IncrementGameStat(GAME_STAT_USED_ROCK_SMASH);
     return FALSE;
 }

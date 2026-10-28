@@ -110,8 +110,6 @@ static void Task_MixingRecordsRecv(u8);
 static void Task_SendPacket(u8);
 static void Task_CopyReceiveBuffer(u8);
 static void Task_SendPacket_SwitchToReceive(u8);
-static void *LoadPtrFromTaskData(const u16 *);
-static void StorePtrInTaskData(void *, u16 *);
 static u8 GetMultiplayerId_(void);
 static void *GetPlayerRecvBuffer(u8);
 static void ReceiveOldManData(OldMan *, size_t, u8);
@@ -462,20 +460,20 @@ static void Task_MixingRecordsRecv(u8 taskId)
             task->func = Task_SendPacket;
             if (Link_AnyPartnersPlayingRubyOrSapphire())
             {
-                StorePtrInTaskData(sSentRecord, (u16*) &task->tSentRecord);
+                SetTaskPointerArg(taskId, 2, sSentRecord);
                 subTaskId = CreateTask(Task_CopyReceiveBuffer, 80);
                 task->tCopyTaskId = subTaskId;
                 gTasks[subTaskId].tParentTaskId = taskId;
-                StorePtrInTaskData(sReceivedRecords, (u16*) &gTasks[subTaskId].tRecvRecords);
+                SetTaskPointerArg(subTaskId, 5, sReceivedRecords);
                 sRecordStructSize = sizeof(struct PlayerRecordRS);
             }
             else
             {
-                StorePtrInTaskData(sSentRecord, (u16*)  &task->tSentRecord);
+                SetTaskPointerArg(taskId, 2, sSentRecord);
                 subTaskId = CreateTask(Task_CopyReceiveBuffer, 80);
                 task->tCopyTaskId = subTaskId;
                 gTasks[subTaskId].tParentTaskId = taskId;
-                StorePtrInTaskData(sReceivedRecords,(u16*) &gTasks[subTaskId].tRecvRecords);
+                SetTaskPointerArg(subTaskId, 5, sReceivedRecords);
                 sRecordStructSize = sizeof(struct PlayerRecordEmerald);
             }
         }
@@ -497,7 +495,7 @@ static void Task_SendPacket(u8 taskId)
     {
     case 0: // Copy record data chunk to send buffer
         {
-            void *recordData = LoadPtrFromTaskData((u16*)&task->tSentRecord) + task->tNumChunksSent * BUFFER_CHUNK_SIZE;
+            void *recordData = GetTaskPointerArg(taskId, 2) + task->tNumChunksSent * BUFFER_CHUNK_SIZE;
 
             memcpy(gBlockSendBuffer, recordData, BUFFER_CHUNK_SIZE);
             task->tState++;
@@ -539,7 +537,7 @@ static void Task_CopyReceiveBuffer(u8 taskId)
         {
             if ((status >> i) & 1)
             {
-                void *dest = LoadPtrFromTaskData((u16*) &task->tRecvRecords) + task->tNumChunksRecv(i) * BUFFER_CHUNK_SIZE + sRecordStructSize * i;
+                void *dest = GetTaskPointerArg(taskId, 5) + task->tNumChunksRecv(i) * BUFFER_CHUNK_SIZE + sRecordStructSize * i;
                 void *src = GetPlayerRecvBuffer(i);
                 if ((task->tNumChunksRecv(i) + 1) * BUFFER_CHUNK_SIZE > sRecordStructSize)
                     memcpy(dest, src, sRecordStructSize - task->tNumChunksRecv(i) * BUFFER_CHUNK_SIZE);
@@ -580,17 +578,6 @@ static void Task_SendPacket_SwitchToReceive(u8 taskId)
 {
     gTasks[taskId].func = Task_ReceivePacket;
     sReadyToReceive = TRUE;
-}
-
-static void *LoadPtrFromTaskData(const u16 *asShort)
-{
-    return (void *)(asShort[0] | (asShort[1] << 16));
-}
-
-static void StorePtrInTaskData(void *records, u16 *asShort)
-{
-    asShort[0] = (u32)records;
-    asShort[1] = ((u32)records >> 16);
 }
 
 static u8 GetMultiplayerId_(void)

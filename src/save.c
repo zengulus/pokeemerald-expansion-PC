@@ -1,4 +1,8 @@
 #include "global.h"
+#ifdef NATIVE
+#include "native.h"
+#include "mods.h"
+#endif
 #include "agb_flash.h"
 #include "gba/flash_internal.h"
 #include "fieldmap.h"
@@ -499,6 +503,10 @@ static u8 CopySaveSlotData(u16 sectorId, struct SaveSectorLocation *locations)
         ReadFlashSector(i + slotOffset, gReadWriteSector);
 
         id = gReadWriteSector->id;
+        // Erased or corrupt flash may contain an arbitrary sector id. Validate
+        // it before indexing the RAM layout, including when both slots are empty.
+        if (gReadWriteSector->signature != SECTOR_SIGNATURE || id >= NUM_SECTORS_PER_SLOT)
+            continue;
         if (id == 0)
             gLastWrittenSector = i;
 
@@ -535,6 +543,8 @@ static u8 GetSaveValidStatus(const struct SaveSectorLocation *locations)
         if (gReadWriteSector->signature == SECTOR_SIGNATURE)
         {
             signatureValid = TRUE;
+            if (gReadWriteSector->id >= NUM_SECTORS_PER_SLOT)
+                continue;
             checksum = CalculateChecksum(gReadWriteSector->data, locations[gReadWriteSector->id].size);
             if (gReadWriteSector->checksum == checksum)
             {
@@ -567,6 +577,8 @@ static u8 GetSaveValidStatus(const struct SaveSectorLocation *locations)
         if (gReadWriteSector->signature == SECTOR_SIGNATURE)
         {
             signatureValid = TRUE;
+            if (gReadWriteSector->id >= NUM_SECTORS_PER_SLOT)
+                continue;
             checksum = CalculateChecksum(gReadWriteSector->data, locations[gReadWriteSector->id].size);
             if (gReadWriteSector->checksum == checksum)
             {
@@ -715,6 +727,10 @@ u8 HandleSavingData(u8 saveType)
     u8 i;
     u32 *backupVar = gTrainerHillVBlankCounter;
 
+#ifdef NATIVE
+    if (NativeSaveBegin()) { gDamagedSaveSectors = 1; return 1; }
+#endif
+
     gTrainerHillVBlankCounter = NULL;
     UpdateSaveAddresses();
     switch (saveType)
@@ -767,6 +783,10 @@ u8 HandleSavingData(u8 saveType)
         break;
     }
     gTrainerHillVBlankCounter = backupVar;
+#ifdef NATIVE
+    if (NativeSaveEnd(gSaveCounter, !gDamagedSaveSectors)) gDamagedSaveSectors = 1;
+    else ModsAfterSave();
+#endif
     return 0;
 }
 
@@ -796,6 +816,9 @@ bool8 LinkFullSave_Init(void)
 {
     if (gFlashMemoryPresent != TRUE)
         return TRUE;
+#ifdef NATIVE
+    if (NativeSaveBegin()) return TRUE;
+#endif
     UpdateSaveAddresses();
     CopyPartyAndObjectsToSave();
     RestoreSaveBackupVarsAndIncrement(gRamSaveSectorLocations);
@@ -828,6 +851,10 @@ bool8 LinkFullSave_ReplaceLastSector(void)
 bool8 LinkFullSave_SetLastSectorSignature(void)
 {
     CopySectorSignatureByte(NUM_SECTORS_PER_SLOT, gRamSaveSectorLocations);
+#ifdef NATIVE
+    if (NativeSaveEnd(gSaveCounter, !gDamagedSaveSectors)) gDamagedSaveSectors = 1;
+    else ModsAfterSave();
+#endif
     if (gDamagedSaveSectors)
         DoSaveFailedScreen(SAVE_NORMAL);
     return FALSE;
@@ -837,6 +864,9 @@ bool8 WriteSaveBlock2(void)
 {
     if (gFlashMemoryPresent != TRUE)
         return TRUE;
+#ifdef NATIVE
+    if (NativeSaveBegin()) return TRUE;
+#endif
 
     UpdateSaveAddresses();
     CopyPartyAndObjectsToSave();
@@ -873,6 +903,14 @@ bool8 WriteSaveBlock1Sector(void)
     if (gDamagedSaveSectors)
         DoSaveFailedScreen(SAVE_LINK);
 
+#ifdef NATIVE
+    if (finished && NativeSaveEnd(gSaveCounter, !gDamagedSaveSectors))
+    {
+        gDamagedSaveSectors = 1;
+        DoSaveFailedScreen(SAVE_LINK);
+    }
+    else if (finished) ModsAfterSave();
+#endif
     return finished;
 }
 
@@ -892,7 +930,18 @@ u8 LoadGameSave(u8 saveType)
     case SAVE_NORMAL:
     default:
         status = TryLoadSaveSlot(FULL_SAVE_SLOT, gRamSaveSectorLocations);
+#ifdef NATIVE
+        if ((status == SAVE_STATUS_OK || status == SAVE_STATUS_ERROR) && NativeSaveRestoreMods(gSaveCounter))
+        {
+            /* Do not offer Continue with state belonging to another run. */
+            gSaveFileStatus = SAVE_STATUS_EMPTY;
+            return SAVE_STATUS_ERROR;
+        }
+#endif
         CopyPartyAndObjectsFromSave();
+#ifdef NATIVE
+        if (status == SAVE_STATUS_OK || status == SAVE_STATUS_ERROR) ModsAfterLoad();
+#endif
         gSaveFileStatus = status;
         gGameContinueCallback = NULL;
         break;

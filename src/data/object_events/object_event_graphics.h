@@ -387,7 +387,7 @@ const u16 gObjectEventPal_Lugia[] = INCGFX_U16("graphics/object_events/palettes/
 
 const u16 gObjectEventPaletteLight[] = INCGFX_U16("graphics/object_events/palettes/light.pal", ".gbapal");
 const u16 gObjectEventPaletteLight2[] = INCGFX_U16("graphics/object_events/palettes/light2.pal", ".gbapal");
-const u16 gObjectEventPal_Substitute[] = INCGFX_U16("graphics/object_events/pics/pokemon_old/substitute.png", ".gbapal");
+const u16 gObjectEventPal_Substitute[16] = INCGFX_U16("graphics/object_events/pics/pokemon_old/substitute.png", ".gbapal");
 
 const u16 gObjectEventPaletteEmotes[] = INCGFX_U16("graphics/misc/emotes.pal", ".gbapal");
 const u16 gObjectEventPaletteNeonLight[] = INCGFX_U16("graphics/object_events/palettes/neon_light.pal", ".gbapal");
@@ -425,38 +425,38 @@ const u32 gObjectEventPic_StrangeBall[] = INCGFX_U32("graphics/object_events/pic
 #if OW_FOLLOWERS_POKEBALLS
 // Palettes are small, so always include all of the palettes (no #ifdef)
 // Vanilla
-const u16 gObjectEventPal_MasterBall[] = INCGFX_U16("graphics/object_events/pics/misc/ball_master.png", ".gbapal");
-const u16 gObjectEventPal_UltraBall[] = INCGFX_U16("graphics/object_events/pics/misc/ball_ultra.png", ".gbapal");
-const u16 gObjectEventPal_GreatBall[] = INCGFX_U16("graphics/object_events/pics/misc/ball_great.png", ".gbapal");
-const u16 gObjectEventPal_SafariBall[] = INCGFX_U16("graphics/object_events/pics/misc/ball_safari.png", ".gbapal");
-const u16 gObjectEventPal_NetBall[] = INCGFX_U16("graphics/object_events/pics/misc/ball_net.png", ".gbapal");
-const u16 gObjectEventPal_DiveBall[] = INCGFX_U16("graphics/object_events/pics/misc/ball_dive.png", ".gbapal");
-const u16 gObjectEventPal_NestBall[] = INCGFX_U16("graphics/object_events/pics/misc/ball_nest.png", ".gbapal");
-const u16 gObjectEventPal_RepeatBall[] = INCGFX_U16("graphics/object_events/pics/misc/ball_repeat.png", ".gbapal");
-const u16 gObjectEventPal_TimerBall[] = INCGFX_U16("graphics/object_events/pics/misc/ball_timer.png", ".gbapal");
-const u16 gObjectEventPal_LuxuryBall[] = INCGFX_U16("graphics/object_events/pics/misc/ball_luxury.png", ".gbapal");
-const u16 gObjectEventPal_PremierBall[] = INCGFX_U16("graphics/object_events/pics/misc/ball_premier.png", ".gbapal");
+const u16 gObjectEventPal_MasterBall[16] = INCGFX_U16("graphics/object_events/pics/misc/ball_master.png", ".gbapal");
+const u16 gObjectEventPal_UltraBall[16] = INCGFX_U16("graphics/object_events/pics/misc/ball_ultra.png", ".gbapal");
+const u16 gObjectEventPal_GreatBall[16] = INCGFX_U16("graphics/object_events/pics/misc/ball_great.png", ".gbapal");
+const u16 gObjectEventPal_SafariBall[16] = INCGFX_U16("graphics/object_events/pics/misc/ball_safari.png", ".gbapal");
+const u16 gObjectEventPal_NetBall[16] = INCGFX_U16("graphics/object_events/pics/misc/ball_net.png", ".gbapal");
+const u16 gObjectEventPal_DiveBall[16] = INCGFX_U16("graphics/object_events/pics/misc/ball_dive.png", ".gbapal");
+const u16 gObjectEventPal_NestBall[16] = INCGFX_U16("graphics/object_events/pics/misc/ball_nest.png", ".gbapal");
+const u16 gObjectEventPal_RepeatBall[16] = INCGFX_U16("graphics/object_events/pics/misc/ball_repeat.png", ".gbapal");
+const u16 gObjectEventPal_TimerBall[16] = INCGFX_U16("graphics/object_events/pics/misc/ball_timer.png", ".gbapal");
+const u16 gObjectEventPal_LuxuryBall[16] = INCGFX_U16("graphics/object_events/pics/misc/ball_luxury.png", ".gbapal");
+const u16 gObjectEventPal_PremierBall[16] = INCGFX_U16("graphics/object_events/pics/misc/ball_premier.png", ".gbapal");
 // Gen IV/Sinnoh
-const u16 gObjectEventPal_DuskBall[] = INCGFX_U16("graphics/object_events/pics/misc/ball_dusk.png", ".gbapal");
-const u16 gObjectEventPal_HealBall[] = INCGFX_U16("graphics/object_events/pics/misc/ball_heal.png", ".gbapal");
-const u16 gObjectEventPal_QuickBall[] = INCGFX_U16("graphics/object_events/pics/misc/ball_quick.png", ".gbapal");
-const u16 gObjectEventPal_CherishBall[] = INCGFX_U16("graphics/object_events/pics/misc/ball_cherish.png", ".gbapal");
-const u16 gObjectEventPal_ParkBall[] = INCGFX_U16("graphics/object_events/pics/misc/ball_park.png", ".gbapal");
+const u16 gObjectEventPal_DuskBall[16] = INCGFX_U16("graphics/object_events/pics/misc/ball_dusk.png", ".gbapal");
+const u16 gObjectEventPal_HealBall[16] = INCGFX_U16("graphics/object_events/pics/misc/ball_heal.png", ".gbapal");
+const u16 gObjectEventPal_QuickBall[16] = INCGFX_U16("graphics/object_events/pics/misc/ball_quick.png", ".gbapal");
+const u16 gObjectEventPal_CherishBall[16] = INCGFX_U16("graphics/object_events/pics/misc/ball_cherish.png", ".gbapal");
+const u16 gObjectEventPal_ParkBall[16] = INCGFX_U16("graphics/object_events/pics/misc/ball_park.png", ".gbapal");
 // Gen II/Johto Apricorns
-const u16 gObjectEventPal_FastBall[] = INCGFX_U16("graphics/object_events/pics/misc/ball_fast.png", ".gbapal");
-const u16 gObjectEventPal_LevelBall[] = INCGFX_U16("graphics/object_events/pics/misc/ball_level.png", ".gbapal");
-const u16 gObjectEventPal_LureBall[] = INCGFX_U16("graphics/object_events/pics/misc/ball_lure.png", ".gbapal");
-const u16 gObjectEventPal_HeavyBall[] = INCGFX_U16("graphics/object_events/pics/misc/ball_heavy.png", ".gbapal");
-const u16 gObjectEventPal_LoveBall[] = INCGFX_U16("graphics/object_events/pics/misc/ball_love.png", ".gbapal");
-const u16 gObjectEventPal_FriendBall[] = INCGFX_U16("graphics/object_events/pics/misc/ball_friend.png", ".gbapal");
-const u16 gObjectEventPal_MoonBall[] = INCGFX_U16("graphics/object_events/pics/misc/ball_moon.png", ".gbapal");
-const u16 gObjectEventPal_SportBall[] = INCGFX_U16("graphics/object_events/pics/misc/ball_sport.png", ".gbapal");
+const u16 gObjectEventPal_FastBall[16] = INCGFX_U16("graphics/object_events/pics/misc/ball_fast.png", ".gbapal");
+const u16 gObjectEventPal_LevelBall[16] = INCGFX_U16("graphics/object_events/pics/misc/ball_level.png", ".gbapal");
+const u16 gObjectEventPal_LureBall[16] = INCGFX_U16("graphics/object_events/pics/misc/ball_lure.png", ".gbapal");
+const u16 gObjectEventPal_HeavyBall[16] = INCGFX_U16("graphics/object_events/pics/misc/ball_heavy.png", ".gbapal");
+const u16 gObjectEventPal_LoveBall[16] = INCGFX_U16("graphics/object_events/pics/misc/ball_love.png", ".gbapal");
+const u16 gObjectEventPal_FriendBall[16] = INCGFX_U16("graphics/object_events/pics/misc/ball_friend.png", ".gbapal");
+const u16 gObjectEventPal_MoonBall[16] = INCGFX_U16("graphics/object_events/pics/misc/ball_moon.png", ".gbapal");
+const u16 gObjectEventPal_SportBall[16] = INCGFX_U16("graphics/object_events/pics/misc/ball_sport.png", ".gbapal");
 // Gen V
-const u16 gObjectEventPal_DreamBall[] = INCGFX_U16("graphics/object_events/pics/misc/ball_dream.png", ".gbapal");
+const u16 gObjectEventPal_DreamBall[16] = INCGFX_U16("graphics/object_events/pics/misc/ball_dream.png", ".gbapal");
 // Gen VII
-const u16 gObjectEventPal_BeastBall[] = INCGFX_U16("graphics/object_events/pics/misc/ball_beast.png", ".gbapal");
+const u16 gObjectEventPal_BeastBall[16] = INCGFX_U16("graphics/object_events/pics/misc/ball_beast.png", ".gbapal");
 // Gen VIII
-const u16 gObjectEventPal_StrangeBall[] = INCGFX_U16("graphics/object_events/pics/misc/ball_strange.png", ".gbapal");
+const u16 gObjectEventPal_StrangeBall[16] = INCGFX_U16("graphics/object_events/pics/misc/ball_strange.png", ".gbapal");
 #endif //OW_FOLLOWERS_POKEBALLS
 
 const u32 gFieldEffectObjectPic_CaveDust[] = INCGFX_U32("graphics/field_effects/pics/cave_dust.png", ".4bpp");

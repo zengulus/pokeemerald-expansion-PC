@@ -181,7 +181,7 @@ u32 IsLZ77Data(const void *ptr, u32 minSize, u32 maxSize)
     const u8 *data = ptr;
     u32 size;
     // Compressed data must be word aligned
-    if (((u32)ptr) & 3)
+    if (((uintptr_t)ptr) & 3)
         return 0;
     // Check LZ77 header byte
     // See https://problemkaputt.de/gbatek.htm#biosdecompressionfunctions
@@ -207,7 +207,7 @@ static inline u32 DoLoadCompressedSpriteSheet(const struct CompressedSpriteSheet
 
 u32 LoadCompressedSpriteSheet(const struct CompressedSpriteSheet *src)
 {
-    void *buffer = malloc_and_decompress(src->data, NULL);
+    void *buffer = malloc_and_decompress_padded(src->data, src->size, NULL);
     u32 ret = DoLoadCompressedSpriteSheet(src, buffer);
     Free(buffer);
 
@@ -398,6 +398,43 @@ static IWRAM_DATA u8 sBitIndex = 0;
 static IWRAM_DATA const u32 *sDataPtr = 0;
 static IWRAM_DATA u32 sCurrState = 0;
 
+#ifdef NATIVE
+static const u32 *sBitstreamEnd;
+static const u32 *sLastBitWord;
+
+static u32 ReadSmolWord(const u32 *cursor)
+{
+    // tANS computes an unused final state and may prefetch beyond its last
+    // encoded word. That logical padding is zero, not the next host object.
+    return cursor < sBitstreamEnd ? *cursor : 0;
+}
+
+static u32 ReadSmolWordAndAdvance(const u32 **cursor)
+{
+    sLastBitWord = *cursor;
+    u32 value = ReadSmolWord(*cursor);
+    if (*cursor < sBitstreamEnd) ++*cursor;
+    return value;
+}
+
+static u32 ReadNextSmolWord(const u32 **cursor)
+{
+    if (*cursor < sBitstreamEnd) ++*cursor;
+    return ReadSmolWord(*cursor);
+}
+
+#define SMOL_READ_ADVANCE(cursor) ReadSmolWordAndAdvance(&(cursor))
+#define SMOL_READ_CURRENT(cursor) ReadSmolWord(cursor)
+#define SMOL_READ_NEXT(cursor) ReadNextSmolWord(&(cursor))
+#define SMOL_LAST_WORD(cursor) sLastBitWord
+#else
+#define SMOL_READ_ADVANCE(cursor) (*(cursor)++)
+#define SMOL_READ_CURRENT(cursor) (*(cursor))
+#define SMOL_READ_NEXT(cursor) (*++(cursor))
+#define SMOL_LAST_WORD(cursor) ((cursor) - 1)
+#endif
+
+
 // 33 because of FastUnsafeCopy32, we divide by 4 because the buffer is an array of u32
 #define FUNC_BUFFER_SIZE(funcStart, funcEnd)(((u32)(funcEnd) - (u32)(funcStart) + 33) / 4)
 
@@ -426,7 +463,7 @@ static inline void CopyFuncToIwram(void *funcBuffer, const void *funcStartAddres
 // The same for all the loops
 #define LOOP_BITADVANCE() \
 {   \
-    currBits = *data++; \
+    currBits = SMOL_READ_ADVANCE(data); \
     bitIndex -= 32; \
     if (bitIndex != 0)  \
     {   \
@@ -438,7 +475,7 @@ static inline void CopyFuncToIwram(void *funcBuffer, const void *funcStartAddres
 //  from the y and k values for the current state and add the value read from the next k bits in the bitstream
 ARM_FUNC __attribute__((flatten, noinline, no_reorder)) __attribute__((optimize("-O3"))) static void DecodeLOtANSLoop(const u32 *data, u32 *ykTable, u8 *resultVec, u8 *resultVecEnd)
 {
-    u32 currBits = *data++;
+    u32 currBits = SMOL_READ_ADVANCE(data);
     u32 bitIndex = sBitIndex;
     u16 *resultVec_u16 = (u16 *) resultVec;
 
@@ -507,7 +544,7 @@ LOOP_STORE:
     } while (resultVec_u16 < (u16 *) resultVecEnd);
 
     sBitIndex = bitIndex;
-    sDataPtr = data - 1;
+    sDataPtr = SMOL_LAST_WORD(data);
 }
 
 //  Dark Egg magic
@@ -524,14 +561,21 @@ static void DecodeLOtANS(const u32 *data, const u32 *pFreqs, u8 *resultVec, u32 
     // We want to store in packs of 2, so count needs to be divisible by 2
     u32 remainingCount = count % 2;
 
+#ifdef NATIVE
+    if (count - remainingCount)
+        DecodeLOtANSLoop(data, sWorkingYkTable, resultVec, &resultVec[count - remainingCount]);
+    else
+        sDataPtr = data;
+#else
     u32 funcBuffer[FUNC_BUFFER_SIZE(DecodeLOtANSLoop, SwitchToArmCallLOtANS)];
 
     CopyFuncToIwram(funcBuffer, DecodeLOtANSLoop, SwitchToArmCallLOtANS);
     SwitchToArmCallLOtANS(data, sWorkingYkTable, resultVec, &resultVec[count - remainingCount], (void *) funcBuffer);
+#endif
 
     if (remainingCount)
     {
-        u32 currBits = *sDataPtr;
+        u32 currBits = SMOL_READ_CURRENT(sDataPtr);
         u32 symbol = 0;
         for (u32 currNibble = 0; currNibble < 2; currNibble++)
         {
@@ -543,7 +587,7 @@ static void DecodeLOtANS(const u32 *data, const u32 *pFreqs, u8 *resultVec, u32 
             sBitIndex += currK;
             if (sBitIndex >= 32)
             {
-                currBits = *(++sDataPtr);
+                currBits = SMOL_READ_NEXT(sDataPtr);
                 sBitIndex -= 32;
                 if (sBitIndex != 0)
                 {
@@ -560,7 +604,7 @@ static void DecodeLOtANS(const u32 *data, const u32 *pFreqs, u8 *resultVec, u32 
 
 ARM_FUNC __attribute__((flatten, noinline, no_reorder)) __attribute__((optimize("-O3"))) UNUSED static void DecodeSymtANSLoop(const u32 *data, u32 *ykTable, u16 *resultVec, u16 *resultVecEnd)
 {
-    u32 currBits = *data++;
+    u32 currBits = SMOL_READ_ADVANCE(data);
     u32 bitIndex = sBitIndex;
 
     do
@@ -576,7 +620,7 @@ ARM_FUNC __attribute__((flatten, noinline, no_reorder)) __attribute__((optimize(
             bitIndex += currK;
             if (bitIndex >= 32)
             {
-                currBits = *data++;
+                currBits = SMOL_READ_ADVANCE(data);
                 bitIndex -= 32;
                 if (bitIndex != 0)
                 {
@@ -588,7 +632,7 @@ ARM_FUNC __attribute__((flatten, noinline, no_reorder)) __attribute__((optimize(
     } while (resultVec < resultVecEnd);
 
     sBitIndex = bitIndex;
-    sDataPtr = data - 1;
+    sDataPtr = SMOL_LAST_WORD(data);
 }
 
 ARM_FUNC __attribute__((no_reorder)) static void SwitchToArmCallDecodeSymtANS(const u32 *data, u32 *ykTable, u16 *resultVec, u16 *resultVecEnd, void (*decodeFunction)(const u32 *data, u32 *ykTable, u16 *resultVec, u16 *resultVecEnd))
@@ -600,10 +644,15 @@ static void DecodeSymtANS(const u32 *data, const u32 *pFreqs, u16 *resultVec, u3
 {
     BuildDecompressionTable(pFreqs, sWorkingYkTable);
 
+#ifdef NATIVE
+    if (count)
+        DecodeSymtANSLoop(data, sWorkingYkTable, resultVec, &resultVec[count]);
+#else
     u32 funcBuffer[FUNC_BUFFER_SIZE(DecodeLOtANSLoop, SwitchToArmCallLOtANS)];
     // CopyFuncToIwram(funcBuffer, DecodeSymtANSLoop, SwitchToArmCallDecodeSymtANS);
     CopyFuncToIwram(funcBuffer, DecodeLOtANSLoop, SwitchToArmCallLOtANS);
     SwitchToArmCallDecodeSymtANS(data, sWorkingYkTable, resultVec, &resultVec[count], (void *) funcBuffer);
+#endif
 }
 
 #define ANS_LOOP_MAIN(nibble)   \
@@ -622,7 +671,7 @@ static void DecodeSymtANS(const u32 *data, const u32 *pFreqs, u16 *resultVec, u3
 //  from the y and k values for the current state and add the value read from the next k bits in the bitstream
 ARM_FUNC __attribute__((flatten, noinline, no_reorder)) __attribute__((optimize("-O3"))) u32 DecodeSymDeltatANSLoop(const u32 *data, u32 *ykTable, u16 *resultVec, u16 *resultVecEnd)
 {
-    u32 currBits = *data++;
+    u32 currBits = SMOL_READ_ADVANCE(data);
     u32 currSymbol = 0;
     u32 bitIndex = sBitIndex;
     u32 * resultVec_32 = (u32*)(resultVec); // Since we're doing 2 symbols at one time we store as word which is faster than storing two halfwords.
@@ -762,7 +811,7 @@ ARM_FUNC __attribute__((flatten, noinline, no_reorder)) __attribute__((optimize(
 
     } while (resultVec_32 < (u32 *) resultVecEnd);
     sBitIndex = bitIndex;
-    sDataPtr = data - 1;
+    sDataPtr = SMOL_LAST_WORD(data);
     return currSymbol;
 }
 
@@ -779,16 +828,24 @@ static void DecodeSymDeltatANS(const u32 *data, const u32 *pFreqs, u16 *resultVe
     // We want to store in packs of 2, so count needs to be divisible by 2
     u32 remainingCount = count % 2;
 
+#ifdef NATIVE
+    u32 currSymbol = 0;
+    if (count - remainingCount)
+        currSymbol = DecodeSymDeltatANSLoop(data, sWorkingYkTable, resultVec, &resultVec[count - remainingCount]);
+    else
+        sDataPtr = data;
+#else
     u32 funcBuffer[FUNC_BUFFER_SIZE(DecodeSymDeltatANSLoop, SwitchToArmCallSymDeltaANS)];
     CopyFuncToIwram(funcBuffer, DecodeSymDeltatANSLoop, SwitchToArmCallSymDeltaANS);
     u32 currSymbol = SwitchToArmCallSymDeltaANS(data, sWorkingYkTable, resultVec, &resultVec[count - remainingCount], (void *) funcBuffer);
+#endif
 
     if (remainingCount)
     {
         u32 currK;
         u32 *ykTable = sWorkingYkTable;
         const u32 *data = sDataPtr;
-        u32 currBits = *data++;
+        u32 currBits = SMOL_READ_ADVANCE(data);
         u32 bitIndex = sBitIndex;
         u32 symbol = 0;
 
@@ -935,10 +992,15 @@ ARM_FUNC __attribute__((no_reorder)) static void SwitchToArmCallDecodeInstructio
 //  Dark Egg magic
 static void DecodeInstructionsIwram(u32 headerLoSize, const u8 *loVec, const u16 *symVec, void *dest)
 {
+#ifdef NATIVE
+    if (headerLoSize)
+        DecodeInstructions(headerLoSize, loVec, symVec, dest);
+#else
     u32 funcBuffer[FUNC_BUFFER_SIZE(DecodeInstructions, SwitchToArmCallDecodeInstructions)];
 
     CopyFuncToIwram(funcBuffer, DecodeInstructions, SwitchToArmCallDecodeInstructions);
     SwitchToArmCallDecodeInstructions(headerLoSize, loVec, symVec, dest, (void *) funcBuffer);
+#endif
 }
 
 //  Entrance point for smol compressed data
@@ -980,6 +1042,9 @@ static void SmolDecompressData(const struct SmolHeader *header, const u32 *data,
         break;
     }
 
+#ifdef NATIVE
+    sBitstreamEnd = sDataPtr + header->bitstreamSize;
+#endif
     bool32 loEncoded = isModeLoEncoded(header->mode);
     bool32 symEncoded = isModeSymEncoded(header->mode);
     bool32 symDelta = isModeSymDelta(header->mode);
@@ -1091,10 +1156,14 @@ static void SmolDecompressTilemap(const struct SmolTilemapHeader *header, const 
     DecodeInstructionsIwram(header->tileNumberSize, loVec, symVec, dest);
     u32 arraySize = header->tilemapSize/2;
 
+#ifdef NATIVE
+    DeltaDecodeTileNumbers(deltaDest, arraySize);
+#else
     u32 funcBuffer[FUNC_BUFFER_SIZE(DeltaDecodeTileNumbers, SwitchToArmCallDecodeTileNumbers)];
 
     CopyFuncToIwram(funcBuffer, DeltaDecodeTileNumbers, SwitchToArmCallDecodeTileNumbers);
     SwitchToArmCallDecodeTileNumbers(deltaDest, arraySize, (void *) funcBuffer);
+#endif
 }
 
 //  Helper functions for determining modes
@@ -1398,8 +1467,12 @@ ARM_FUNC static void SwitchToArmCallFastLZ77(const u32 *src, void *dest, void (*
 
 void FastLZ77UnCompWram(const u32 *src, void *dest)
 {
+#ifdef NATIVE
+    LZ77UnCompWram(src, dest);
+#else
     u32 funcBuffer[200];
 
     CopyFuncToIwram(funcBuffer, LZ77UnCompWRAMOptimized, LZ77UnCompWRAMOptimized_end);
     SwitchToArmCallFastLZ77(src, dest, (void *) funcBuffer);
+#endif
 }

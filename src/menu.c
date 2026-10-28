@@ -1517,12 +1517,27 @@ bool8 FreeTempTileDataBuffersIfPossible(void)
     }
 }
 
+void *malloc_and_decompress_padded(const void *src, u32 capacity, u32 *size)
+{
+    u32 decodedSize = GetDecompressedDataSize(src);
+    if (size != NULL)
+        *size = decodedSize;
+    u8 *ptr = Alloc(max(capacity, decodedSize));
+    if (ptr)
+    {
+        DecompressDataWithHeaderWram(src, ptr);
+        if (capacity > decodedSize)
+            memset(ptr + decodedSize, 0, capacity - decodedSize);
+    }
+    return ptr;
+}
+
 void *DecompressAndCopyTileDataToVram(u8 bgId, const void *src, u32 size, u16 offset, u8 mode)
 {
     u32 sizeOut;
     if (sTempTileDataBufferIdx < ARRAY_COUNT(sTempTileDataBuffer))
     {
-        void *ptr = malloc_and_decompress(src, &sizeOut);
+        void *ptr = malloc_and_decompress_padded(src, size, &sizeOut);
         if (!size)
             size = sizeOut;
         if (ptr)
@@ -1538,14 +1553,14 @@ void *DecompressAndCopyTileDataToVram(u8 bgId, const void *src, u32 size, u16 of
 void DecompressAndLoadBgGfxUsingHeap(u8 bgId, const void *src, u32 size, u16 offset, u8 mode)
 {
     u32 sizeOut;
-    void *ptr = malloc_and_decompress(src, &sizeOut);
+    void *ptr = malloc_and_decompress_padded(src, size, &sizeOut);
     if (!size)
         size = sizeOut;
     if (ptr)
     {
         u8 taskId = CreateTask(task_free_buf_after_copying_tile_data_to_vram, 0);
         gTasks[taskId].data[0] = copy_decompressed_tile_data_to_vram(bgId, ptr, size, offset, mode);
-        SetWordTaskArg(taskId, 1, (u32)ptr);
+        SetTaskPointerArg(taskId, 1, (const void *)ptr);
     }
 }
 
@@ -1553,23 +1568,14 @@ void task_free_buf_after_copying_tile_data_to_vram(u8 taskId)
 {
     if (!CheckForSpaceForDma3Request(gTasks[taskId].data[0]))
     {
-        Free((void *)GetWordTaskArg(taskId, 1));
+        Free((void *)GetTaskPointerArg(taskId, 1));
         DestroyTask(taskId);
     }
 }
 
 void *malloc_and_decompress(const void *src, u32 *size)
 {
-    void *ptr;
-    u32 localSize = GetDecompressedDataSize(src);
-
-    if (size != NULL)
-        *size = localSize;
-
-    ptr = Alloc(localSize);
-    if (ptr)
-        DecompressDataWithHeaderWram(src, ptr);
-    return ptr;
+    return malloc_and_decompress_padded(src, 0, size);
 }
 
 u16 copy_decompressed_tile_data_to_vram(u8 bgId, const void *src, u16 size, u16 offset, u8 mode)
@@ -1628,8 +1634,8 @@ void ResetBgPositions(void)
 void BgDmaFill(u32 bg, u8 value, int offset, int size)
 {
     int temp = (!GetBgAttribute(bg, BG_ATTR_PALETTEMODE)) ? 32 : 64;
-    void *addr = (void *)((GetBgAttribute(bg, BG_ATTR_CHARBASEINDEX) * 0x4000) + (GetBgAttribute(bg, BG_ATTR_BASETILE) + offset) * temp);
-    RequestDma3Fill(value << 24 | value << 16 | value << 8 | value, VRAM + addr, size * temp, 1);
+    size_t addr = (GetBgAttribute(bg, BG_ATTR_CHARBASEINDEX) * 0x4000) + (GetBgAttribute(bg, BG_ATTR_BASETILE) + offset) * temp;
+    RequestDma3Fill(value << 24 | value << 16 | value << 8 | value, (u8 *)VRAM + addr, size * temp, 1);
 }
 
 void AddTextPrinterParameterized3(u8 windowId, u8 fontId, u8 left, u8 top, const u8 *color, s8 speed, const u8 *str)

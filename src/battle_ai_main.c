@@ -6766,7 +6766,7 @@ void ScriptSetDynamicAiFunc(struct ScriptContext *ctx)
 {
     Script_RequestEffects(SCREFF_V1);
 
-    AiScoreFunc func = (AiScoreFunc)ScriptReadWord(ctx);
+    AiScoreFunc func = (AiScoreFunc)ScriptReadPointer(ctx);
     sDynamicAiFunc = func;
 }
 
@@ -6774,7 +6774,7 @@ void ScriptSetDynamicAiSwitchFunc(struct ScriptContext *ctx)
 {
     Script_RequestEffects(SCREFF_V1);
 
-    AiSwitchFunc func = (AiSwitchFunc)ScriptReadWord(ctx);
+    AiSwitchFunc func = (AiSwitchFunc)ScriptReadPointer(ctx);
     gDynamicAiSwitchFunc = func;
 }
 

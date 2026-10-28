@@ -18,6 +18,10 @@ void ResetTasks(void)
         gTasks[i].next = i + 1;
         gTasks[i].priority = -1;
         memset(gTasks[i].data, 0, sizeof(gTasks[i].data));
+#ifdef NATIVE
+        memset(gTasks[i].pointerArgs, 0, sizeof(gTasks[i].pointerArgs));
+        gTasks[i].followupFunc = NULL;
+#endif
     }
 
     gTasks[0].prev = HEAD_SENTINEL;
@@ -36,6 +40,10 @@ u8 CreateTask(TaskFunc func, u8 priority)
             gTasks[i].priority = priority;
             InsertTask(i);
             memset(gTasks[i].data, 0, sizeof(gTasks[i].data));
+#ifdef NATIVE
+            memset(gTasks[i].pointerArgs, 0, sizeof(gTasks[i].pointerArgs));
+            gTasks[i].followupFunc = NULL;
+#endif
             gTasks[i].isActive = TRUE;
             return i;
         }
@@ -86,6 +94,10 @@ void DestroyTask(u8 taskId)
     if (gTasks[taskId].isActive)
     {
         gTasks[taskId].isActive = FALSE;
+#ifdef NATIVE
+        memset(gTasks[taskId].pointerArgs, 0, sizeof(gTasks[taskId].pointerArgs));
+        gTasks[taskId].followupFunc = NULL;
+#endif
 
         if (gTasks[taskId].prev == HEAD_SENTINEL)
         {
@@ -138,18 +150,29 @@ void TaskDummy(u8 taskId)
 
 void SetTaskFuncWithFollowupFunc(u8 taskId, TaskFunc func, TaskFunc followupFunc)
 {
+#ifdef NATIVE
+    gTasks[taskId].followupFunc = followupFunc;
+#if UINTPTR_MAX == UINT32_MAX
+    SetWordTaskArg(taskId, NUM_TASK_DATA - 2, (uintptr_t)followupFunc);
+#endif
+#else
     u8 followupFuncIndex = NUM_TASK_DATA - 2; // Should be const.
 
     gTasks[taskId].data[followupFuncIndex] = (s16)((u32)followupFunc);
     gTasks[taskId].data[followupFuncIndex + 1] = (s16)((u32)followupFunc >> 16); // Store followupFunc as two half-words in the data array.
+#endif
     gTasks[taskId].func = func;
 }
 
 void SwitchTaskToFollowupFunc(u8 taskId)
 {
+#ifdef NATIVE
+    gTasks[taskId].func = gTasks[taskId].followupFunc;
+#else
     u8 followupFuncIndex = NUM_TASK_DATA - 2; // Should be const.
 
     gTasks[taskId].func = (TaskFunc)((u16)(gTasks[taskId].data[followupFuncIndex]) | (gTasks[taskId].data[followupFuncIndex + 1] << 16));
+#endif
 }
 
 bool8 FuncIsActiveTask(TaskFunc func)
@@ -186,7 +209,32 @@ void SetWordTaskArg(u8 taskId, u8 dataElem, u32 value)
 u32 GetWordTaskArg(u8 taskId, u8 dataElem)
 {
     if (dataElem < NUM_TASK_DATA - 1)
-        return (u16)gTasks[taskId].data[dataElem] | (gTasks[taskId].data[dataElem + 1] << 16);
+        return (u16)gTasks[taskId].data[dataElem] | ((u32)(u16)gTasks[taskId].data[dataElem + 1] << 16);
     else
         return 0;
+}
+
+void SetTaskPointerArg(u8 taskId, u8 slot, const void *pointer)
+{
+#ifdef NATIVE
+    if (taskId < NUM_TASKS && slot < NUM_TASK_DATA)
+    {
+        gTasks[taskId].pointerArgs[slot] = (void *)pointer;
+#if UINTPTR_MAX == UINT32_MAX
+        // Retain the legacy halfwords while remaining manual readers migrate.
+        SetWordTaskArg(taskId, slot, (uintptr_t)pointer);
+#endif
+    }
+#else
+    SetWordTaskArg(taskId, slot, (uintptr_t)pointer);
+#endif
+}
+
+void *GetTaskPointerArg(u8 taskId, u8 slot)
+{
+#ifdef NATIVE
+    return taskId < NUM_TASKS && slot < NUM_TASK_DATA ? gTasks[taskId].pointerArgs[slot] : NULL;
+#else
+    return (void *)(uintptr_t)GetWordTaskArg(taskId, slot);
+#endif
 }

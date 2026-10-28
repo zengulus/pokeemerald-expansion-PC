@@ -1,4 +1,7 @@
 #include "global.h"
+#ifdef NATIVE
+#include "mods.h"
+#endif
 #include "data.h"
 #include "main.h"
 #include "battle.h"
@@ -356,6 +359,9 @@ void BattleSetup_StartMultiBattle(void)
 
     if (gSpecialVar_0x8005 & MULTI_BATTLE_2_VS_WILD) // Player + AI against wild mon
     {
+#ifdef NATIVE
+        ModsEncounterStarted();
+#endif
         gBattleTypeFlags = BATTLE_TYPE_DOUBLE | BATTLE_TYPE_MULTI | BATTLE_TYPE_INGAME_PARTNER;
     }
     else if (gSpecialVar_0x8005 & MULTI_BATTLE_2_VS_1) // Player + AI against one trainer
@@ -394,6 +400,9 @@ void BattleSetup_StartBattlePikeWildBattle(void)
 
 static void DoStandardWildBattle(bool32 isDouble)
 {
+#ifdef NATIVE
+    ModsEncounterStarted();
+#endif
     LockPlayerFieldControls();
     FreezeObjectEvents();
     StopPlayerAvatar();
@@ -452,6 +461,9 @@ void BattleSetup_StartRoamerBattle(void)
 
 static void DoSafariBattle(void)
 {
+#ifdef NATIVE
+    ModsEncounterStarted();
+#endif
     LockPlayerFieldControls();
     FreezeObjectEvents();
     StopPlayerAvatar();
@@ -531,6 +543,9 @@ void StartOldManTutorialBattle(void)
 
 void BattleSetup_StartScriptedWildBattle(void)
 {
+#ifdef NATIVE
+    ModsEncounterStarted();
+#endif
     LockPlayerFieldControls();
     gMain.savedCallback = CB2_EndScriptedWildBattle;
     gBattleTypeFlags = 0;
@@ -543,6 +558,9 @@ void BattleSetup_StartScriptedWildBattle(void)
 
 void BattleSetup_StartScriptedDoubleWildBattle(void)
 {
+#ifdef NATIVE
+    ModsEncounterStarted();
+#endif
     LockPlayerFieldControls();
     gMain.savedCallback = CB2_EndScriptedWildBattle;
     gBattleTypeFlags = BATTLE_TYPE_DOUBLE;
@@ -574,6 +592,9 @@ void StartMarowakBattle(void)
 
 void BattleSetup_StartLatiBattle(void)
 {
+#ifdef NATIVE
+    ModsEncounterStarted();
+#endif
     LockPlayerFieldControls();
     gMain.savedCallback = CB2_EndScriptedWildBattle;
     gBattleTypeFlags = BATTLE_TYPE_LEGENDARY;
@@ -586,6 +607,9 @@ void BattleSetup_StartLatiBattle(void)
 
 void BattleSetup_StartLegendaryBattle(void)
 {
+#ifdef NATIVE
+    ModsEncounterStarted();
+#endif
     LockPlayerFieldControls();
     gMain.savedCallback = CB2_EndScriptedWildBattle;
     gBattleTypeFlags = BATTLE_TYPE_LEGENDARY;
@@ -628,6 +652,9 @@ void BattleSetup_StartLegendaryBattle(void)
 
 void StartGroudonKyogreBattle(void)
 {
+#ifdef NATIVE
+    ModsEncounterStarted();
+#endif
     LockPlayerFieldControls();
     gMain.savedCallback = CB2_EndScriptedWildBattle;
     gBattleTypeFlags = BATTLE_TYPE_LEGENDARY;
@@ -2182,13 +2209,13 @@ void SetMultiTrainerBattle(struct ScriptContext *ctx)
     InitTrainerBattleParameter();
 
     TRAINER_BATTLE_PARAM.opponentA = ScriptReadHalfword(ctx);
-    TRAINER_BATTLE_PARAM.defeatTextA = (u8*)ScriptReadWord(ctx);
+    TRAINER_BATTLE_PARAM.defeatTextA = (u8*)ScriptReadPointer(ctx);
     TRAINER_BATTLE_PARAM.opponentB = ScriptReadHalfword(ctx);
-    TRAINER_BATTLE_PARAM.defeatTextB = (u8*)ScriptReadWord(ctx);
+    TRAINER_BATTLE_PARAM.defeatTextB = (u8*)ScriptReadPointer(ctx);
     gPartnerTrainerId = TRAINER_PARTNER(ScriptReadHalfword(ctx));
 };
 
-void CreateNPCTrainerPartyFromTrainer(struct Pokemon *party, const struct Trainer *trainer)
+static void CreateNPCTrainerPartyImpl(struct Pokemon *party, const struct Trainer *trainer, u16 trainerId)
 {
     s32 i;
     u8 monsCount;
@@ -2210,16 +2237,45 @@ void CreateNPCTrainerPartyFromTrainer(struct Pokemon *party, const struct Traine
     for (i = 0; i < monsCount; i++)
     {
         u32 monIndex = monIndices[i];
+#ifdef NATIVE
+        struct TrainerMon randomized = trainer->party[monIndex];
+        if (trainerId != TRAINER_NONE && party != gParties[B_TRAINER_PLAYER])
+        {
+            randomized.species = ModsTrainerSpecies(randomized.species, trainerId, i);
+            if (randomized.species != trainer->party[monIndex].species)
+            {
+                memset(randomized.moves, 0, sizeof(randomized.moves));
+                randomized.ability = ABILITY_NONE;
+                randomized.gender = TRAINER_MON_RANDOM_GENDER;
+                randomized.nickname = NULL;
+                randomized.gigantamaxFactor = FALSE;
+                randomized.teraType = TYPE_MYSTERY;
+            }
+        }
+        GenerateMonFromTrainerMon(&party[i], &randomized, trainerGen);
+#else
         GenerateMonFromTrainerMon(&party[i], &trainer->party[monIndex], trainerGen);
+#endif
     }
     Free(trainerGen);
+}
+
+void CreateNPCTrainerPartyFromTrainer(struct Pokemon *party, const struct Trainer *trainer)
+{
+    u16 id = TRAINER_NONE;
+#ifdef NATIVE
+    if (party != gParties[B_TRAINER_PLAYER])
+        for (u32 i = 1; i < TRAINERS_COUNT; ++i)
+            if (trainer == GetTrainerStructFromId(i)) { id = i; break; }
+#endif
+    CreateNPCTrainerPartyImpl(party, trainer, id);
 }
 
 static void CreateNPCTrainerParty(struct Pokemon *party, u16 trainerNum)
 {
     if (!GetTrainerStructFromId(trainerNum)->overrideTrainer)
     {
-        CreateNPCTrainerPartyFromTrainer(party, GetTrainerStructFromId(trainerNum));
+        CreateNPCTrainerPartyImpl(party, GetTrainerStructFromId(trainerNum), trainerNum);
         return;
     }
 
@@ -2232,7 +2288,7 @@ static void CreateNPCTrainerParty(struct Pokemon *party, u16 trainerNum)
     tempTrainer.poolSize = origTrainer->poolSize;
     if (tempTrainer.partySize == 0)
         tempTrainer.partySize = origTrainer->partySize;
-    CreateNPCTrainerPartyFromTrainer(party, (const struct Trainer *)(&tempTrainer));
+    CreateNPCTrainerPartyImpl(party, (const struct Trainer *)(&tempTrainer), trainerNum);
 }
 
 void CreateTrainerPartyForPlayer(void)

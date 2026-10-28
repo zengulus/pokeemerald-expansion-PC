@@ -1,4 +1,7 @@
 #include "global.h"
+#ifdef NATIVE
+#include "mods.h"
+#endif
 #include "battle_setup.h"
 #include "battle_pike.h"
 #include "battle_pyramid.h"
@@ -528,6 +531,27 @@ bool8 TryGenerateWildMon(const struct WildPokemonInfo *wildMonInfo, enum WildPok
 {
     u8 wildMonIndex = 0;
     u8 level;
+#ifdef NATIVE
+    /* Apply the stable pool before ability-based slot selection, so Static,
+     * Magnet Pull and similar abilities inspect the actual randomized table. */
+    struct WildPokemonInfo modInfo;
+    struct WildPokemon modMons[NUM_LAND_MONS_ENCOUNTER_SLOTS];
+    u32 modHeader = GetCurrentMapWildMonHeaderId();
+    u32 modTime = modHeader == HEADER_NONE ? 0 : GetTimeOfDayForEncounters(modHeader, area);
+    bool32 modPool = ModsGetConfig().wildMode == MOD_WILD_POOL;
+    if (modPool)
+    {
+        static const u8 counts[] = {NUM_LAND_MONS_ENCOUNTER_SLOTS, NUM_WATER_MONS_ENCOUNTER_SLOTS,
+            NUM_ROCK_SMASH_MONS_ENCOUNTER_SLOTS, NUM_FISHING_MONS_ENCOUNTER_SLOTS, NUM_HIDDEN_MONS_ENCOUNTER_SLOTS};
+        modInfo = *wildMonInfo;
+        for (u32 i = 0; i < counts[area]; ++i)
+        {
+            modMons[i] = wildMonInfo->wildPokemon[i];
+            modMons[i].species = ModsWildSpecies(modMons[i].species, area, i, modTime);
+        }
+        modInfo.wildPokemon = modMons; wildMonInfo = &modInfo;
+    }
+#endif
 
     switch (area)
     {
@@ -578,7 +602,14 @@ bool8 TryGenerateWildMon(const struct WildPokemonInfo *wildMonInfo, enum WildPok
     if (gMapHeader.mapLayoutId != LAYOUT_BATTLE_FRONTIER_BATTLE_PIKE_ROOM_WILD_MONS && flags & WILD_CHECK_KEEN_EYE && !IsAbilityAllowingEncounter(level))
         return FALSE;
 
-    CreateWildMon(wildMonInfo->wildPokemon[wildMonIndex].species, level);
+    enum Species species = wildMonInfo->wildPokemon[wildMonIndex].species;
+#ifdef NATIVE
+    if (!modPool) species = ModsWildSpecies(species, area, wildMonIndex, modTime);
+#endif
+    CreateWildMon(species, level);
+#ifdef NATIVE
+    ModsWildCreated(species, area, wildMonIndex, modTime);
+#endif
     return TRUE;
 }
 
@@ -589,7 +620,16 @@ static u16 GenerateFishingWildMon(const struct WildPokemonInfo *wildMonInfo, u8 
     u8 level = ChooseWildMonLevel(wildMonInfo->wildPokemon, wildMonIndex, WILD_AREA_FISHING);
 
     UpdateChainFishingStreak();
+#ifdef NATIVE
+    u32 header = GetCurrentMapWildMonHeaderId();
+    wildMonSpecies = ModsWildSpecies(wildMonSpecies, WILD_AREA_FISHING, wildMonIndex,
+        header == HEADER_NONE ? 0 : GetTimeOfDayForEncounters(header, WILD_AREA_FISHING));
+#endif
     CreateWildMon(wildMonSpecies, level);
+#ifdef NATIVE
+    ModsWildCreated(wildMonSpecies, WILD_AREA_FISHING, wildMonIndex,
+        header == HEADER_NONE ? 0 : GetTimeOfDayForEncounters(header, WILD_AREA_FISHING));
+#endif
     return wildMonSpecies;
 }
 
@@ -957,7 +997,13 @@ void FishingWildEncounter(u8 rod)
         u8 level = ChooseWildMonLevel(&gWildFeebas, 0, WILD_AREA_FISHING);
 
         species = gWildFeebas.species;
+#ifdef NATIVE
+        species = ModsWildSpecies(species, WILD_AREA_FISHING, 255, 0);
+#endif
         CreateWildMon(species, level);
+#ifdef NATIVE
+        ModsWildCreated(species, WILD_AREA_FISHING, 255, 0);
+#endif
     }
     else
     {

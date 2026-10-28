@@ -570,7 +570,7 @@ void CallWindowFunction(u32 windowId, void ( *func)(u8, u8, u8, u8, u8, u8))
     func(window.bg, window.tilemapLeft, window.tilemapTop, window.width, window.height, window.paletteNum);
 }
 
-bool32 SetWindowAttribute(u32 windowId, u32 attributeId, u32 value)
+bool32 SetWindowAttribute(u32 windowId, u32 attributeId, uintptr_t value)
 {
     switch (attributeId)
     {
@@ -597,7 +597,7 @@ bool32 SetWindowAttribute(u32 windowId, u32 attributeId, u32 value)
     }
 }
 
-u32 GetWindowAttribute(u32 windowId, u32 attributeId)
+uintptr_t GetWindowAttribute(u32 windowId, u32 attributeId)
 {
     switch (attributeId)
     {
@@ -616,7 +616,7 @@ u32 GetWindowAttribute(u32 windowId, u32 attributeId)
     case WINDOW_BASE_BLOCK:
         return gWindows[windowId].window.baseBlock;
     case WINDOW_TILE_DATA:
-        return (u32)(gWindows[windowId].tileData);
+        return (uintptr_t)(gWindows[windowId].tileData);
     default:
         return 0;
     }

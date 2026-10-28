@@ -182,12 +182,16 @@ static void WindowFunc_ClearNamebox(u8 bg, u8 L, u8 T, u8 w, u8 h, u8 p)
 
 void SetSpeaker(struct ScriptContext *ctx)
 {
-    u32 arg = ScriptReadWord(ctx);
+    uintptr_t arg = ScriptReadPointer(ctx);
     const u8 *speaker = NULL;
 
     if (arg < SP_NAME_COUNT)
         speaker = gSpeakerNamesTable[arg];
+#ifdef NATIVE
+    else
+#else
     else if (arg >= ROM_START && arg < ROM_END)
+#endif
         speaker = (const u8 *)arg;
 
     gSpeakerName = speaker;

@@ -866,7 +866,7 @@ static void AnimSuperpowerRock(struct Sprite *sprite)
     sprite->y = 120;
 
     sprite->data[0] = gBattleAnimArgs[3];
-    StorePointerInVars(&sprite->data[4], &sprite->data[5], (void *)(sprite->y << 8));
+    StoreWordInVars(&sprite->data[4], &sprite->data[5], sprite->y << 8);
 
     sprite->data[6] = gBattleAnimArgs[1];
     sprite->oam.tileNum += gBattleAnimArgs[2] * 4;
@@ -876,16 +876,15 @@ static void AnimSuperpowerRock(struct Sprite *sprite)
 
 static void AnimSuperpowerRock_Step1(struct Sprite *sprite)
 {
-    void *var0;
+    s32 var0;
 
     if (sprite->data[0] != 0)
     {
-        var0 = LoadPointerFromVars(sprite->data[4], sprite->data[5]);
+        var0 = (s32)LoadWordFromVars(sprite->data[4], sprite->data[5]);
         var0 -= sprite->data[6];
-        StorePointerInVars(&sprite->data[4], &sprite->data[5], var0);
+        StoreWordInVars(&sprite->data[4], &sprite->data[5], var0);
 
-        var0 = (void *)(((intptr_t)var0) >> 8);
-        sprite->y = (intptr_t)var0;
+        sprite->y = var0 >> 8;
         if (sprite->y < -8)
             DestroyAnimSprite(sprite);
         else

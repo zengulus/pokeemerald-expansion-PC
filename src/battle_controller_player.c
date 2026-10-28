@@ -2226,13 +2226,11 @@ static void PlayerHandleStatusXor(enum BattlerId battler)
 
 static void PlayerHandleDMA3Transfer(enum BattlerId battler)
 {
-    u32 dstArg = gBattleResources->bufferA[battler][1]
-            | (gBattleResources->bufferA[battler][2] << 8)
-            | (gBattleResources->bufferA[battler][3] << 16)
-            | (gBattleResources->bufferA[battler][4] << 24);
-    u16 sizeArg = gBattleResources->bufferA[battler][5] | (gBattleResources->bufferA[battler][6] << 8);
+    const u8 *args = &gBattleResources->bufferA[battler][1];
+    void *dstArg = (void *)T1_READ_PTR(args);
+    u16 sizeArg = T1_READ_16(args + sizeof(void *));
 
-    DmaCopyLarge16(3, &gBattleResources->bufferA[battler][7], (void *)dstArg, sizeArg, 0x1000);
+    DmaCopyLarge16(3, args + sizeof(void *) + 2, dstArg, sizeArg, 0x1000);
     BtlController_Complete(battler);
 }
 

@@ -53,9 +53,7 @@ static const u16 sBgColor[] = {RGB_WHITE};
 
 static struct PokemonSpriteVisualizer *GetStructPtr(u8 taskId)
 {
-    u8 *taskDataPtr = (u8 *)(&gTasks[taskId].data[0]);
-
-    return (struct PokemonSpriteVisualizer*)(T1_READ_PTR(taskDataPtr));
+    return GetTaskPointerArg(taskId, 0);
 }
 
 //BgTemplates
@@ -561,13 +559,7 @@ static void VBlankCB(void)
 
 static void SetStructPtr(u8 taskId, void *ptr)
 {
-    u32 structPtr = (u32)(ptr);
-    u8 *taskDataPtr = (u8 *)(&gTasks[taskId].data[0]);
-
-    taskDataPtr[0] = structPtr >> 0;
-    taskDataPtr[1] = structPtr >> 8;
-    taskDataPtr[2] = structPtr >> 16;
-    taskDataPtr[3] = structPtr >> 24;
+    SetTaskPointerArg(taskId, 0, ptr);
 }
 
 //Digit and arrow functions
@@ -1643,16 +1635,8 @@ static void UpdateSubmenuFourOptionValue(u8 taskId, bool8 increment)
     }
 }
 
-#define READ_PTR_FROM_TASK(taskId, dataId)              \
-    (void *)(                                           \
-    ((u16)(gTasks[taskId].data[dataId]) |               \
-    ((u16)(gTasks[taskId].data[dataId + 1]) << 16)))
-
-#define STORE_PTR_IN_TASK(ptr, taskId, dataId)          \
-{                                                       \
-    gTasks[taskId].data[dataId] = (u32)(ptr);           \
-    gTasks[taskId].data[dataId + 1] = (u32)(ptr) >> 16; \
-}
+#define READ_PTR_FROM_TASK(taskId, dataId) GetTaskPointerArg(taskId, dataId)
+#define STORE_PTR_IN_TASK(ptr, taskId, dataId) SetTaskPointerArg(taskId, dataId, ptr)
 
 #define sAnimId    data[2]
 #define sAnimDelay data[3]

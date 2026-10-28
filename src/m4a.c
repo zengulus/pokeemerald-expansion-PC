@@ -1,5 +1,14 @@
 #include "global.h"
+#ifdef NATIVE
+#include "mod_music.h"
+#endif
 #include "gba/m4a_internal.h"
+#ifdef NATIVE
+#include "native_audio.h"
+#define ply_lfos MP2K_event_lfos
+#define ply_mod MP2K_event_mod
+#define ply_endtie MP2K_event_endtie
+#endif
 #include "global.h"
 
 extern const u8 gCgb3Vol[];
@@ -98,7 +107,11 @@ void m4aSoundInit(void)
 
 void m4aSoundMain(void)
 {
+#ifdef NATIVE
+    RunMixerFrame();
+#else
     SoundMain();
+#endif
 }
 
 void m4aSongNumStart(u16 n)
@@ -260,6 +273,14 @@ void MPlayExtender(struct CgbChannel *cgbChans)
     REG_NR30 = 0;
     REG_NR50 = 0x77;
 
+#ifdef NATIVE
+    for (u8 ch = 0; ch < 4; ++ch)
+    {
+        cgb_set_envelope(ch, 8);
+        cgb_trigger_note(ch);
+    }
+#endif
+
     soundInfo = SOUND_INFO_PTR;
 
     ident = soundInfo->ident;
@@ -313,7 +334,9 @@ void MPlayExtender(struct CgbChannel *cgbChans)
 
 static void UNUSED MusicPlayerJumpTableCopy(void)
 {
+#ifndef NATIVE
     asm("swi 0x2A");
+#endif
 }
 
 void ClearChain(void *x)
@@ -358,17 +381,23 @@ void SoundInit(struct SoundInfo *soundInfo)
                    | SOUND_ALL_MIX_FULL;
     REG_SOUNDBIAS_H = (REG_SOUNDBIAS_H & 0x3F) | 0x40;
 
+#ifndef NATIVE
     REG_DMA1SAD = (s32)soundInfo->pcmBuffer;
     REG_DMA1DAD = (s32)&REG_FIFO_A;
     REG_DMA2SAD = (s32)soundInfo->pcmBuffer + PCM_DMA_BUF_SIZE;
     REG_DMA2DAD = (s32)&REG_FIFO_B;
+#endif
 
     SOUND_INFO_PTR = soundInfo;
     CpuFill32(0, soundInfo, sizeof(struct SoundInfo));
 
     soundInfo->maxChans = 8;
     soundInfo->masterVolume = 15;
+#ifdef NATIVE
+    soundInfo->plynote = (PlyNoteFunc)MP2K_event_nxx;
+#else
     soundInfo->plynote = ply_note;
+#endif
     soundInfo->CgbSound = DummyFunc;
     soundInfo->CgbOscOff = (CgbOscOffFunc)DummyFunc;
     soundInfo->MidiKeyToCgbFreq = (MidiKeyToCgbFreqFunc)DummyFunc;
@@ -389,14 +418,23 @@ void SampleFreqSet(u32 freq)
 
     freq = (freq & 0xF0000) >> 16;
     soundInfo->freq = freq;
+#ifdef NATIVE
+    soundInfo->pcmSamplesPerVBlank = 701;
+#else
     soundInfo->pcmSamplesPerVBlank = gPcmSamplesPerVBlankTable[freq - 1];
+#endif
     soundInfo->pcmDmaPeriod = PCM_DMA_BUF_SIZE / soundInfo->pcmSamplesPerVBlank;
 
     // LCD refresh rate 59.7275Hz
     soundInfo->pcmFreq = (597275 * soundInfo->pcmSamplesPerVBlank + 5000) / 10000;
 
     // CPU frequency 16.78Mhz
+#ifdef NATIVE
+    soundInfo->pcmFreq = 42060;
+    soundInfo->divFreq = 1.0f / soundInfo->pcmFreq;
+#else
     soundInfo->divFreq = (16777216 / soundInfo->pcmFreq + 1) >> 1;
+#endif
 
     // Turn off timer 0.
     REG_TM0CNT_H = 0;
@@ -406,11 +444,13 @@ void SampleFreqSet(u32 freq)
 
     m4aSoundVSyncOn();
 
+#ifndef NATIVE
     while (*(vu8 *)REG_ADDR_VCOUNT == 159)
         ;
 
     while (*(vu8 *)REG_ADDR_VCOUNT != 159)
         ;
+#endif
 
     REG_TM0CNT_H = TIMER_ENABLE | TIMER_1CLK;
 }
@@ -550,7 +590,11 @@ void MPlayOpen(struct MusicPlayerInfo *mplayInfo, struct MusicPlayerTrack *track
     }
 
     soundInfo->musicPlayerHead = mplayInfo;
+#ifdef NATIVE
+    soundInfo->MPlayMainHead = (MPlayMainFunc)MP2KPlayerMain;
+#else
     soundInfo->MPlayMainHead = MPlayMain;
+#endif
     soundInfo->ident = ID_NUMBER;
     mplayInfo->ident = ID_NUMBER;
 }
@@ -609,6 +653,9 @@ void MPlayStart(struct MusicPlayerInfo *mplayInfo, struct SongHeader *songHeader
             m4aSoundMode(songHeader->reverb);
 
         mplayInfo->ident = ID_NUMBER;
+#ifdef NATIVE
+        NativeMusicOnStart(mplayInfo, songHeader);
+#endif
     }
 }
 
@@ -616,6 +663,10 @@ void m4aMPlayStop(struct MusicPlayerInfo *mplayInfo)
 {
     s32 i;
     struct MusicPlayerTrack *track;
+
+#ifdef NATIVE
+    NativeMusicOnStop(mplayInfo);
+#endif
 
     if (mplayInfo->ident != ID_NUMBER)
         return;
@@ -820,6 +871,10 @@ void CgbOscOff(u8 chanNum)
         REG_NR42 = 8;
         REG_NR44 = 0x80;
     }
+#ifdef NATIVE
+    cgb_set_envelope(chanNum - 1, 8);
+    cgb_trigger_note(chanNum - 1);
+#endif
 }
 
 static inline int CgbPan(struct CgbChannel *chan)
@@ -943,9 +998,12 @@ void CgbSound(void)
                 {
                 case 1:
                     *nrx0ptr = channels->sweep;
+#ifdef NATIVE
+                    cgb_set_sweep(channels->sweep);
+#endif
                     // fallthrough
                 case 2:
-                    *nrx1ptr = ((u32)channels->wavePointer << 6) + channels->length;
+                    *nrx1ptr = ((uintptr_t)channels->wavePointer << 6) + channels->length;
                     goto init_env_step_time_dir;
                 case 3:
                     if (channels->wavePointer != channels->currentPointer)
@@ -956,6 +1014,9 @@ void CgbSound(void)
                         REG_WAVE_RAM2 = channels->wavePointer[2];
                         REG_WAVE_RAM3 = channels->wavePointer[3];
                         channels->currentPointer = channels->wavePointer;
+#ifdef NATIVE
+                        cgb_set_wavram();
+#endif
                     }
                     *nrx0ptr = 0;
                     *nrx1ptr = channels->length;
@@ -966,7 +1027,7 @@ void CgbSound(void)
                     break;
                 default:
                     *nrx1ptr = channels->length;
-                    *nrx3ptr = (u32)channels->wavePointer << 3;
+                    *nrx3ptr = (uintptr_t)channels->wavePointer << 3;
                 init_env_step_time_dir:
                     envelopeStepTimeAndDir = channels->attack + CGB_NRx2_ENV_DIR_INC;
                     if (channels->length)
@@ -975,6 +1036,9 @@ void CgbSound(void)
                         channels->n4 = 0x00;
                     break;
                 }
+#ifdef NATIVE
+                cgb_set_length(ch - 1, channels->length);
+#endif
                 channels->envelopeCounter = channels->attack;
                 if ((s8)(channels->attack & mask))
                 {
@@ -1171,6 +1235,11 @@ void CgbSound(void)
                 if (ch == 1 && !(*nrx0ptr & 0x08))
                     *nrx4ptr = channels->n4 | 0x80;
             }
+#ifdef NATIVE
+            cgb_set_envelope(ch - 1, *nrx2ptr);
+            cgb_toggle_length(ch - 1, *nrx4ptr & 0x40);
+            cgb_trigger_note(ch - 1);
+#endif
         }
 
     channel_complete:
@@ -1194,6 +1263,9 @@ void m4aMPlayVolumeControl(struct MusicPlayerInfo *mplayInfo, u16 trackBits, u16
     s32 i;
     u32 bit;
     struct MusicPlayerTrack *track;
+#ifdef NATIVE
+    NativeMusicOnVolume(mplayInfo, volume);
+#endif
 
     if (mplayInfo->ident != ID_NUMBER)
         return;
@@ -1392,7 +1464,7 @@ cond_true:
     }
 
 cond_false:
-    track->cmdPtr += 4;
+    track->cmdPtr += sizeof(uintptr_t);
 }
 
 void ply_xcmd(struct MusicPlayerInfo *mplayInfo, struct MusicPlayerTrack *track)
@@ -1418,6 +1490,10 @@ void ply_xxx(struct MusicPlayerInfo *mplayInfo, struct MusicPlayerTrack *track)
 
 void ply_xwave(struct MusicPlayerInfo *mplayInfo, struct MusicPlayerTrack *track)
 {
+#ifdef NATIVE
+    track->tone.wav = (struct WaveData *)ReadNativePointerValue(track->cmdPtr);
+    track->cmdPtr += sizeof(uintptr_t);
+#else
     u32 wav;
 
 #ifdef UBFIX
@@ -1431,6 +1507,7 @@ void ply_xwave(struct MusicPlayerInfo *mplayInfo, struct MusicPlayerTrack *track
 
     track->tone.wav = (struct WaveData *)wav;
     track->cmdPtr += 4;
+#endif
 }
 
 void ply_xtype(struct MusicPlayerInfo *mplayInfo, struct MusicPlayerTrack *track)
@@ -1564,7 +1641,7 @@ start_song:
     gPokemonCrySongs[i].tone = tone;
     gPokemonCrySongs[i].part[0] = &gPokemonCrySongs[i].part0;
     gPokemonCrySongs[i].part[1] = &gPokemonCrySongs[i].part1;
-    gPokemonCrySongs[i].gotoTarget = (u32)&gPokemonCrySongs[i].cont;
+    gPokemonCrySongs[i].gotoTarget = (uintptr_t)&gPokemonCrySongs[i].cont;
 
     mplayInfo->ident = ID_NUMBER;
 

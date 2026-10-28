@@ -402,17 +402,29 @@ static void Callback_Dummy_M(int reqCommandId, int error, void (*callbackM)())
 static void Callback_Dummy_M(int reqCommandId, int error, void (*callbackM)(...))
 #endif
 {
+#ifdef NATIVE
+    callbackM(reqCommandId, error);
+#else
     asm("bx r2");
+#endif
 }
 
 NAKED
 static void Callback_Dummy_S(u16 reqCommandId, void (*callbackS)(u16))
 {
+#ifdef NATIVE
+    callbackS(reqCommandId);
+#else
     asm("bx r1");
+#endif
 }
 
 NAKED
 static void Callback_Dummy_ID(void (*callbackId)(void))
 {
+#ifdef NATIVE
+    callbackId();
+#else
     asm("bx r0");
+#endif
 }

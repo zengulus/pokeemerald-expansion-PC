@@ -152,7 +152,11 @@ struct SoundChannel
     u8 rhythmPan;
     u8 dummy3[3];
     u32 count;
+#ifdef NATIVE
+    float fw;
+#else
     u32 fw;
+#endif
     u32 frequency;
     struct WaveData *wav;
     s8 *currentPointer;
@@ -166,7 +170,11 @@ struct SoundChannel
 
 #define MAX_DIRECTSOUND_CHANNELS 12
 
+#ifdef NATIVE
+#define PCM_DMA_BUF_SIZE 4907
+#else
 #define PCM_DMA_BUF_SIZE 1584 // size of Direct Sound buffer
+#endif
 
 struct MusicPlayerInfo;
 
@@ -205,7 +213,11 @@ struct SoundInfo
     u8 gap[3];
     s32 pcmSamplesPerVBlank;
     s32 pcmFreq;
+#ifdef NATIVE
+    float divFreq;
+#else
     s32 divFreq;
+#endif
     struct CgbChannel *cgbChans;
     MPlayMainFunc MPlayMainHead;
     struct MusicPlayerInfo *musicPlayerHead;
@@ -215,9 +227,17 @@ struct SoundInfo
     MPlayFunc *MPlayJumpTable;
     PlyNoteFunc plynote;
     ExtVolPitFunc ExtVolPit;
+#ifdef NATIVE
+    void *gap2[4];
+#else
     u8 gap2[16];
+#endif
     struct SoundChannel chans[MAX_DIRECTSOUND_CHANNELS];
+#ifdef NATIVE
+    float ALIGNED(4) pcmBuffer[PCM_DMA_BUF_SIZE * 2];
+#else
     s8 ALIGNED(4) pcmBuffer[PCM_DMA_BUF_SIZE * 2];
+#endif
 };
 
 struct SongHeader
@@ -242,7 +262,11 @@ struct PokemonCrySong
     u8 part0; // 0x11
     u8 tuneValue; // 0x12
     u8 gotoCmd; // 0x13
+#ifdef NATIVE
+    uintptr_t gotoTarget __attribute__((packed));
+#else
     u32 gotoTarget; // 0x14
+#endif
     u8 part1; // 0x18
     u8 tuneValue2; // 0x19
     u8 cont[2]; // 0x1A
@@ -347,6 +371,9 @@ struct MusicPlayerInfo
     u32 ident;
     MPlayMainFunc MPlayMainNext;
     struct MusicPlayerInfo *musicPlayerNext;
+#ifdef NATIVE
+    bool8 hasBeenRanOnce;
+#endif
 };
 
 struct MusicPlayer
@@ -406,12 +433,21 @@ extern const struct ToneData voicegroup_dummy;
 extern char gNumMusicPlayers[];
 extern char gMaxLines[];
 
+#ifdef NATIVE
+#define NUM_MUSIC_PLAYERS 4
+#define MAX_LINES 0
+#else
 #define NUM_MUSIC_PLAYERS ((u16)gNumMusicPlayers)
 #define MAX_LINES ((u32)gMaxLines)
+#endif
 
 u32 umul3232H32(u32 multiplier, u32 multiplicand);
 void SoundMain(void);
+#ifdef NATIVE
+void SoundMainBTM(void *ptr);
+#else
 void SoundMainBTM(void);
+#endif
 void TrackStop(struct MusicPlayerInfo *mplayInfo, struct MusicPlayerTrack *track);
 void MPlayMain(struct MusicPlayerInfo *);
 void RealClearChain(void *x);

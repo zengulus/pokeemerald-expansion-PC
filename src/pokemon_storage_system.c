@@ -1897,7 +1897,7 @@ static void ChooseBoxMenu_PrintInfo(void)
     u8 windowId;
     u8 *boxName = GetBoxNamePtr(sChooseBoxMenu->curBox);
     u8 numInBox = CountMonsInBox(sChooseBoxMenu->curBox);
-    u32 winTileData;
+    uintptr_t winTileData;
     s32 center;
 
     memset(&template, 0, sizeof(template));

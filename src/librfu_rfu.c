@@ -140,7 +140,7 @@ u16 rfu_initializeAPI(u32 *APIBuffer, u16 buffByteSize, IntrFunc *sioIntrTable_p
     if (((uintptr_t)APIBuffer & 0xF000000) == EWRAM_START && copyInterruptToRam)
         return ERR_RFU_API_BUFF_ADR;
     // is not 4-byte aligned?
-    if ((u32)APIBuffer & 3)
+    if ((uintptr_t)APIBuffer & 3)
         return ERR_RFU_API_BUFF_ADR;
     if (copyInterruptToRam)
     {
@@ -1700,7 +1700,7 @@ static void rfu_constructSendLLFrame(void)
         }
         if (pakcketSize != 0)
         {
-            while ((u32)llf_p & 3)
+            while ((uintptr_t)llf_p & 3)
                 *llf_p++ = 0;
             gRfuFixed->LLFBuffer[0] = pakcketSize;
             if (gRfuLinkStatus->parentChild == MODE_CHILD)

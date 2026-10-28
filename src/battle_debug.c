@@ -617,20 +617,12 @@ static void SwitchToDebugViewFromAiParty(u8 taskId);
 // code
 static struct BattleDebugMenu *GetStructPtr(u8 taskId)
 {
-    u8 *taskDataPtr = (u8 *)(&gTasks[taskId].data[0]);
-
-    return (struct BattleDebugMenu*)(T1_READ_PTR(taskDataPtr));
+    return GetTaskPointerArg(taskId, 0);
 }
 
 static void SetStructPtr(u8 taskId, void *ptr)
 {
-    u32 structPtr = (u32)(ptr);
-    u8 *taskDataPtr = (u8 *)(&gTasks[taskId].data[0]);
-
-    taskDataPtr[0] = structPtr >> 0;
-    taskDataPtr[1] = structPtr >> 8;
-    taskDataPtr[2] = structPtr >> 16;
-    taskDataPtr[3] = structPtr >> 24;
+    SetTaskPointerArg(taskId, 0, ptr);
 }
 
 static void MainCB2(void)

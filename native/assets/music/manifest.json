@@ -1,0 +1,303 @@
+{
+  "version": 1,
+  "files": [
+    {
+      "path": "gen1/wild.mid",
+      "source": "https://www.vgmusic.com/music/console/nintendo/gameboy/PkmRB-Battle1.mid",
+      "author": "Joao *Johnnyz* Buaes",
+      "format": "midi",
+      "id": "rhh:midi/gen1/wild",
+      "source_catalogue": "https://www.vgmusic.com/music/console/nintendo/gameboy/",
+      "sha256": "6dfa1da24797da3b1323f99df447aed07fd3d9006915f2f32afe37578dc4b201",
+      "size": 10213
+    },
+    {
+      "path": "gen1/trainer.mid",
+      "source": "https://www.vgmusic.com/music/console/nintendo/gameboy/PkmRB-Battle2.mid",
+      "author": "Joao *Johnnyz* Buaes",
+      "format": "midi",
+      "id": "rhh:midi/gen1/trainer",
+      "source_catalogue": "https://www.vgmusic.com/music/console/nintendo/gameboy/",
+      "sha256": "11a0cf24702d439b8d86fe5765d03fda5a307c11b71ca188bca8930a52f03b32",
+      "size": 18076
+    },
+    {
+      "path": "gen1/gym.mid",
+      "source": "https://www.vgmusic.com/music/console/nintendo/gameboy/PkmRB-Battle3.mid",
+      "author": "Joao *Johnnyz* Buaes",
+      "format": "midi",
+      "id": "rhh:midi/gen1/gym",
+      "source_catalogue": "https://www.vgmusic.com/music/console/nintendo/gameboy/",
+      "sha256": "9654809419d76bc5502a6f4085e8c47dad2f1d76e51fbc10ae8291d5664522fd",
+      "size": 11524
+    },
+    {
+      "path": "gen1/champion.mid",
+      "source": "https://www.vgmusic.com/music/console/nintendo/gameboy/PkmRB-Battle4.mid",
+      "author": "Joao *Johnnyz* Buaes",
+      "format": "midi",
+      "id": "rhh:midi/gen1/champion",
+      "source_catalogue": "https://www.vgmusic.com/music/console/nintendo/gameboy/",
+      "sha256": "e5f62394d6215d7d244694bc5d15d0da8ba1e9b1a618549c52e6cb09fde9ef1e",
+      "size": 13300
+    },
+    {
+      "path": "gen2/wild.mid",
+      "source": "https://www.vgmusic.com/music/console/nintendo/gameboy/PkmGS-Battle1.mid",
+      "author": "Joao *Johnnyz* Buaes",
+      "format": "midi",
+      "id": "rhh:midi/gen2/wild",
+      "source_catalogue": "https://www.vgmusic.com/music/console/nintendo/gameboy/",
+      "sha256": "ab47a9e1c96c05f7be5d42d3e6b6769e6624fec1dfb5ce3603bf602aa198e9d0",
+      "size": 9447
+    },
+    {
+      "path": "gen2/trainer.mid",
+      "source": "https://www.vgmusic.com/music/console/nintendo/gameboy/PkmGS-Battle3.mid",
+      "author": "Joao *Johnnyz* Buaes",
+      "format": "midi",
+      "id": "rhh:midi/gen2/trainer",
+      "source_catalogue": "https://www.vgmusic.com/music/console/nintendo/gameboy/",
+      "sha256": "1b5ab8c9764d7e186bc7da30b3016145d7d69a921e3c53438b6b64543952563e",
+      "size": 19815
+    },
+    {
+      "path": "gen2/gym.mid",
+      "source": "https://www.vgmusic.com/music/console/nintendo/gameboy/PkmGS-Battle4.mid",
+      "author": "Joao *Johnnyz* Buaes",
+      "format": "midi",
+      "id": "rhh:midi/gen2/gym",
+      "source_catalogue": "https://www.vgmusic.com/music/console/nintendo/gameboy/",
+      "sha256": "758cc9befb11fde4eb566dc96242e25dcae3e800839f84e1c59cebab3f6ea204",
+      "size": 13646
+    },
+    {
+      "path": "gen2/champion.mid",
+      "source": "https://www.vgmusic.com/music/console/nintendo/gameboy/PkmGS-Battle6.mid",
+      "author": "Joao *Johnnyz* Buaes",
+      "format": "midi",
+      "id": "rhh:midi/gen2/champion",
+      "source_catalogue": "https://www.vgmusic.com/music/console/nintendo/gameboy/",
+      "sha256": "cca95607c28d22fc8772bc73c7814db1187b57c0c148b4bfa07c6cb1462e6ea9",
+      "size": 9238
+    },
+    {
+      "path": "gen3/wild.mid",
+      "source": "https://www.vgmusic.com/music/console/nintendo/gba/PkmRS_Battle1.mid",
+      "author": "Joao *Johnnyz* Buaes",
+      "format": "midi",
+      "id": "rhh:midi/gen3/wild",
+      "source_catalogue": "https://www.vgmusic.com/music/console/nintendo/gba/",
+      "sha256": "1bbf752b40166eace56bf863941862be55eea72d4428959c4b2a279ac25cdfa7",
+      "size": 16587
+    },
+    {
+      "path": "gen3/trainer.mid",
+      "source": "https://www.vgmusic.com/music/console/nintendo/gba/PkmRS-Battle3.mid",
+      "author": "Joao *Johnnyz* Buaes",
+      "format": "midi",
+      "id": "rhh:midi/gen3/trainer",
+      "source_catalogue": "https://www.vgmusic.com/music/console/nintendo/gba/",
+      "sha256": "a01b93797ae0015b7da503e5c94c5e06a5e3fe1b3680bc36c75583adb0a4ef9c",
+      "size": 32108
+    },
+    {
+      "path": "gen3/gym.mid",
+      "source": "https://www.vgmusic.com/music/console/nintendo/gba/PkmRS_Battle_5.mid",
+      "author": "Joao *Johnnyz* Buaes",
+      "format": "midi",
+      "id": "rhh:midi/gen3/gym",
+      "source_catalogue": "https://www.vgmusic.com/music/console/nintendo/gba/",
+      "sha256": "e27f6f997fe3aa1b71c21f6718aa9892b668f483af0f779c4f539ad243631fbc",
+      "size": 26414
+    },
+    {
+      "path": "gen3/champion.mid",
+      "source": "https://www.vgmusic.com/music/console/nintendo/gba/PkmRS-Battle10.mid",
+      "author": "Joao *Johnnyz* Buaes",
+      "format": "midi",
+      "id": "rhh:midi/gen3/champion",
+      "source_catalogue": "https://www.vgmusic.com/music/console/nintendo/gba/",
+      "sha256": "c6b6274fe21f1a19df18eca2cf77c0ca43eb1af123586e8f21cfd29ef0428cd5",
+      "size": 21836
+    },
+    {
+      "path": "gen4/wild.mid",
+      "source": "https://www.vgmusic.com/music/console/nintendo/ds/Pokemon_Diamond_Pearl_Wild_Pokemon_Battle.mid",
+      "author": "Electric Concerto",
+      "format": "midi",
+      "id": "rhh:midi/gen4/wild",
+      "source_catalogue": "https://www.vgmusic.com/music/console/nintendo/ds/",
+      "sha256": "492d3c6d208ae1eaf77d4091dcec65250a9bc46523fa6fb9f2702cc2b70331e6",
+      "size": 18558
+    },
+    {
+      "path": "gen4/trainer.mid",
+      "source": "https://www.vgmusic.com/music/console/nintendo/ds/Trainer.mid",
+      "author": "Brian Hayden",
+      "format": "midi",
+      "id": "rhh:midi/gen4/trainer",
+      "source_catalogue": "https://www.vgmusic.com/music/console/nintendo/ds/",
+      "sha256": "1f3bcc1fda2897f8c9b8ddc2374b78644de397bf23e9d80cac228c98695aa19f",
+      "size": 65008
+    },
+    {
+      "path": "gen4/gym.mid",
+      "source": "https://www.vgmusic.com/music/console/nintendo/ds/PMDPgymbattle.mid",
+      "author": "foxT.A.K.A",
+      "format": "midi",
+      "id": "rhh:midi/gen4/gym",
+      "source_catalogue": "https://www.vgmusic.com/music/console/nintendo/ds/",
+      "sha256": "b1f64d63743f3d59ef4f8822976b7454c105441986e83b7696d69687c19d69c8",
+      "size": 88085
+    },
+    {
+      "path": "gen4/champion.mid",
+      "source": "https://www.vgmusic.com/music/console/nintendo/ds/pmdpp_champbattle.mid",
+      "author": "Joanna",
+      "format": "midi",
+      "id": "rhh:midi/gen4/champion",
+      "source_catalogue": "https://www.vgmusic.com/music/console/nintendo/ds/",
+      "sha256": "0b51a426164e4acdc8578d33eeae51a1183758b6fcb04daeed36c72a23c3c171",
+      "size": 52720
+    },
+    {
+      "path": "gen5/wild.mid",
+      "source": "https://www.vgmusic.com/music/console/nintendo/ds/PKMN_BW_wild_battle_midi.mid",
+      "author": "Neocrystal3D/Superpokemonray1234",
+      "format": "midi",
+      "id": "rhh:midi/gen5/wild",
+      "source_catalogue": "https://www.vgmusic.com/music/console/nintendo/ds/",
+      "sha256": "96adddf29a54a8f95004adb113918e007df5843ddfdb45fbc9ac1668993498f0",
+      "size": 44510
+    },
+    {
+      "path": "gen5/trainer.mid",
+      "source": "https://www.vgmusic.com/music/console/nintendo/ds/TrainerWhite.mid",
+      "author": "Fortwaffles",
+      "format": "midi",
+      "id": "rhh:midi/gen5/trainer",
+      "source_catalogue": "https://www.vgmusic.com/music/console/nintendo/ds/",
+      "sha256": "6d6cc032106515335f4d46cd959371866986764ee7134bf6045b88735e40a568",
+      "size": 38053
+    },
+    {
+      "path": "gen5/gym.mid",
+      "source": "https://www.vgmusic.com/music/console/nintendo/ds/Gym_Leader.mid",
+      "author": "Fortwaffles",
+      "format": "midi",
+      "id": "rhh:midi/gen5/gym",
+      "source_catalogue": "https://www.vgmusic.com/music/console/nintendo/ds/",
+      "sha256": "5c325e3efb9f185b93a814154caced61fc2fcee841e8078dbb8da65bc763de07",
+      "size": 30863
+    },
+    {
+      "path": "gen5/champion.mid",
+      "source": "https://www.vgmusic.com/music/console/nintendo/ds/irisfix.mid",
+      "author": "Wobuffet3",
+      "format": "midi",
+      "id": "rhh:midi/gen5/champion",
+      "source_catalogue": "https://www.vgmusic.com/music/console/nintendo/ds/",
+      "sha256": "6a34b43b7bd4c4686b935b433715472a8ac7c87ff7a558626c606c8b0dcedc98",
+      "size": 35997
+    },
+    {
+      "path": "fonts/gen12.sf2",
+      "source": "https://datajake.braillescreen.net/SoundfontFiles/500_Soundfonts_Full_GM_Sets/Gameboy_GM_Soundfont_2.sf2",
+      "format": "sf2",
+      "id": "rhh:soundfont/gen12",
+      "sha256": "2110158d111d01e823ba8961fa58a9952d4fa04a0cd4b9a7deb89e58dfae7fe0",
+      "size": 23781494
+    },
+    {
+      "path": "fonts/gen3.sf2",
+      "source": "https://archive.org/download/soundfonts-collection/The%20Ultimate%20SoundFont%20Pack.zip",
+      "zip_entry": "Pok\u00e9mon Emerald.sf2",
+      "archive_size": 3226345874,
+      "format": "sf2",
+      "id": "rhh:soundfont/gen3",
+      "author": "MezmerKaiser",
+      "title": "Pokemon Emerald Soundfont (Updated Aug 13, 2021)",
+      "sha256": "df6a40d052070ab300552ff61f7e2ac656dbbeddb190b2c4c80b624f283b04eb",
+      "size": 59525406
+    },
+    {
+      "path": "fonts/gen4.sf2",
+      "source": "https://archive.org/download/soundfonts-collection/The%20Ultimate%20SoundFont%20Pack.zip",
+      "zip_entry": "Pok\u00e9mon Platinum.sf2",
+      "archive_size": 3226345874,
+      "format": "sf2",
+      "id": "rhh:soundfont/gen4",
+      "title": "Pokemon DPPt Soundfont 2021 (GM)",
+      "sha256": "313eae2a85ff1f56f7b20fbae6c67e1a4c5ce01d70466c5f3fe458d49519438e",
+      "size": 2501748
+    },
+    {
+      "path": "fonts/gen5.sf2",
+      "source": "https://drive.google.com/uc?export=download&id=12f57qQTnlMnp5KZn2kyhWDYL3v_oyw4t",
+      "source_catalogue": "https://www.polyphone.io/en/soundfonts/instrument-sets/1103-pokemon-black-and-white-2-soundfont-updated",
+      "author": "Xennon",
+      "format": "sf2",
+      "id": "rhh:soundfont/gen5",
+      "sha256": "767ff2e9cdff4ecf643e09299cf4e188cb411a2393f3a4b84c7d9c67b6bcd518",
+      "size": 27705906
+    }
+  ],
+  "packs": [
+    {
+      "id": "rhh:music/gen1",
+      "generation": 1,
+      "font": "fonts/gen12.sf2",
+      "tracks": {
+        "wild": "gen1/wild.mid",
+        "trainer": "gen1/trainer.mid",
+        "gym": "gen1/gym.mid",
+        "champion": "gen1/champion.mid"
+      }
+    },
+    {
+      "id": "rhh:music/gen2",
+      "generation": 2,
+      "font": "fonts/gen12.sf2",
+      "tracks": {
+        "wild": "gen2/wild.mid",
+        "trainer": "gen2/trainer.mid",
+        "gym": "gen2/gym.mid",
+        "champion": "gen2/champion.mid"
+      }
+    },
+    {
+      "id": "rhh:music/gen3",
+      "generation": 3,
+      "font": "fonts/gen3.sf2",
+      "tracks": {
+        "wild": "gen3/wild.mid",
+        "trainer": "gen3/trainer.mid",
+        "gym": "gen3/gym.mid",
+        "champion": "gen3/champion.mid"
+      }
+    },
+    {
+      "id": "rhh:music/gen4",
+      "generation": 4,
+      "font": "fonts/gen4.sf2",
+      "tracks": {
+        "wild": "gen4/wild.mid",
+        "trainer": "gen4/trainer.mid",
+        "gym": "gen4/gym.mid",
+        "champion": "gen4/champion.mid"
+      }
+    },
+    {
+      "id": "rhh:music/gen5",
+      "generation": 5,
+      "font": "fonts/gen5.sf2",
+      "tracks": {
+        "wild": "gen5/wild.mid",
+        "trainer": "gen5/trainer.mid",
+        "gym": "gen5/gym.mid",
+        "champion": "gen5/champion.mid"
+      }
+    }
+  ]
+}

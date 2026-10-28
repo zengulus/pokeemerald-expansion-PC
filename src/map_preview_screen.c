@@ -481,7 +481,7 @@ void Task_MapPreviewScreen_NonFade(u8 taskId)
     switch (tState)
     {
     case 0:
-        SetWordTaskArg(taskId, 5, (uintptr_t)gMain.vblankCallback);
+        SetTaskPointerArg(taskId, 5, (const void *)gMain.vblankCallback);
         SetVBlankCallback(NULL);
         MapPreview_InitBgs();
         MapPreview_LoadGfx(tMapSecId);
@@ -509,7 +509,7 @@ void Task_MapPreviewScreen_NonFade(u8 taskId)
             else
                 BeginNormalPaletteFade(PALETTES_ALL, -1, 16, 0, RGB_BLACK);
 
-            SetVBlankCallback((IntrCallback)GetWordTaskArg(taskId, 5));
+            SetVBlankCallback((IntrCallback)GetTaskPointerArg(taskId, 5));
             tState++;
         }
         break;

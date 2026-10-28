@@ -1,5 +1,8 @@
 #include "global.h"
 #include "dma3.h"
+#ifdef NATIVE
+#include "malloc.h"
+#endif
 
 #define MAX_DMA_REQUESTS 128
 
@@ -37,6 +40,9 @@ void ClearDma3Requests(void)
     }
 
     sDma3ManagerLocked = FALSE;
+#ifdef NATIVE
+    NativeCollectRetiredAllocations();
+#endif
 }
 
 void ProcessDma3Requests(void)
@@ -53,10 +59,12 @@ void ProcessDma3Requests(void)
     {
         bytesTransferred += sDma3Requests[sDma3RequestCursor].size;
 
+#ifndef NATIVE
         if (bytesTransferred > 40 * 1024)
             return; // don't transfer more than 40 KiB
         if (*(u8 *)REG_ADDR_VCOUNT > 224)
             return; // we're about to leave vblank, stop
+#endif
 
         switch (sDma3Requests[sDma3RequestCursor].mode)
         {
@@ -91,7 +99,31 @@ void ProcessDma3Requests(void)
 
         sDma3RequestCursor = INCREMENT_OR_WRAP(sDma3RequestCursor, MAX_DMA_REQUESTS); // loop back to the first DMA request
     }
+#ifdef NATIVE
+    NativeCollectRetiredAllocations();
+#endif
 }
+
+#ifdef NATIVE
+static bool32 BuffersOverlap(const void *left, size_t leftSize, const void *right, size_t rightSize)
+{
+    uintptr_t a = (uintptr_t)left, b = (uintptr_t)right;
+    return a <= b ? b - a < leftSize : a - b < rightSize;
+}
+
+bool32 NativeDma3ReferencesBuffer(const void *buffer, size_t size)
+{
+    for (unsigned i = 0; i < MAX_DMA_REQUESTS; ++i)
+    {
+        const struct Dma3Request *request = &sDma3Requests[i];
+        if (!request->size) continue;
+        if (BuffersOverlap(buffer, size, request->dest, request->size)) return TRUE;
+        if ((request->mode == DMA_REQUEST_COPY16 || request->mode == DMA_REQUEST_COPY32)
+            && BuffersOverlap(buffer, size, request->src, request->size)) return TRUE;
+    }
+    return FALSE;
+}
+#endif
 
 s16 RequestDma3Copy(const void *src, void *dest, u16 size, u32 mode)
 {
@@ -161,6 +193,12 @@ s16 RequestDma3Fill(s32 value, void *dest, u16 size, u32 mode)
 s16 CheckForSpaceForDma3Request(s16 index)
 {
     int i = 0;
+
+#ifdef NATIVE
+    // Preserve deferred copies until VBlank or an explicit completion poll.
+    // A map loader may poll without returning to the host frame loop.
+    ProcessDma3Requests();
+#endif
 
     if (index == -1)  // check if all requests are free
     {

@@ -242,6 +242,22 @@ u32 ScriptPeekWord(struct ScriptContext *ctx)
     return (((((value3 << 8) + value2) << 8) + value1) << 8) + value0;
 }
 
+uintptr_t ScriptPeekPointer(struct ScriptContext *ctx)
+{
+#ifdef NATIVE
+    return ReadNativePointerValue(ctx->scriptPtr);
+#else
+    return ScriptPeekWord(ctx);
+#endif
+}
+
+uintptr_t ScriptReadPointer(struct ScriptContext *ctx)
+{
+    uintptr_t pointer = ScriptPeekPointer(ctx);
+    ctx->scriptPtr += sizeof(uintptr_t);
+    return pointer;
+}
+
 void LockPlayerFieldControls(void)
 {
     sLockFieldControls = TRUE;
@@ -382,7 +398,7 @@ const u8 *MapHeaderGetScriptTable(u8 tag)
             mapScripts++;
             return T2_READ_PTR(mapScripts);
         }
-        mapScripts += 5;
+        mapScripts += 1 + sizeof(uintptr_t);
     }
 }
 
@@ -423,7 +439,7 @@ const u8 *MapHeaderCheckScriptTable(u8 tag)
                 return mapScript;
         }
 
-        ptr += 4;
+        ptr += sizeof(uintptr_t);
     }
 }
 
@@ -612,7 +628,7 @@ struct ScriptEffectContext *gScriptEffectContext = NULL;
 static bool32 Script_IsEffectInstrumentedCommand(ScrCmdFunc func)
 {
     // In ROM mirror 1.
-    return (((uintptr_t)func) & 0xE000000) == 0xA000000;
+    return SCRIPT_IS_INSTRUMENTED(func);
 }
 
 /* 'setjmp' and 'longjmp' cause link errors, so we use
@@ -714,10 +730,12 @@ bool32 Script_MatchesCallNative(const u8 *script, void *funcPtr, bool32 requestE
 {
     if (script[0] != SCR_OP_CALLNATIVE)
         return FALSE;
-    u32 callnativeFunc = (((((script[4] << 8) + script[3]) << 8) + script[2]) << 8) + script[1];
-    u32 targetFunc = (u32)funcPtr;
+    uintptr_t callnativeFunc = (uintptr_t)T1_READ_PTR(script + 1);
+    uintptr_t targetFunc = (uintptr_t)funcPtr;
+#ifndef NATIVE
     if (requestEffects)
         targetFunc |= 0xA000000;
+#endif
     if (callnativeFunc == targetFunc)
         return TRUE;
     return FALSE;
@@ -730,7 +748,7 @@ bool32 Script_MatchesSpecial(const u8 *script, void *funcPtr)
     typedef u16 (*SpecialFunc)(void);
     extern const SpecialFunc gSpecials[];
     SpecialFunc specialFunc = gSpecials[(script[2] << 8) + script[1]];
-    if ((u32)specialFunc == ((u32)funcPtr))
+    if ((uintptr_t)specialFunc == (uintptr_t)funcPtr)
         return TRUE;
     return FALSE;
 }

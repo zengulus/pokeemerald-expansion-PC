@@ -425,7 +425,7 @@ void StartPokemonJump(u16 partyId, MainCallback exitCallback)
             sPokemonJump->multiplayerId = GetMultiplayerId();
             InitJumpMonInfo(&sPokemonJump->monInfo[sPokemonJump->multiplayerId], &gParties[B_TRAINER_PLAYER][partyId]);
             InitGame(sPokemonJump);
-            SetWordTaskArg(taskId, 2, (u32)sPokemonJump);
+            SetTaskPointerArg(taskId, 2, (const void *)sPokemonJump);
             SetMainCallback2(CB2_PokemonJump);
             return;
         }
@@ -1518,7 +1518,7 @@ static void Task_CommunicateMonInfo(u8 taskId)
 {
     int i;
     s16 *data = gTasks[taskId].data;
-    struct PokemonJump *jump = (struct PokemonJump *)GetWordTaskArg(taskId, DATAIDX_GAME_STRUCT);
+    struct PokemonJump *jump = (struct PokemonJump *)GetTaskPointerArg(taskId, DATAIDX_GAME_STRUCT);
 
     switch (tState)
     {
@@ -1552,7 +1552,7 @@ static void Task_CommunicateMonInfo(u8 taskId)
 static void SetTaskWithPokeJumpStruct(TaskFunc func, u8 taskPriority)
 {
     u8 taskId = CreateTask(func, taskPriority);
-    SetWordTaskArg(taskId, DATAIDX_GAME_STRUCT, (u32)sPokemonJump);
+    SetTaskPointerArg(taskId, DATAIDX_GAME_STRUCT, (const void *)sPokemonJump);
 }
 
 #undef tState
@@ -2879,7 +2879,7 @@ static void StartPokeJumpGfx(struct PokemonJumpGfx *jumpGfx)
     InitPokeJumpGfx(sPokemonJumpGfx);
     taskId = CreateTask(Task_RunPokeJumpGfxFunc, 3);
     sPokemonJumpGfx->taskId = taskId;
-    SetWordTaskArg(sPokemonJumpGfx->taskId, 2, (u32) sPokemonJumpGfx);
+    SetTaskPointerArg(sPokemonJumpGfx->taskId, 2, (const void *) sPokemonJumpGfx);
     SetUpPokeJumpGfxFunc(LoadPokeJumpGfx);
 }
 
@@ -3009,7 +3009,7 @@ static bool32 IsPokeJumpGfxFuncFinished(void)
 
 static void SetUpPokeJumpGfxFunc(void (*func)(void))
 {
-    SetWordTaskArg(sPokemonJumpGfx->taskId, 0, (u32) func);
+    SetTaskPointerArg(sPokemonJumpGfx->taskId, 0, (const void *) func);
     sPokemonJumpGfx->mainState = 0;
     sPokemonJumpGfx->funcFinished = FALSE;
 }
@@ -3019,7 +3019,7 @@ static void Task_RunPokeJumpGfxFunc(u8 taskId)
     if (!sPokemonJumpGfx->funcFinished)
     {
         // Read the function set in the data by SetUpPokeJumpGfxFunc
-        void (*func)(void) = (void *)(GetWordTaskArg(taskId, 0));
+        void (*func)(void) = (void *)(GetTaskPointerArg(taskId, 0));
 
         func();
     }

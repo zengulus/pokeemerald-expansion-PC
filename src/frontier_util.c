@@ -3378,7 +3378,7 @@ static void PrintBannedSpeciesName(u8 windowId, u32 itemId, u8 y)
         sCaughtBannedSpeciesListTemplate.cursorPal,
         sCaughtBannedSpeciesListTemplate.cursorShadowPal
     };
-    u16 *list = (u16 *) GetWordTaskArg(gSpecialVar_0x8006, tListPointerElemId);
+    u16 *list = (u16 *) GetTaskPointerArg(gSpecialVar_0x8006, tListPointerElemId);
     AddTextPrinterParameterized4(windowId,
                                  sCaughtBannedSpeciesListTemplate.fontId,
                                  sCaughtBannedSpeciesListTemplate.item_X, y,
@@ -3403,7 +3403,7 @@ void ShowBattleFrontierCaughtBannedSpecies(void)
     u32 inputTaskId = CreateTask(Task_BannedSpeciesWindowInput, 3);
     gTasks[inputTaskId].tWindowId = windowId;
     gSpecialVar_0x8006 = inputTaskId;
-    SetWordTaskArg(inputTaskId, tListPointerElemId, (u32)listItems);
+    SetTaskPointerArg(inputTaskId, tListPointerElemId, (const void *)listItems);
     u32 menuTaskId = ListMenuInit(&listTemplate, 0, 0);
     gTasks[inputTaskId].tMenuTaskId = menuTaskId;
     gTasks[inputTaskId].tArrowTaskId = TASK_NONE;
@@ -3427,7 +3427,7 @@ static void Task_BannedSpeciesWindowInput(u8 taskId)
         ScriptContext_Enable();
         if (gTasks[taskId].tArrowTaskId < TASK_NONE)
             RemoveScrollIndicatorArrowPair(gTasks[taskId].tArrowTaskId);
-        Free((struct ListItem *)(GetWordTaskArg(taskId, tListPointerElemId)));
+        Free((struct ListItem *)(GetTaskPointerArg(taskId, tListPointerElemId)));
         DestroyListMenuTask(gTasks[taskId].tMenuTaskId, NULL, NULL);
         ClearStdWindowAndFrame(gTasks[taskId].tWindowId, TRUE);
         RemoveWindow(gTasks[taskId].tWindowId);

@@ -50,5 +50,6 @@ const int kMaxStringLength = 1024;
 const unsigned long kMaxCharmapSequenceLength = 16;
 
 extern Charmap* g_charmap;
+extern bool g_native;
 
 #endif // PREPROC_H

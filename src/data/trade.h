@@ -953,7 +953,7 @@ static const struct SpriteTemplate sSpriteTemplate_GbaScreenFlash_Short =
     .callback = SpriteCB_GbaScreen
 };
 
-static const u16 sLinkMonShadow_Pal[] = INCGFX_U16("graphics/trade/link_mon_shadow.pal", ".gbapal");
+static const u16 sLinkMonShadow_Pal[16] = INCGFX_U16("graphics/trade/link_mon_shadow.pal", ".gbapal");
 
 static const union AffineAnimCmd sAffineAnim_CrossingMonPic[] =
 {

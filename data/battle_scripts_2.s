@@ -16,27 +16,27 @@
 
 	.align 2
 gBattlescriptsForUsingItem::
-	.4byte BattleScript_ItemRestoreHP                @ EFFECT_ITEM_RESTORE_HP
-	.4byte BattleScript_ItemCureStatus               @ EFFECT_ITEM_CURE_STATUS
-	.4byte BattleScript_ItemHealAndCureStatus        @ EFFECT_ITEM_HEAL_AND_CURE_STATUS
-	.4byte BattleScript_ItemIncreaseStat             @ EFFECT_ITEM_INCREASE_STAT
-	.4byte BattleScript_ItemSetMist                  @ EFFECT_ITEM_SET_MIST
-	.4byte BattleScript_ItemSetFocusEnergy           @ EFFECT_ITEM_SET_FOCUS_ENERGY
-	.4byte BattleScript_RunByUsingItem               @ EFFECT_ITEM_ESCAPE
-	.4byte BattleScript_BallThrow                    @ EFFECT_ITEM_THROW_BALL
-	.4byte BattleScript_ItemRestoreHP                @ EFFECT_ITEM_REVIVE
-	.4byte BattleScript_ItemRestorePP                @ EFFECT_ITEM_RESTORE_PP
-	.4byte BattleScript_ItemIncreaseStat             @ EFFECT_ITEM_INCREASE_ALL_STATS
-	.4byte BattleScript_UsePokeFlute                 @ EFFECT_ITEM_USE_POKE_FLUTE
+	data_ptr BattleScript_ItemRestoreHP                @ EFFECT_ITEM_RESTORE_HP
+	data_ptr BattleScript_ItemCureStatus               @ EFFECT_ITEM_CURE_STATUS
+	data_ptr BattleScript_ItemHealAndCureStatus        @ EFFECT_ITEM_HEAL_AND_CURE_STATUS
+	data_ptr BattleScript_ItemIncreaseStat             @ EFFECT_ITEM_INCREASE_STAT
+	data_ptr BattleScript_ItemSetMist                  @ EFFECT_ITEM_SET_MIST
+	data_ptr BattleScript_ItemSetFocusEnergy           @ EFFECT_ITEM_SET_FOCUS_ENERGY
+	data_ptr BattleScript_RunByUsingItem               @ EFFECT_ITEM_ESCAPE
+	data_ptr BattleScript_BallThrow                    @ EFFECT_ITEM_THROW_BALL
+	data_ptr BattleScript_ItemRestoreHP                @ EFFECT_ITEM_REVIVE
+	data_ptr BattleScript_ItemRestorePP                @ EFFECT_ITEM_RESTORE_PP
+	data_ptr BattleScript_ItemIncreaseStat             @ EFFECT_ITEM_INCREASE_ALL_STATS
+	data_ptr BattleScript_UsePokeFlute                 @ EFFECT_ITEM_USE_POKE_FLUTE
 
 	.align 2
 gBattlescriptsForSafariActions::
-	.4byte BattleScript_ActionWatchesCarefully
-	.4byte BattleScript_ActionGetNear
-	.4byte BattleScript_ActionThrowPokeblock
-	.4byte BattleScript_ActionWallyThrow
-	.4byte BattleScript_ActionThrowRock
-	.4byte BattleScript_ActionThrowBait
+	data_ptr BattleScript_ActionWatchesCarefully
+	data_ptr BattleScript_ActionGetNear
+	data_ptr BattleScript_ActionThrowPokeblock
+	data_ptr BattleScript_ActionWallyThrow
+	data_ptr BattleScript_ActionThrowRock
+	data_ptr BattleScript_ActionThrowBait
 
 BattleScript_ItemEnd:
 	end

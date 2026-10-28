@@ -44,8 +44,7 @@ bool8 FldEff_SweetScent(void)
 
     SetWeatherScreenFadeOut();
     taskId = CreateFieldMoveTask();
-    gTasks[taskId].data[8] = (u32)StartSweetScentFieldEffect >> 16;
-    gTasks[taskId].data[9] = (u32)StartSweetScentFieldEffect;
+    SetTaskPointerArg(taskId, 8, StartSweetScentFieldEffect);
     return FALSE;
 }
 
@@ -65,16 +64,13 @@ void StartSweetScentFieldEffect(void)
     BeginNormalPaletteFade(palettes, 4, 0, 8, RGB_RED);
     taskId = CreateTask(TrySweetScentEncounter, 0);
     gTasks[taskId].data[0] = 0;
-    StoreWordInTwoHalfwords((u16 *)&gTasks[taskId].tPalBuffer1, (u32) palBuffer);
+    SetTaskPointerArg(taskId, 1, palBuffer);
     FieldEffectActiveListRemove(FLDEFF_SWEET_SCENT);
 }
 
 static void *GetPalBufferPtr(u32 taskId)
 {
-    u32 palBuffer;
-
-    LoadWordFromTwoHalfwords((u16 *)&gTasks[taskId].tPalBuffer1, &palBuffer);
-    return (void *) palBuffer;
+    return GetTaskPointerArg(taskId, 1);
 }
 
 static void FreeDestroyTask(u32 taskId)

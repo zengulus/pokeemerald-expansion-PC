@@ -419,8 +419,8 @@ static void DrawMultichoiceMenuDynamic(u8 left, u8 top, u8 argc, struct ListMenu
     gTasks[taskId].data[2] = windowId;
     gTasks[taskId].data[5] = argc;
     gTasks[taskId].data[7] = maxBeforeScroll;
-    StoreWordInTwoHalfwords((u16*) &gTasks[taskId].data[3], (u32) items);
-    list = (void *) gTasks[gTasks[taskId].data[0]].data;
+    SetTaskPointerArg(taskId, 3, items);
+    list = ListMenuGetState(gTasks[taskId].data[0]);
     ListMenuChangeSelectionFull(list, TRUE, FALSE, initialRow, TRUE);
 
     if (sDynamicMenuEventId != DYN_MULTICHOICE_CB_NONE && sDynamicListMenuEventCollections[sDynamicMenuEventId].OnSelectionChanged)
@@ -556,7 +556,7 @@ static void Task_HandleScrollingMultichoiceInput(u8 taskId)
             RemoveScrollIndicatorArrowPair(gTasks[taskId].data[6]);
         }
 
-        LoadWordFromTwoHalfwords((u16*) &gTasks[taskId].data[3], (u32* )(&items));
+        items = GetTaskPointerArg(taskId, 3);
         FreeListMenuItems(items, gTasks[taskId].data[5]);
         TRY_FREE_AND_SET_NULL(sDynamicMenuEventScratchPad);
         DestroyListMenuTask(gTasks[taskId].data[0], NULL, NULL);

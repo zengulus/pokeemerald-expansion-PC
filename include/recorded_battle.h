@@ -25,7 +25,8 @@ struct RecordedBattleSave
     u16 textSpeed:3;
     u16 playersGender:4; // 1 bit per player; please don't hate me
     u16 padding:1;
-    u64 AI_scripts[MAX_BATTLERS_COUNT];
+    // The persistent format follows the upstream 4-byte aggregate alignment.
+    u64 AI_scripts[MAX_BATTLERS_COUNT] __attribute__((packed, aligned(4)));
     u8 recordMixFriendName[PLAYER_NAME_LENGTH + 1];
     u8 recordMixFriendClass;
     u8 apprenticeId;

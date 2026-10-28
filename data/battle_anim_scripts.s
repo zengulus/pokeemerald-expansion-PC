@@ -2,6 +2,7 @@
 #include "config/battle.h"
 #include "constants/battle.h"
 #include "constants/battle_anim.h"
+#include "constants/battle_string_ids.h"
 #include "constants/rgb.h"
 #include "constants/songs.h"
 #include "constants/sound.h"

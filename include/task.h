@@ -18,6 +18,11 @@ struct Task
     u8 next;
     u8 priority;
     s16 data[NUM_TASK_DATA];
+#ifdef NATIVE
+    // Keep scalar halfwords intact; host references have their own storage.
+    void *pointerArgs[NUM_TASK_DATA];
+    TaskFunc followupFunc;
+#endif
 };
 
 extern struct Task gTasks[];
@@ -33,5 +38,7 @@ bool8 FuncIsActiveTask(TaskFunc func);
 u8 FindTaskIdByFunc(TaskFunc func);
 void SetWordTaskArg(u8 taskId, u8 dataElem, u32 value);
 u32 GetWordTaskArg(u8 taskId, u8 dataElem);
+void SetTaskPointerArg(u8 taskId, u8 slot, const void *pointer);
+void *GetTaskPointerArg(u8 taskId, u8 slot);
 
 #endif // GUARD_TASK_H

@@ -1,15 +1,17 @@
 	.macro song label:req, music_player:req, unknown:req
-	.4byte \label
+	data_ptr \label
 	.2byte \music_player
 	.2byte \unknown
+	native64_pad 4
 	.endm
 
 	.macro music_player info_struct:req, track_struct:req, num_tracks:req, unknown:req
-	.4byte \info_struct
-	.4byte \track_struct
+	data_ptr \info_struct
+	data_ptr \track_struct
 	.byte \num_tracks
 	.space 1  @ Padding
 	.2byte \unknown
+	native64_pad 4
 	.endm
 
 	.macro voice_group label:req, starting_note
@@ -18,7 +20,7 @@
 		.global voicegroup_\label
 		voicegroup_\label:
 	.else
-		.set voicegroup_\label, . - \starting_note * 0xC
+		.set voicegroup_\label, . - \starting_note * (NATIVE_POINTER_SIZE * 3)
 	.endif
 	.endm
 

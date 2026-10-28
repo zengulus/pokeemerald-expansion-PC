@@ -25,6 +25,13 @@ typedef volatile s64 vs64;
 typedef float  f32;
 typedef double f64;
 
+#ifdef NATIVE
+typedef int_fast8_t sf8;
+typedef uint_fast8_t uf8;
+typedef int_fast16_t sf16;
+typedef uint_fast16_t uf16;
+#endif
+
 typedef u8  bool8;
 typedef u16 bool16;
 typedef u32 bool32;

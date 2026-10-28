@@ -1,4 +1,28 @@
 #include "gba/m4a_internal.h"
+#ifdef NATIVE
+#include "native_audio.h"
+#define ply_fine MP2K_event_fine
+#define ply_goto MP2K_event_goto
+#define ply_patt MP2K_event_patt
+#define ply_pend MP2K_event_pend
+#define ply_rept MP2K_event_rept
+#define ply_prio MP2K_event_prio
+#define ply_tempo MP2K_event_tempo
+#define ply_keysh MP2K_event_keysh
+#define ply_voice MP2K_event_voice
+#define ply_vol MP2K_event_vol
+#define ply_pan MP2K_event_pan
+#define ply_bend MP2K_event_bend
+#define ply_bendr MP2K_event_bendr
+#define ply_lfos MP2K_event_lfos
+#define ply_lfodl MP2K_event_lfodl
+#define ply_mod MP2K_event_mod
+#define ply_modt MP2K_event_modt
+#define ply_tune MP2K_event_tune
+#define ply_port MP2K_event_port
+#define ply_endtie MP2K_event_endtie
+#define RealClearChain MP2KClearChain
+#endif
 
 // Some of these functions have different signatures, so we need to make this
 // an array of void pointers or a struct. It's simpler to just make it an array

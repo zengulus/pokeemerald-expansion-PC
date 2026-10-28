@@ -32,7 +32,7 @@ static void AnimTask_BlendMonInAndOut_Step(u8 taskId);
 static bool8 ShouldRotScaleSpeciesBeFlipped(void);
 static void CreateBattlerTrace(struct Task *task, u8 taskId);
 
-EWRAM_DATA static union AffineAnimCmd *sAnimTaskAffineAnim = NULL;
+EWRAM_DATA static const union AffineAnimCmd *sAnimTaskAffineAnim = NULL;
 
 const struct UCoords8 sBattlerCoords[BATTLE_COORDS_COUNT][MAX_BATTLERS_COUNT] =
 {
@@ -329,14 +329,22 @@ u8 GetAnimBattlerSpriteId(enum AnimBattler animBattler)
 
 void StoreSpriteCallbackInData6(struct Sprite *sprite, void (*callback)(struct Sprite *))
 {
+#if defined(NATIVE) && UINTPTR_MAX > UINT32_MAX
+    sprite->storedCallback = callback;
+#else
     sprite->data[6] = (u32)(callback) & 0xffff;
     sprite->data[7] = (u32)(callback) >> 16;
+#endif
 }
 
 void SetCallbackToStoredInData6(struct Sprite *sprite)
 {
-    u32 callback = (u16)sprite->data[6] | (sprite->data[7] << 16);
+#if defined(NATIVE) && UINTPTR_MAX > UINT32_MAX
+    sprite->callback = sprite->storedCallback;
+#else
+    u32 callback = (u16)sprite->data[6] | ((u32)(u16)sprite->data[7] << 16);
     sprite->callback = (void (*)(struct Sprite *))callback;
+#endif
 }
 
 // Sprite data for TranslateSpriteInCircle/Ellipse and related
@@ -1755,13 +1763,13 @@ void PrepareAffineAnimInTaskData(struct Task *task, u8 spriteId, const union Aff
     task->data[10] = 0x100;
     task->data[11] = 0x100;
     task->data[12] = 0;
-    StorePointerInVars(&task->data[13], &task->data[14], affineAnimCmds);
+    SetTaskPointerArg(task - gTasks, 13, affineAnimCmds);
     PrepareBattlerSpriteForRotScale(spriteId, ST_OAM_OBJ_NORMAL);
 }
 
 bool8 RunAffineAnimFromTaskData(struct Task *task)
 {
-    sAnimTaskAffineAnim = &((union AffineAnimCmd *)LoadPointerFromVars(task->data[13], task->data[14]))[task->data[7]];
+    sAnimTaskAffineAnim = &((const union AffineAnimCmd *)GetTaskPointerArg(task - gTasks, 13))[task->data[7]];
     switch (sAnimTaskAffineAnim->type)
     {
     default:
@@ -1890,15 +1898,15 @@ static u16 GetBattlerYDeltaFromSpriteId(u8 spriteId)
     return MON_PIC_HEIGHT;
 }
 
-void StorePointerInVars(s16 *lo, s16 *hi, const void *ptr)
+void StoreWordInVars(s16 *lo, s16 *hi, u32 value)
 {
-    *lo = ((intptr_t) ptr) & 0xffff;
-    *hi = (((intptr_t) ptr) >> 16) & 0xffff;
+    *lo = value & 0xffff;
+    *hi = value >> 16;
 }
 
-void *LoadPointerFromVars(s16 lo, s16 hi)
+u32 LoadWordFromVars(s16 lo, s16 hi)
 {
-    return (void *)((u16)lo | ((u16)hi << 16));
+    return (u16)lo | ((u32)(u16)hi << 16);
 }
 
 void PrepareEruptAnimTaskData(struct Task *task, u8 spriteId, s16 xScaleStart, s16 yScaleStart, s16 xScaleEnd, s16 yScaleEnd, u16 duration)

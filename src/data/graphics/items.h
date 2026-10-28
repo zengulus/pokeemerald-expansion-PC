@@ -620,16 +620,16 @@ const u32 gItemIcon_PeatBlock[] = INCGFX_U32("graphics/items/icons/peat_block.pn
 const u16 gItemIconPalette_PeatBlock[] = INCGFX_U16("graphics/items/icon_palettes/peat_block.pal", ".gbapal");
 
 const u32 gItemIcon_SyrupyApple[] = INCGFX_U32("graphics/items/icons/syrupy_apple.png", ".4bpp.smol");
-const u16 gItemIconPalette_SyrupyApple[] = INCGFX_U16("graphics/items/icon_palettes/syrupy_apple.pal", ".gbapal");
+const u16 gItemIconPalette_SyrupyApple[16] = INCGFX_U16("graphics/items/icon_palettes/syrupy_apple.pal", ".gbapal");
 
 const u32 gItemIcon_UnremarkableTeacup[] = INCGFX_U32("graphics/items/icons/unremarkable_teacup.png", ".4bpp.smol");
-const u16 gItemIconPalette_UnremarkableTeacup[] = INCGFX_U16("graphics/items/icon_palettes/unremarkable_teacup.pal", ".gbapal");
+const u16 gItemIconPalette_UnremarkableTeacup[16] = INCGFX_U16("graphics/items/icon_palettes/unremarkable_teacup.pal", ".gbapal");
 
 const u32 gItemIcon_MasterpieceTeacup[] = INCGFX_U32("graphics/items/icons/masterpiece_teacup.png", ".4bpp.smol");
-const u16 gItemIconPalette_MasterpieceTeacup[] = INCGFX_U16("graphics/items/icon_palettes/masterpiece_teacup.pal", ".gbapal");
+const u16 gItemIconPalette_MasterpieceTeacup[16] = INCGFX_U16("graphics/items/icon_palettes/masterpiece_teacup.pal", ".gbapal");
 
 const u32 gItemIcon_MetalAlloy[] = INCGFX_U32("graphics/items/icons/metal_alloy.png", ".4bpp.smol");
-const u16 gItemIconPalette_MetalAlloy[] = INCGFX_U16("graphics/items/icon_palettes/metal_alloy.pal", ".gbapal");
+const u16 gItemIconPalette_MetalAlloy[16] = INCGFX_U16("graphics/items/icon_palettes/metal_alloy.pal", ".gbapal");
 
 // Nectars
 
@@ -2024,7 +2024,7 @@ const u16 gItemIconPalette_TinyBambooShoot[] = INCGFX_U16("graphics/items/icon_p
 const u32 gItemIcon_TeraShard[] = INCGFX_U32("graphics/items/icons/tera_shard.png", ".4bpp.smol");
 const u16 gItemIconPalette_NormalTeraShard[] = INCGFX_U16("graphics/items/icon_palettes/normal_tera_shard.pal", ".gbapal");
 const u16 gItemIconPalette_FireTeraShard[] = INCGFX_U16("graphics/items/icon_palettes/fire_tera_shard.pal", ".gbapal");
-const u16 gItemIconPalette_WaterTeraShard[] = INCGFX_U16("graphics/items/icon_palettes/water_tera_shard.pal", ".gbapal");
+const u16 gItemIconPalette_WaterTeraShard[16] = INCGFX_U16("graphics/items/icon_palettes/water_tera_shard.pal", ".gbapal");
 const u16 gItemIconPalette_GrassTeraShard[] = INCGFX_U16("graphics/items/icon_palettes/grass_tera_shard.pal", ".gbapal");
 const u16 gItemIconPalette_ElectricTeraShard[] = INCGFX_U16("graphics/items/icon_palettes/electric_tera_shard.pal", ".gbapal");
 const u16 gItemIconPalette_IceTeraShard[] = INCGFX_U16("graphics/items/icon_palettes/ice_tera_shard.pal", ".gbapal");
@@ -2042,27 +2042,27 @@ const u16 gItemIconPalette_SteelTeraShard[] = INCGFX_U16("graphics/items/icon_pa
 const u16 gItemIconPalette_FairyTeraShard[] = INCGFX_U16("graphics/items/icon_palettes/fairy_tera_shard.pal", ".gbapal");
 
 const u32 gItemIcon_StellarTeraShard[] = INCGFX_U32("graphics/items/icons/stellar_tera_shard.png", ".4bpp.smol");
-const u16 gItemIconPalette_StellarTeraShard[] = INCGFX_U16("graphics/items/icon_palettes/stellar_tera_shard.pal", ".gbapal");
+const u16 gItemIconPalette_StellarTeraShard[16] = INCGFX_U16("graphics/items/icon_palettes/stellar_tera_shard.pal", ".gbapal");
 
 // Mochi
 
 const u32 gItemIcon_Mochi[] = INCGFX_U32("graphics/items/icons/mochi.png", ".4bpp.smol");
-const u16 gItemIconPalette_HealthMochi[] = INCGFX_U16("graphics/items/icon_palettes/health_mochi.pal", ".gbapal");
-const u16 gItemIconPalette_MuscleMochi[] = INCGFX_U16("graphics/items/icon_palettes/muscle_mochi.pal", ".gbapal");
-const u16 gItemIconPalette_ResistMochi[] = INCGFX_U16("graphics/items/icon_palettes/resist_mochi.pal", ".gbapal");
-const u16 gItemIconPalette_GeniusMochi[] = INCGFX_U16("graphics/items/icon_palettes/genius_mochi.pal", ".gbapal");
-const u16 gItemIconPalette_CleverMochi[] = INCGFX_U16("graphics/items/icon_palettes/clever_mochi.pal", ".gbapal");
-const u16 gItemIconPalette_SwiftMochi[] = INCGFX_U16("graphics/items/icon_palettes/swift_mochi.pal", ".gbapal");
-const u16 gItemIconPalette_FreshStartMochi[] = INCGFX_U16("graphics/items/icon_palettes/fresh_start_mochi.pal", ".gbapal");
+const u16 gItemIconPalette_HealthMochi[16] = INCGFX_U16("graphics/items/icon_palettes/health_mochi.pal", ".gbapal");
+const u16 gItemIconPalette_MuscleMochi[16] = INCGFX_U16("graphics/items/icon_palettes/muscle_mochi.pal", ".gbapal");
+const u16 gItemIconPalette_ResistMochi[16] = INCGFX_U16("graphics/items/icon_palettes/resist_mochi.pal", ".gbapal");
+const u16 gItemIconPalette_GeniusMochi[16] = INCGFX_U16("graphics/items/icon_palettes/genius_mochi.pal", ".gbapal");
+const u16 gItemIconPalette_CleverMochi[16] = INCGFX_U16("graphics/items/icon_palettes/clever_mochi.pal", ".gbapal");
+const u16 gItemIconPalette_SwiftMochi[16] = INCGFX_U16("graphics/items/icon_palettes/swift_mochi.pal", ".gbapal");
+const u16 gItemIconPalette_FreshStartMochi[16] = INCGFX_U16("graphics/items/icon_palettes/fresh_start_mochi.pal", ".gbapal");
 
 // Ogerpon masks
 
 const u32 gItemIcon_WellspringMask[] = INCGFX_U32("graphics/items/icons/wellspring_mask.png", ".4bpp.smol");
-const u16 gItemIconPalette_WellspringMask[] = INCGFX_U16("graphics/items/icon_palettes/wellspring_mask.pal", ".gbapal");
+const u16 gItemIconPalette_WellspringMask[16] = INCGFX_U16("graphics/items/icon_palettes/wellspring_mask.pal", ".gbapal");
 const u32 gItemIcon_HearthflameMask[] = INCGFX_U32("graphics/items/icons/hearthflame_mask.png", ".4bpp.smol");
 const u16 gItemIconPalette_HearthflameMask[] = INCGFX_U16("graphics/items/icon_palettes/hearthflame_mask.pal", ".gbapal");
 const u32 gItemIcon_CornerstoneMask[] = INCGFX_U32("graphics/items/icons/cornerstone_mask.png", ".4bpp.smol");
-const u16 gItemIconPalette_CornerstoneMask[] = INCGFX_U16("graphics/items/icon_palettes/cornerstone_mask.pal", ".gbapal");
+const u16 gItemIconPalette_CornerstoneMask[16] = INCGFX_U16("graphics/items/icon_palettes/cornerstone_mask.pal", ".gbapal");
 
 // Misc. Items
 

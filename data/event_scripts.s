@@ -86,47 +86,47 @@
 
 .align 2
 gSpecialVars::
-	.4byte gSpecialVar_0x8000
-	.4byte gSpecialVar_0x8001
-	.4byte gSpecialVar_0x8002
-	.4byte gSpecialVar_0x8003
-	.4byte gSpecialVar_0x8004
-	.4byte gSpecialVar_0x8005
-	.4byte gSpecialVar_0x8006
-	.4byte gSpecialVar_0x8007
-	.4byte gSpecialVar_0x8008
-	.4byte gSpecialVar_0x8009
-	.4byte gSpecialVar_0x800A
-	.4byte gSpecialVar_0x800B
-	.4byte gSpecialVar_Facing
-	.4byte gSpecialVar_Result
-	.4byte gSpecialVar_ItemId
-	.4byte gSpecialVar_LastTalked
-	.4byte gSpecialVar_ContestRank
-	.4byte gSpecialVar_ContestCategory
-	.4byte gSpecialVar_MonBoxId
-	.4byte gSpecialVar_MonBoxPos
-	.4byte gSpecialVar_Unused_0x8014
-	.4byte gTrainerBattleParameter + 2 // gTrainerBattleParameter.params.opponentA
+	data_ptr gSpecialVar_0x8000
+	data_ptr gSpecialVar_0x8001
+	data_ptr gSpecialVar_0x8002
+	data_ptr gSpecialVar_0x8003
+	data_ptr gSpecialVar_0x8004
+	data_ptr gSpecialVar_0x8005
+	data_ptr gSpecialVar_0x8006
+	data_ptr gSpecialVar_0x8007
+	data_ptr gSpecialVar_0x8008
+	data_ptr gSpecialVar_0x8009
+	data_ptr gSpecialVar_0x800A
+	data_ptr gSpecialVar_0x800B
+	data_ptr gSpecialVar_Facing
+	data_ptr gSpecialVar_Result
+	data_ptr gSpecialVar_ItemId
+	data_ptr gSpecialVar_LastTalked
+	data_ptr gSpecialVar_ContestRank
+	data_ptr gSpecialVar_ContestCategory
+	data_ptr gSpecialVar_MonBoxId
+	data_ptr gSpecialVar_MonBoxPos
+	data_ptr gSpecialVar_Unused_0x8014
+	data_ptr gTrainerBattleParameter + 2 // gTrainerBattleParameter.params.opponentA
 
 	.purgem def_special
 	.set ALLOCATE_SPECIAL_TABLE, 1
 	.include "data/specials.inc"
 
 gStdScripts::
-	.4byte Std_ObtainItem              @ STD_OBTAIN_ITEM
-	.4byte Std_FindItem                @ STD_FIND_ITEM
-	.4byte Std_MsgboxNPC               @ MSGBOX_NPC
-	.4byte Std_MsgboxSign              @ MSGBOX_SIGN
-	.4byte Std_MsgboxDefault           @ MSGBOX_DEFAULT
-	.4byte Std_MsgboxYesNo             @ MSGBOX_YESNO
-	.4byte Std_MsgboxAutoclose         @ MSGBOX_AUTOCLOSE
-	.4byte Std_ObtainDecoration        @ STD_OBTAIN_DECORATION
-	.4byte Std_RegisteredInMatchCall   @ STD_REGISTER_MATCH_CALL
-	.4byte Std_MsgboxGetPoints         @ MSGBOX_GETPOINTS
-	.4byte Std_MsgboxPokenav           @ MSGBOX_POKENAV
-	.4byte Std_PutItemAway             @ STD_PUT_ITEM_AWAY
-	.4byte Std_ReceivedItem            @ STD_RECEIVED_ITEM
+	data_ptr Std_ObtainItem              @ STD_OBTAIN_ITEM
+	data_ptr Std_FindItem                @ STD_FIND_ITEM
+	data_ptr Std_MsgboxNPC               @ MSGBOX_NPC
+	data_ptr Std_MsgboxSign              @ MSGBOX_SIGN
+	data_ptr Std_MsgboxDefault           @ MSGBOX_DEFAULT
+	data_ptr Std_MsgboxYesNo             @ MSGBOX_YESNO
+	data_ptr Std_MsgboxAutoclose         @ MSGBOX_AUTOCLOSE
+	data_ptr Std_ObtainDecoration        @ STD_OBTAIN_DECORATION
+	data_ptr Std_RegisteredInMatchCall   @ STD_REGISTER_MATCH_CALL
+	data_ptr Std_MsgboxGetPoints         @ MSGBOX_GETPOINTS
+	data_ptr Std_MsgboxPokenav           @ MSGBOX_POKENAV
+	data_ptr Std_PutItemAway             @ STD_PUT_ITEM_AWAY
+	data_ptr Std_ReceivedItem            @ STD_RECEIVED_ITEM
 gStdScripts_End::
 
 

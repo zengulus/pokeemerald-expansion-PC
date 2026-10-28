@@ -42,7 +42,7 @@
 
 #define CpuSmartCopy16(src, dest, size) \
 { \
-    if ((((size) & 0x1f) == 0) && ((((u32)(src)) & 3) == 0) && ((((u32)(dest)) & 3) == 0)) { \
+    if ((((size) & 0x1f) == 0) && ((((uintptr_t)(src)) & 3) == 0) && ((((uintptr_t)(dest)) & 3) == 0)) { \
         CpuFastCopy((src), (dest), (size)); \
     } else { \
         CpuCopy16((src), (dest), (size)); \
@@ -51,7 +51,7 @@
 
 #define CpuSmartCopy32(src, dest, size) \
 { \
-    if ((((size) & 0x1f) == 0) && ((((u32)(src)) & 3) == 0) && ((((u32)(dest)) & 3) == 0)) { \
+    if ((((size) & 0x1f) == 0) && ((((uintptr_t)(src)) & 3) == 0) && ((((uintptr_t)(dest)) & 3) == 0)) { \
         CpuFastCopy((src), (dest), (size)); \
     } else { \
         CpuCopy32((src), (dest), (size)); \
@@ -72,7 +72,7 @@
 
 #define CpuSmartFill(value, dest, size) \
 { \
-    if ((((size) & 0x1f) == 0) && ((((u32)(dest)) & 3) == 0)) { \
+    if ((((size) & 0x1f) == 0) && ((((uintptr_t)(dest)) & 3) == 0)) { \
         CpuFastFill((value), (dest), (size)); \
     } else { \
         CpuFill32((value), (dest), (size)); \
@@ -81,7 +81,7 @@
 
 #define CpuSmartFill16(value, dest, size) \
 { \
-    if ((((size) & 0x1f) == 0) && ((((u32)(dest)) & 3) == 0)) { \
+    if ((((size) & 0x1f) == 0) && ((((uintptr_t)(dest)) & 3) == 0)) { \
         CpuFastFill16((value), (dest), (size)); \
     } else { \
         CpuFill16((value), (dest), (size)); \
@@ -90,6 +90,10 @@
 
 #define CpuFastCopy(src, dest, size) CpuFastSet(src, dest, ((size)/(32/8) & 0x1FFFFF))
 
+#ifdef NATIVE
+void DmaSet(int dmaNum, const volatile void *src, volatile void *dest, u32 control);
+#define DmaSetUnchecked(dmaNum, src, dest, control) DmaSet(dmaNum, src, dest, control)
+#else
 #define DmaSetUnchecked(dmaNum, src, dest, control) \
 {                                                 \
     vu32 *dmaRegs = (vu32 *)REG_ADDR_DMA##dmaNum; \
@@ -98,8 +102,9 @@
     dmaRegs[2] = (vu32)(control);                 \
     dmaRegs[2];                                   \
 }
+#endif
 
-#if MODERN
+#if MODERN && !defined(NATIVE)
 // NOTE: Assumes 16-bit DMAs.
 #define DmaSet(dmaNum, src, dest, control) \
     do \
@@ -108,7 +113,7 @@
         _Static_assert(_Alignof(dest) >= __builtin_choose_expr(__builtin_constant_p(control), ((control) & (DMA_32BIT << 16)) ? 4 : 2, 2), "destination potentially unaligned"); \
         DmaSetUnchecked(dmaNum, src, dest, control); \
     } while (0)
-#else
+#elif !defined(NATIVE)
 #define DmaSet(dmaNum, src, dest, control) \
     DmaSetUnchecked(dmaNum, src, dest, control)
 #endif

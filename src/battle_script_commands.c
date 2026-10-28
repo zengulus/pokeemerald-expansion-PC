@@ -1,4 +1,7 @@
 #include "global.h"
+#ifdef NATIVE
+#include "mods.h"
+#endif
 #include "battle.h"
 #include "battle_hold_effects.h"
 #include "battle_message.h"
@@ -1901,6 +1904,9 @@ static void Cmd_tryfaintmon(void)
                 }
             }
 
+#ifdef NATIVE
+            if (GetBattlerSide(battler) == B_SIDE_PLAYER) ModsMonFainted(GetBattlerMon(battler));
+#endif
             SetValuesOnFaint(battler);
             BattleScriptPush(cmd->nextInstr);
             gBattlescriptCurrInstr = BattleScript_FaintBattler;
@@ -2295,7 +2301,11 @@ static void Cmd_getexp(void)
 
                     ApplyExperienceMultipliers(&gBattleStruct->battlerExpReward, *expMonId, gBattlerFainted);
 
-                    if (B_EXP_CAP_TYPE == EXP_CAP_HARD && gBattleStruct->battlerExpReward != 0)
+                    if ((B_EXP_CAP_TYPE == EXP_CAP_HARD
+#ifdef NATIVE
+                        || ModsHardCap()
+#endif
+                        ) && gBattleStruct->battlerExpReward != 0)
                     {
                         enum GrowthRate growthRate = gSpeciesInfo[GetMonData(&gParties[B_TRAINER_PLAYER][*expMonId], MON_DATA_SPECIES)].growthRate;
                         u32 currentExp = GetMonData(&gParties[B_TRAINER_PLAYER][*expMonId], MON_DATA_EXP);
@@ -4621,9 +4631,9 @@ static void DrawLevelUpBannerText(void)
     *(txtPtr)++ = CHAR_EXTRA_SYMBOL;
     *(txtPtr)++ = CHAR_LV_2;
 
-    var = (u32)(txtPtr);
+    var = (uintptr_t)(txtPtr);
     txtPtr = ConvertIntToDecimalStringN(txtPtr, monLevel, STR_CONV_MODE_LEFT_ALIGN, 3);
-    var = (u32)(txtPtr) - var;
+    var = (uintptr_t)(txtPtr) - var;
     txtPtr = StringFill(txtPtr, CHAR_SPACER, 4 - var);
 
     if (monGender != MON_GENDERLESS)
@@ -8236,6 +8246,15 @@ static void Cmd_handleballthrow(void)
 
     gBattlerTarget = GetCatchingBattler();
 
+#ifdef NATIVE
+    if (!(gBattleTypeFlags & (BATTLE_TYPE_TRAINER | BATTLE_TYPE_CATCH_TUTORIAL)) && !ModsCanCapture())
+    {
+        BtlController_EmitBallThrowAnim(gBattlerAttacker, B_COMM_TO_CONTROLLER, BALL_TRAINER_BLOCK);
+        MarkBattlerForControllerExec(gBattlerAttacker);
+        gBattlescriptCurrInstr = BattleScript_TrainerBallBlock;
+        return;
+    }
+#endif
     if (gBattleTypeFlags & BATTLE_TYPE_GHOST)
     {
         BtlController_EmitBallThrowAnim(gBattlerAttacker, B_COMM_TO_CONTROLLER, BALL_GHOST_DODGE);
@@ -8271,6 +8290,9 @@ static void Cmd_givecaughtmon(void)
     switch (state)
     {
     case GIVECAUGHTMON_CHECK_PARTY_SIZE:
+#ifdef NATIVE
+        ModsCaughtMon();
+#endif
         if (CalculatePlayerPartyCount() == PARTY_SIZE && B_CATCH_SWAP_INTO_PARTY >= GEN_7)
         {
             PrepareStringBattleWithWait(STRINGID_SENDCAUGHTMONPARTYORBOX, gBattlerAttacker);
@@ -9244,6 +9266,9 @@ u8 GetFirstFaintedPartyIndex(enum BattlerId battler)
         enum Species species = GetMonData(&party[i], MON_DATA_SPECIES_OR_EGG);
         if (species != SPECIES_NONE
             && species != SPECIES_EGG
+#ifdef NATIVE
+            && !ModsMonIsDead(&party[i])
+#endif
             && GetMonData(&party[i], MON_DATA_HP) == 0)
         {
             return i;
@@ -9932,6 +9957,11 @@ void BS_TryRevivalBlessing(void)
     if (gSelectedMonPartyId != PARTY_SIZE)
     {
         struct Pokemon *party = GetBattlerParty(gBattlerAttacker);
+
+#ifdef NATIVE
+        if (ModsMonIsDead(&party[gSelectedMonPartyId]))
+        { gSelectedMonPartyId = PARTY_SIZE; gBattlescriptCurrInstr = cmd->failInstr; return; }
+#endif
 
         u16 hp = GetMonData(&party[gSelectedMonPartyId], MON_DATA_MAX_HP) / 2;
         BtlController_EmitSetMonData(gBattlerAttacker, B_COMM_TO_CONTROLLER, REQUEST_HP_BATTLE, 1u << gSelectedMonPartyId, sizeof(hp), &hp);

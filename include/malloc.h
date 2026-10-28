@@ -14,6 +14,15 @@ do {                                    \
 
 struct MemBlock
 {
+#ifdef NATIVE
+    bool8 allocated;
+    u16 magic;
+    size_t size;
+    const char *location;
+    struct MemBlock *prev;
+    struct MemBlock *next;
+    u8 data[0] ALIGNED(__alignof__(max_align_t));
+#else
     // Whether this block is currently allocated.
     u16 allocated:1;
 
@@ -39,6 +48,7 @@ struct MemBlock
 
     // Data in the memory block. (Arrays of length 0 are a GNU extension.)
     u8 data[0];
+#endif
 };
 
 #define HEAP_SIZE 0x1C500
@@ -67,6 +77,9 @@ void *AllocZeroed_(u32 size, const char *location);
 void *AllocZeroedUnchecked_(u32 size, const char *location);
 void Free(void *pointer);
 void InitHeap(void *heapStart, u32 heapSize);
+#ifdef NATIVE
+void NativeCollectRetiredAllocations(void);
+#endif
 void PrintHeap(void);
 
 const struct MemBlock *HeapHead(void);

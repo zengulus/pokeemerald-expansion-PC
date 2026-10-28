@@ -1,4 +1,7 @@
 #include "global.h"
+#ifdef NATIVE
+#include "mods.h"
+#endif
 #include "item_use.h"
 #include "battle.h"
 #include "battle_anim.h"
@@ -1121,6 +1124,9 @@ void ItemUseOutOfBattle_EvolutionStone(u8 taskId)
 
 static u32 GetBallThrowableState(void)
 {
+#ifdef NATIVE
+    if (!ModsCanCapture()) return BALL_THROW_UNABLE_DISABLED_FLAG;
+#endif
     if (IsBattlerAlive(GetBattlerAtPosition(B_POSITION_OPPONENT_LEFT))
      && IsBattlerAlive(GetBattlerAtPosition(B_POSITION_OPPONENT_RIGHT)))
         return BALL_THROW_UNABLE_TWO_MONS;
@@ -1254,6 +1260,9 @@ bool32 CannotUseItemsInBattle(enum Item itemId, struct Pokemon *mon)
             break;
         case BALL_THROW_UNABLE_DISABLED_FLAG:
             failStr = sText_CantThrowPokeBall_Disabled;
+#ifdef NATIVE
+            if (!ModsCanCapture()) failStr = COMPOUND_STRING("NUZLOCKE: This area's\nencounter has been used.\p");
+#endif
             cannotUse = TRUE;
             break;
         }
@@ -1293,6 +1302,9 @@ bool32 CannotUseItemsInBattle(enum Item itemId, struct Pokemon *mon)
             cannotUse = TRUE;
         break;
     case EFFECT_ITEM_REVIVE:
+#ifdef NATIVE
+        if (ModsMonIsDead(mon)) cannotUse = TRUE;
+#endif
         if (hp != 0)
             cannotUse = TRUE;
         break;

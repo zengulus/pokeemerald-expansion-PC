@@ -100,7 +100,9 @@ void AgbMain(void)
     InitIntrHandlers();
     m4aSoundInit();
     EnableVCountIntrAtLine150();
+#ifndef NATIVE
     InitRFU();
+#endif
     RtcInit();
     CheckForFlashMemory();
     InitMainCallbacks();
@@ -128,12 +130,18 @@ void AgbMain(void)
 #endif
 #endif
     gAgbMainLoop_sp = __builtin_frame_address(0);
+#ifndef NATIVE
     AgbMainLoop();
+#endif
 }
 
 void AgbMainLoop(void)
 {
+#ifdef NATIVE
+    // The host owns pacing and presentation; each invocation is one game tick.
+#else
     for (;;)
+#endif
     {
         ReadKeys();
 
@@ -169,7 +177,9 @@ void AgbMainLoop(void)
 
         PlayTimeCounter_Update();
         MapMusicMain();
+#ifndef NATIVE
         WaitForVBlank();
+#endif
     }
 }
 

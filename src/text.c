@@ -781,10 +781,10 @@ static u32 OffsetCurrGlyph(u32 shiftWidth)
 
 inline static void GLYPH_COPY(u8 *windowTiles, u32 widthOffset, u32 x0, u32 y0, u32 *glyphPixels, s32 width, s32 height)
 {
-    if (width <= 0)
+    if (width <= 0 || height <= 0)
         return;
 
-    u32 widthMask = (1 << (width * 4)) - 1;
+    u32 widthMask = width == 8 ? UINT32_MAX : (1u << (width * 4)) - 1;
 
     u32 shift0 = (x0 % 8) * 4, shift8 = 32 - shift0;
 
@@ -801,13 +801,16 @@ inline static void GLYPH_COPY(u8 *windowTiles, u32 widthOffset, u32 x0, u32 y0, 
         mask = mask & 0x11111111;
         mask = mask * 0xF;
 
-        u32 pixels0 = pixels << shift0, pixels8 = pixels >> shift8;
-        u32 mask0 = mask << shift0, mask8 = mask >> shift8;
+        // A shift by 32 is undefined in C. ARM and x86 implement different
+        // results for it; aligned glyphs must never spill into the next tile.
+        u32 pixels0 = pixels << shift0, pixels8 = shift0 ? pixels >> shift8 : 0;
+        u32 mask0 = mask << shift0, mask8 = shift0 ? mask >> shift8 : 0;
 
         u32 *alignedWindowTiles = (u32 *)((u8 *)alignedWindowTilesX + ((y / 8) * widthOffset) + ((y % 8) * 4));
 
         alignedWindowTiles[0] = (alignedWindowTiles[0] & ~mask0) | pixels0;
-        alignedWindowTiles[8] = (alignedWindowTiles[8] & ~mask8) | pixels8;
+        if (mask8)
+            alignedWindowTiles[8] = (alignedWindowTiles[8] & ~mask8) | pixels8;
     }
 }
 

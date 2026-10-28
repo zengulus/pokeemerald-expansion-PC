@@ -1,11 +1,11 @@
 .macro def_special, ptr:req, requests_effects=0, waitstate=0
+.set SPECIAL_\ptr, __special__
 .if ALLOCATE_SPECIAL_TABLE
 	.global SPECIAL_\ptr
-	.set SPECIAL_\ptr, __special__
 	.if \requests_effects == 0
-		.4byte \ptr
+		data_ptr \ptr
 	.else
-		.4byte \ptr + ROM_SIZE
+		data_ptr \ptr + ROM_SIZE
 	.endif
 .endif
 .set SPECIAL_WAITSTATE_\ptr, \waitstate

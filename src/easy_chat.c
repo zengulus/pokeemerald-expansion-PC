@@ -1257,8 +1257,8 @@ void DoEasyChatScreen(u8 type, u16 *words, MainCallback exitCallback, u8 display
     taskId = CreateTask(Task_InitEasyChatScreen, 0);
     gTasks[taskId].tType = type;
     gTasks[taskId].tPersonType = displayedPersonType;
-    SetWordTaskArg(taskId, TASKIDX_WORDS, (u32)words);
-    SetWordTaskArg(taskId, TASKIDX_EXIT_CALLBACK, (u32)exitCallback);
+    SetTaskPointerArg(taskId, TASKIDX_WORDS, (const void *)words);
+    SetTaskPointerArg(taskId, TASKIDX_EXIT_CALLBACK, (const void *)exitCallback);
     SetMainCallback2(CB2_EasyChatScreen);
 }
 
@@ -1344,7 +1344,7 @@ static void Task_EasyChatScreen(u8 taskId)
         break;
     case MAINSTATE_EXIT:
         if (!gPaletteFade.active)
-            ExitEasyChatScreen((MainCallback)GetWordTaskArg(taskId, TASKIDX_EXIT_CALLBACK));
+            ExitEasyChatScreen((MainCallback)GetTaskPointerArg(taskId, TASKIDX_EXIT_CALLBACK));
         break;
     case MAINSTATE_WAIT_FADE_IN:
         if (!gPaletteFade.active)
@@ -1372,21 +1372,21 @@ static bool8 InitEasyChatScreen(u8 taskId)
         if (!InitEasyChatScreenWordData())
         {
             // Alloc failed, exit
-            ExitEasyChatScreen((MainCallback)GetWordTaskArg(taskId, TASKIDX_EXIT_CALLBACK));
+            ExitEasyChatScreen((MainCallback)GetTaskPointerArg(taskId, TASKIDX_EXIT_CALLBACK));
         }
         break;
     case 2:
-        if (!InitEasyChatScreenStruct(tType, (u16 *)GetWordTaskArg(taskId, TASKIDX_WORDS), tPersonType))
+        if (!InitEasyChatScreenStruct(tType, (u16 *)GetTaskPointerArg(taskId, TASKIDX_WORDS), tPersonType))
         {
             // Alloc failed, exit
-            ExitEasyChatScreen((MainCallback)GetWordTaskArg(taskId, TASKIDX_EXIT_CALLBACK));
+            ExitEasyChatScreen((MainCallback)GetTaskPointerArg(taskId, TASKIDX_EXIT_CALLBACK));
         }
         break;
     case 3:
         if (!InitEasyChatScreenControl())
         {
             // Alloc failed, exit
-            ExitEasyChatScreen((MainCallback)GetWordTaskArg(taskId, TASKIDX_EXIT_CALLBACK));
+            ExitEasyChatScreen((MainCallback)GetTaskPointerArg(taskId, TASKIDX_EXIT_CALLBACK));
         }
         break;
     case 4:

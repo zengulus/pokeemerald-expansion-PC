@@ -264,13 +264,11 @@ bool8 FldEff_UsePuzzleEffect(void)
 
     if (sIsRegisteelPuzzle == TRUE)
     {
-        gTasks[taskId].data[8] = (u32)UseRegisteelHm_Callback >> 16;
-        gTasks[taskId].data[9] = (u32)UseRegisteelHm_Callback;
+        SetTaskPointerArg(taskId, 8, UseRegisteelHm_Callback);
     }
     else
     {
-        gTasks[taskId].data[8] = (u32)UseRegirockHm_Callback >> 16;
-        gTasks[taskId].data[9] = (u32)UseRegirockHm_Callback;
+        SetTaskPointerArg(taskId, 8, UseRegirockHm_Callback);
     }
     return FALSE;
 }

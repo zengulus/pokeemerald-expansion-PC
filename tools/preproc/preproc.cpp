@@ -34,6 +34,7 @@
 static void UsageAndExit(const char *program);
 
 Charmap* g_charmap;
+bool g_native = false;
 
 void PrintAsmBytes(unsigned char *s, int length)
 {
@@ -199,10 +200,13 @@ int main(int argc, char **argv)
     bool doSize = false;
 
     /* preproc [-i] [-e] [-s] SRC_FILE CHARMAP_FILE */
-    while ((opt = getopt(argc, argv, "ieg:s")) != -1)
+    while ((opt = getopt(argc, argv, "nieg:s")) != -1)
     {
         switch (opt)
         {
+        case 'n':
+            g_native = true;
+            break;
         case 'i':
             isStdin = true;
             break;

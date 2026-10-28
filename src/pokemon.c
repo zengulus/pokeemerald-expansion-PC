@@ -1,4 +1,7 @@
 #include "global.h"
+#ifdef NATIVE
+#include "mods.h"
+#endif
 #include "malloc.h"
 #include "apprentice.h"
 #include "battle.h"
@@ -1379,6 +1382,9 @@ void CalculateMonStats(struct Pokemon *mon)
 
 void CalculateMonStatsCont(struct Pokemon *mon, bool32 updateSpeedStat)
 {
+#ifdef NATIVE
+    ModsNormalizePartyMon(mon);
+#endif
     s32 oldMaxHP = GetMonData(mon, MON_DATA_MAX_HP);
     s32 currentHP = GetMonData(mon, MON_DATA_HP);
     enum Species species = GetMonData(mon, MON_DATA_SPECIES);
@@ -2528,6 +2534,15 @@ u32 GetBoxMonData2(struct BoxPokemon *boxMon, s32 field)
 void SetMonData(struct Pokemon *mon, s32 field, const void *dataArg)
 {
     const u8 *data = dataArg;
+#ifdef NATIVE
+    u32 modValue;
+    if (field == MON_DATA_EXP)
+    {
+        memcpy(&modValue, dataArg, sizeof(modValue));
+        modValue = ModsClampExperience(mon, modValue);
+        data = (const u8 *)&modValue;
+    }
+#endif
 
     switch (field)
     {
@@ -2541,7 +2556,13 @@ void SetMonData(struct Pokemon *mon, s32 field, const void *dataArg)
     case MON_DATA_HP:
     {
         u32 hpLost;
+#ifdef NATIVE
+        u32 oldHP = mon->hp;
+#endif
         SET16(mon->hp);
+#ifdef NATIVE
+        mon->hp = ModsFilterHP(mon, oldHP, mon->hp);
+#endif
         hpLost = mon->maxHP - mon->hp;
         SetBoxMonData(&mon->box, MON_DATA_HP_LOST, &hpLost);
         break;
@@ -2550,7 +2571,14 @@ void SetMonData(struct Pokemon *mon, s32 field, const void *dataArg)
     {
         u32 hpLost;
         SET16(hpLost);
+#ifdef NATIVE
+        u32 oldHP = mon->hp;
+#endif
         mon->hp = mon->maxHP - hpLost;
+#ifdef NATIVE
+        mon->hp = ModsFilterHP(mon, oldHP, mon->hp);
+        hpLost = mon->maxHP - mon->hp;
+#endif
         SetBoxMonData(&mon->box, MON_DATA_HP_LOST, &hpLost);
         break;
     }
@@ -2936,6 +2964,18 @@ void SetBoxMonData(struct BoxPokemon *boxMon, s32 field, const void *dataArg)
 void CopyMon(void *dest, void *src, size_t size)
 {
     memcpy(dest, src, size);
+#ifdef NATIVE
+    if (size == sizeof(struct Pokemon))
+    {
+        /* Gift/capture/storage copies can enter the party without a following
+         * stat calculation. Enforce the cap before scripts can inspect it. */
+        struct Pokemon *mon = dest;
+        u32 before = GetMonData(mon, MON_DATA_EXP);
+        u32 after = ModsClampExperience(mon, before);
+        ModsNormalizePartyMon(mon);
+        if (after != before) CalculateMonStats(mon);
+    }
+#endif
 }
 
 u8 GiveCapturedMonToPlayer(struct Pokemon *mon)
@@ -3222,32 +3262,56 @@ enum Ability GetSpeciesAbility(enum Species species, u8 slot)
 
 u32 GetSpeciesBaseHP(enum Species species)
 {
+#ifdef NATIVE
+    return ModsBaseStat(SanitizeSpeciesId(species), STAT_HP, gSpeciesInfo[SanitizeSpeciesId(species)].baseHP);
+#else
     return gSpeciesInfo[SanitizeSpeciesId(species)].baseHP;
+#endif
 }
 
 u32 GetSpeciesBaseAttack(enum Species species)
 {
+#ifdef NATIVE
+    return ModsBaseStat(SanitizeSpeciesId(species), STAT_ATK, gSpeciesInfo[SanitizeSpeciesId(species)].baseAttack);
+#else
     return gSpeciesInfo[SanitizeSpeciesId(species)].baseAttack;
+#endif
 }
 
 u32 GetSpeciesBaseDefense(enum Species species)
 {
+#ifdef NATIVE
+    return ModsBaseStat(SanitizeSpeciesId(species), STAT_DEF, gSpeciesInfo[SanitizeSpeciesId(species)].baseDefense);
+#else
     return gSpeciesInfo[SanitizeSpeciesId(species)].baseDefense;
+#endif
 }
 
 u32 GetSpeciesBaseSpAttack(enum Species species)
 {
+#ifdef NATIVE
+    return ModsBaseStat(SanitizeSpeciesId(species), STAT_SPATK, gSpeciesInfo[SanitizeSpeciesId(species)].baseSpAttack);
+#else
     return gSpeciesInfo[SanitizeSpeciesId(species)].baseSpAttack;
+#endif
 }
 
 u32 GetSpeciesBaseSpDefense(enum Species species)
 {
+#ifdef NATIVE
+    return ModsBaseStat(SanitizeSpeciesId(species), STAT_SPDEF, gSpeciesInfo[SanitizeSpeciesId(species)].baseSpDefense);
+#else
     return gSpeciesInfo[SanitizeSpeciesId(species)].baseSpDefense;
+#endif
 }
 
 u32 GetSpeciesBaseSpeed(enum Species species)
 {
+#ifdef NATIVE
+    return ModsBaseStat(SanitizeSpeciesId(species), STAT_SPEED, gSpeciesInfo[SanitizeSpeciesId(species)].baseSpeed);
+#else
     return gSpeciesInfo[SanitizeSpeciesId(species)].baseSpeed;
+#endif
 }
 
 u32 GetSpeciesBaseStat(enum Species species, u32 statIndex)
@@ -3505,7 +3569,11 @@ bool8 PokemonUseItemEffects(struct Pokemon *mon, enum Item item, u8 partyIndex, 
         case 3:
             // Rare Candy / EXP Candy
             if ((itemEffect[i] & ITEM3_LEVEL_UP)
-             && GetMonData(mon, MON_DATA_LEVEL) != MAX_LEVEL)
+             && GetMonData(mon, MON_DATA_LEVEL) != MAX_LEVEL
+#ifdef NATIVE
+             && (!ModsHardCap() || GetMonData(mon, MON_DATA_LEVEL) < ModsLevelCap())
+#endif
+             )
             {
                 u8 param = GetItemHoldEffectParam(item);
                 dataUnsigned = 0;
@@ -3655,6 +3723,9 @@ bool8 PokemonUseItemEffects(struct Pokemon *mon, enum Item item, u8 partyIndex, 
                     {
                         u32 currentHP = GetMonData(mon, MON_DATA_HP);
                         u32 maxHP = GetMonData(mon, MON_DATA_MAX_HP);
+#ifdef NATIVE
+                        if (ModsMonIsDead(mon)) { itemEffectParam++; break; }
+#endif
                         if (isLevelUpItem && !didLevelUp && (effectFlags & (ITEM4_REVIVE >> 2)))
                         {
                             itemEffectParam++;
@@ -5474,16 +5545,8 @@ const u8 *GetTrainerPartnerName(void)
     }
 }
 
-#define READ_PTR_FROM_TASK(taskId, dataId)                      \
-    (void *)(                                                   \
-    ((u16)(gTasks[taskId].data[dataId]) |                       \
-    ((u16)(gTasks[taskId].data[dataId + 1]) << 16)))
-
-#define STORE_PTR_IN_TASK(ptr, taskId, dataId)                 \
-{                                                              \
-    gTasks[taskId].data[dataId] = (u32)(ptr);                  \
-    gTasks[taskId].data[dataId + 1] = (u32)(ptr) >> 16;        \
-}
+#define READ_PTR_FROM_TASK(taskId, dataId) GetTaskPointerArg(taskId, dataId)
+#define STORE_PTR_IN_TASK(ptr, taskId, dataId) SetTaskPointerArg(taskId, dataId, ptr)
 
 #define sAnimId    data[2]
 #define sAnimDelay data[3]

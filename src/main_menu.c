@@ -1,4 +1,7 @@
 #include "global.h"
+#ifdef NATIVE
+#include "mods.h"
+#endif
 #include "trainer_pokemon_sprites.h"
 #include "bg.h"
 #include "constants/rgb.h"
@@ -564,6 +567,17 @@ static void VBlankCB_MainMenu(void)
     TransferPlttBuffer();
 }
 
+#ifdef NATIVE
+static void ResumeNewGameAfterRules(void)
+{
+    InitMainMenu(TRUE);
+    ResetTasks();
+    FreeAllWindowBuffers();
+    gPlttBufferUnfaded[0] = gPlttBufferFaded[0] = RGB_BLACK;
+    CreateTask(Task_NewGameBirchSpeech_Init, 0);
+}
+#endif
+
 void CB2_InitMainMenu(void)
 {
     InitMainMenu(FALSE);
@@ -1077,6 +1091,13 @@ static void Task_HandleMainMenuAPressed(u8 taskId)
         {
         case ACTION_NEW_GAME:
         default:
+#ifdef NATIVE
+            DestroyTask(taskId);
+            FreeAllWindowBuffers();
+            sCurrItemAndOptionMenuCheck = 0;
+            ModsOpenNewGameMenu(ResumeNewGameAfterRules, CB2_ReinitMainMenu);
+            return;
+#endif
             if (IS_FRLG)
             {
                 DestroyTask(taskId);
@@ -2142,7 +2163,8 @@ void NewGameBirchSpeech_SetDefaultPlayerName(u8 nameId)
         name = sMalePresetNames[nameId];
     else
         name = sFemalePresetNames[nameId];
-    for (i = 0; i < PLAYER_NAME_LENGTH; i++)
+    memset(gSaveBlock2Ptr->playerName, EOS, sizeof(gSaveBlock2Ptr->playerName));
+    for (i = 0; i < PLAYER_NAME_LENGTH && name[i] != EOS; i++)
         gSaveBlock2Ptr->playerName[i] = name[i];
     gSaveBlock2Ptr->playerName[PLAYER_NAME_LENGTH] = EOS;
 }
@@ -2284,7 +2306,8 @@ static void NewGameBirchSpeech_WaitForThisIsPokemonText(struct TextPrinterTempla
 {
     // Wait for Birch's "This is a Pokémon" text to reach the pause
     // Then start the PokéBall release (if it hasn't been started already)
-    if (*(printer->currentChar - 2) == EXT_CTRL_CODE_PAUSE && !sStartedPokeBallTask)
+    if (!sStartedPokeBallTask && printer->currentChar >= gStringVar4 + 2
+        && printer->currentChar[-2] == EXT_CTRL_CODE_PAUSE)
     {
         sStartedPokeBallTask = TRUE;
         CreateTask(Task_NewGameBirchSpeechSub_InitPokeBall, 0);

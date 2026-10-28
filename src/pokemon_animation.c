@@ -478,22 +478,11 @@ enum BackAnim GetSpeciesBackAnimSet(enum Species species)
 }
 
 #define tState  data[0]
-#define tPtrHi  data[1]
-#define tPtrLo  data[2]
 #define tAnimId data[3]
 #define tBattlerId data[4]
 #define tSpeciesId data[5]
 
-// BUG: In vanilla, tPtrLo is read as an s16, so if bit 15 of the
-// address were to be set it would cause the pointer to be read
-// as 0xFFFFXXXX instead of the desired 0x02YYXXXX.
-// By dumb luck, this is not an issue in vanilla. However,
-// changing the link order revealed this bug.
-#if MODERN || defined(BUGFIX)
-#define ANIM_SPRITE(taskId)   ((struct Sprite *)((gTasks[taskId].tPtrHi << 16) | ((u16)gTasks[taskId].tPtrLo)))
-#else
-#define ANIM_SPRITE(taskId)   ((struct Sprite *)((gTasks[taskId].tPtrHi << 16) | (gTasks[taskId].tPtrLo)))
-#endif //MODERN || BUGFIX
+#define ANIM_SPRITE(taskId) ((struct Sprite *)GetTaskPointerArg(taskId, 1))
 
 static void Task_HandleMonAnimation(u8 taskId)
 {
@@ -527,7 +516,7 @@ static void Task_HandleMonAnimation(u8 taskId)
         // Task_HandleMonAnimation handles more than just KO animations,
         // but if the counter is non-zero then only KO animations are running.
         // This assumption is not checked.
-        if (gBattleStruct->battlerKOAnimsRunning > 0)
+        if (gBattleStruct != NULL && gBattleStruct->battlerKOAnimsRunning > 0)
             gBattleStruct->battlerKOAnimsRunning--;
         DestroyTask(taskId);
     }
@@ -536,8 +525,7 @@ static void Task_HandleMonAnimation(u8 taskId)
 void LaunchAnimationTaskForFrontSprite(struct Sprite *sprite, enum AnimFunctionIDs frontAnimId)
 {
     u8 taskId = CreateTask(Task_HandleMonAnimation, 128);
-    gTasks[taskId].tPtrHi = (u32)(sprite) >> 16;
-    gTasks[taskId].tPtrLo = (u32)(sprite);
+    SetTaskPointerArg(taskId, 1, sprite);
     gTasks[taskId].tAnimId = frontAnimId;
 }
 
@@ -554,8 +542,7 @@ void LaunchAnimationTaskForBackSprite(struct Sprite *sprite, enum BackAnim backA
     enum AnimFunctionIDs animId;
 
     taskId = CreateTask(Task_HandleMonAnimation, 128);
-    gTasks[taskId].tPtrHi = (u32)(sprite) >> 16;
-    gTasks[taskId].tPtrLo = (u32)(sprite);
+    SetTaskPointerArg(taskId, 1, sprite);
 
     battler = sprite->data[0];
     nature = GetNature(GetBattlerMon(battler));
@@ -566,8 +553,6 @@ void LaunchAnimationTaskForBackSprite(struct Sprite *sprite, enum BackAnim backA
 }
 
 #undef tState
-#undef tPtrHi
-#undef tPtrLo
 #undef tAnimId
 #undef tBattlerId
 #undef tSpeciesId

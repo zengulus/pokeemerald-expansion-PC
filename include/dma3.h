@@ -51,5 +51,8 @@ void ProcessDma3Requests(void);
 s16 RequestDma3Copy(const void *src, void *dest, u16 size, u32 mode);
 s16 RequestDma3Fill(s32 value, void *dest, u16 size, u32 mode);
 s16 CheckForSpaceForDma3Request(s16 index);
+#ifdef NATIVE
+bool32 NativeDma3ReferencesBuffer(const void *buffer, size_t size);
+#endif
 
 #endif // GUARD_DMA3_H

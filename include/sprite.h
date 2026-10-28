@@ -240,7 +240,31 @@ struct Sprite
              u8 subspriteMode:2;
 
     /*0x43*/ u8 subpriority;
+#if defined(NATIVE) && UINTPTR_MAX > UINT32_MAX
+    SpriteCallback storedCallback;
+    void *pointerArgs[8];
+#endif
 };
+
+// Runtime references must survive on hosts with addresses wider than data[].
+static inline void SetSpritePointerArg(struct Sprite *sprite, u32 slot, const void *pointer)
+{
+#if defined(NATIVE) && UINTPTR_MAX > UINT32_MAX
+    sprite->pointerArgs[slot] = (void *)pointer;
+#else
+    sprite->data[slot] = (uintptr_t)pointer;
+    sprite->data[slot + 1] = (uintptr_t)pointer >> 16;
+#endif
+}
+
+static inline void *GetSpritePointerArg(const struct Sprite *sprite, u32 slot)
+{
+#if defined(NATIVE) && UINTPTR_MAX > UINT32_MAX
+    return sprite->pointerArgs[slot];
+#else
+    return (void *)((uintptr_t)(u16)sprite->data[slot] | ((uintptr_t)(u16)sprite->data[slot + 1] << 16));
+#endif
+}
 
 struct OamMatrix
 {

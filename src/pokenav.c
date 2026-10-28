@@ -216,7 +216,7 @@ u32 CreateLoopedTask(LoopedTask loopedTask, u32 priority)
     else
         taskId = CreateTask(Task_RunLoopedTask_LinkMode, priority);
 
-    SetWordTaskArg(taskId, 1, (u32)loopedTask);
+    SetTaskPointerArg(taskId, 1, (const void *)loopedTask);
 
     gTasks[taskId].data[3] = gNextLoopedTaskId;
     return LOOPED_TASK_ID(taskId, gNextLoopedTaskId++);
@@ -242,7 +242,7 @@ bool32 FuncIsActiveLoopedTask(LoopedTask func)
     {
         if (gTasks[i].isActive
             && (gTasks[i].func == Task_RunLoopedTask || gTasks[i].func == Task_RunLoopedTask_LinkMode)
-            && (LoopedTask)GetWordTaskArg(i, 1) == func)
+            && (LoopedTask)GetTaskPointerArg(i, 1) == func)
             return TRUE;
     }
     return FALSE;
@@ -250,7 +250,7 @@ bool32 FuncIsActiveLoopedTask(LoopedTask func)
 
 static void Task_RunLoopedTask(u8 taskId)
 {
-    LoopedTask loopedTask = (LoopedTask)GetWordTaskArg(taskId, 1);
+    LoopedTask loopedTask = (LoopedTask)GetTaskPointerArg(taskId, 1);
     s16 *state = &gTasks[taskId].data[0];
     bool32 exitLoop = FALSE;
 
@@ -290,7 +290,7 @@ static void Task_RunLoopedTask_LinkMode(u8 taskId)
     if (Overworld_IsRecvQueueAtMax())
         return;
 
-    task = (LoopedTask)GetWordTaskArg(taskId, 1);
+    task = (LoopedTask)GetTaskPointerArg(taskId, 1);
     state = &gTasks[taskId].data[0];
     action = task(*state);
     switch (action)

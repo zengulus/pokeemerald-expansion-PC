@@ -32,7 +32,11 @@
 
 // to help in decompiling
 #define asm_unified(x) asm(".syntax unified\n" x "\n.syntax divided")
+#ifdef NATIVE
+#define NAKED
+#else
 #define NAKED __attribute__((naked))
+#endif
 
 #if MODERN
 #define asm __asm__
@@ -113,13 +117,27 @@
 #define T1_READ_8(ptr)  ((ptr)[0])
 #define T1_READ_16(ptr) ((ptr)[0] | ((ptr)[1] << 8))
 #define T1_READ_32(ptr) ((ptr)[0] | ((ptr)[1] << 8) | ((ptr)[2] << 16) | ((ptr)[3] << 24))
+#ifdef NATIVE
+static inline uintptr_t ReadNativePointerValue(const void *source)
+{
+    uintptr_t value;
+    memcpy(&value, source, sizeof(value));
+    return value;
+}
+#define T1_READ_PTR(ptr) ((u8 *)ReadNativePointerValue(ptr))
+#else
 #define T1_READ_PTR(ptr) (u8 *) T1_READ_32(ptr)
+#endif
 
 // T2_READ_8 is a duplicate to remain consistent with each group.
 #define T2_READ_8(ptr)  ((ptr)[0])
 #define T2_READ_16(ptr) ((ptr)[0] + ((ptr)[1] << 8))
 #define T2_READ_32(ptr) ((ptr)[0] + ((ptr)[1] << 8) + ((ptr)[2] << 16) + ((ptr)[3] << 24))
+#ifdef NATIVE
+#define T2_READ_PTR(ptr) ((void *)ReadNativePointerValue(ptr))
+#else
 #define T2_READ_PTR(ptr) (void *) T2_READ_32(ptr)
+#endif
 
 #define PACK(data, shift, mask)   ( ((data) << (shift)) & (mask) )
 #define UNPACK(data, shift, mask) ( ((data) & (mask)) >> (shift) )
@@ -217,7 +235,9 @@ struct UCoords32
     u32 y;
 };
 
-struct Time
+// apcs-gnu gives every aggregate a minimum four-byte size. Preserve that
+// persistent data layout explicitly on native compilers as well.
+struct ALIGNED(4) Time
 {
     /*0x00*/ s16 days;
     /*0x02*/ s8 hours;
@@ -254,7 +274,7 @@ struct NPCFollower
 #include "constants/items.h"
 #define ITEM_FLAGS_COUNT ((ITEMS_COUNT / 8) + ((ITEMS_COUNT % 8) ? 1 : 0))
 
-struct SaveBlock3
+struct ALIGNED(4) SaveBlock3
 {
 #if OW_USE_FAKE_RTC
     struct SiiRtcInfo fakeRTC;
@@ -442,7 +462,7 @@ struct RentalMon
     //u8 padding2[2];
 };
 
-struct BattleDomeTrainer
+struct ALIGNED(4) BattleDomeTrainer
 {
     u16 trainerId:10;
     u16 isEliminated:1;
@@ -679,7 +699,7 @@ struct ItemSlot
     u16 quantity;
 };
 
-struct Pokeblock
+struct ALIGNED(4) Pokeblock
 {
     u8 color;
     u8 spicy;
@@ -709,7 +729,7 @@ struct Roamer
     /*0x16*/ u8 filler[0x6];
 };
 
-struct RamScriptData
+struct ALIGNED(4) RamScriptData
 {
     u8 magic;
     u8 mapGroup;
@@ -816,7 +836,7 @@ struct LinkBattleRecord
     u16 draws;
 };
 
-struct LinkBattleRecords
+struct ALIGNED(4) LinkBattleRecords
 {
     struct LinkBattleRecord entries[LINK_B_RECORDS_COUNT];
     u8 languages[LINK_B_RECORDS_COUNT];
@@ -850,7 +870,7 @@ struct ContestWinner
     //u8 padding;
 };
 
-struct Mail
+struct ALIGNED(4) Mail
 {
     /*0x00*/ u16 words[MAIL_WORDS_COUNT];
     /*0x12*/ u8 playerName[PLAYER_NAME_LENGTH + 1];
@@ -980,7 +1000,7 @@ struct TrainerTower
     bool8 validated:1;
 };
 
-struct WonderNewsMetadata
+struct ALIGNED(4) WonderNewsMetadata
 {
     u8 newsType:2;
     u8 sentRewardCounter:3;

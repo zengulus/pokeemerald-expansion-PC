@@ -1,4 +1,13 @@
 #include "global.h"
+#ifdef NATIVE
+#include "mods.h"
+#define OPTION_ROW_HEIGHT 14
+#define OPTION_TOP 32
+#define tMusic data[7]
+#else
+#define OPTION_ROW_HEIGHT 16
+#define OPTION_TOP 40
+#endif
 #include "option_menu.h"
 #include "bg.h"
 #include "gpu_regs.h"
@@ -32,6 +41,9 @@ enum
     MENUITEM_SOUND,
     MENUITEM_BUTTONMODE,
     MENUITEM_FRAMETYPE,
+#ifdef NATIVE
+    MENUITEM_MUSIC,
+#endif
     MENUITEM_CANCEL,
     MENUITEM_COUNT,
 };
@@ -42,12 +54,12 @@ enum
     WIN_OPTIONS
 };
 
-#define YPOS_TEXTSPEED    (MENUITEM_TEXTSPEED * 16)
-#define YPOS_BATTLESCENE  (MENUITEM_BATTLESCENE * 16)
-#define YPOS_BATTLESTYLE  (MENUITEM_BATTLESTYLE * 16)
-#define YPOS_SOUND        (MENUITEM_SOUND * 16)
-#define YPOS_BUTTONMODE   (MENUITEM_BUTTONMODE * 16)
-#define YPOS_FRAMETYPE    (MENUITEM_FRAMETYPE * 16)
+#define YPOS_TEXTSPEED    (MENUITEM_TEXTSPEED * OPTION_ROW_HEIGHT)
+#define YPOS_BATTLESCENE  (MENUITEM_BATTLESCENE * OPTION_ROW_HEIGHT)
+#define YPOS_BATTLESTYLE  (MENUITEM_BATTLESTYLE * OPTION_ROW_HEIGHT)
+#define YPOS_SOUND        (MENUITEM_SOUND * OPTION_ROW_HEIGHT)
+#define YPOS_BUTTONMODE   (MENUITEM_BUTTONMODE * OPTION_ROW_HEIGHT)
+#define YPOS_FRAMETYPE    (MENUITEM_FRAMETYPE * OPTION_ROW_HEIGHT)
 
 static void Task_OptionMenuFadeIn(u8 taskId);
 static void Task_OptionMenuProcessInput(u8 taskId);
@@ -69,6 +81,17 @@ static void ButtonMode_DrawChoices(u8 selection);
 static void DrawHeaderText(void);
 static void DrawOptionMenuTexts(void);
 static void DrawBgWindowFrames(void);
+#ifdef NATIVE
+static void Music_DrawChoice(u8 selection);
+static const u8 *const sMusicNames[] = {
+    COMPOUND_STRING("{COLOR GREEN}{SHADOW LIGHT_GREEN}ORIGINAL"),
+    COMPOUND_STRING("{COLOR GREEN}{SHADOW LIGHT_GREEN}GEN I"),
+    COMPOUND_STRING("{COLOR GREEN}{SHADOW LIGHT_GREEN}GEN II"),
+    COMPOUND_STRING("{COLOR GREEN}{SHADOW LIGHT_GREEN}GEN III"),
+    COMPOUND_STRING("{COLOR GREEN}{SHADOW LIGHT_GREEN}GEN IV"),
+    COMPOUND_STRING("{COLOR GREEN}{SHADOW LIGHT_GREEN}GEN V")
+};
+#endif
 
 EWRAM_DATA static bool8 sArrowPressed = FALSE;
 
@@ -100,6 +123,9 @@ static const u8 *const sOptionMenuItemsNames[MENUITEM_COUNT] =
     [MENUITEM_SOUND]       = COMPOUND_STRING("SOUND"),
     [MENUITEM_BUTTONMODE]  = COMPOUND_STRING("BUTTON MODE"),
     [MENUITEM_FRAMETYPE]   = COMPOUND_STRING("FRAME"),
+#ifdef NATIVE
+    [MENUITEM_MUSIC]       = COMPOUND_STRING("BATTLE MUSIC"),
+#endif
     [MENUITEM_CANCEL]      = COMPOUND_STRING("CANCEL"),
 };
 
@@ -117,9 +143,9 @@ static const struct WindowTemplate sOptionMenuWinTemplates[] =
     [WIN_OPTIONS] = {
         .bg = 0,
         .tilemapLeft = 2,
-        .tilemapTop = 5,
+        .tilemapTop = OPTION_TOP / 8,
         .width = 26,
-        .height = 14,
+        .height = 19 - OPTION_TOP / 8,
         .paletteNum = 1,
         .baseBlock = 0x36
     },
@@ -250,6 +276,10 @@ void CB2_InitOptionMenu(void)
         gTasks[taskId].tSound = gSaveBlock2Ptr->optionsSound;
         gTasks[taskId].tButtonMode = gSaveBlock2Ptr->optionsButtonMode;
         gTasks[taskId].tWindowFrameType = gSaveBlock2Ptr->optionsWindowFrameType;
+#ifdef NATIVE
+        gTasks[taskId].tMusic = ModsGetConfig().music;
+        Music_DrawChoice(gTasks[taskId].tMusic);
+#endif
 
         TextSpeed_DrawChoices(gTasks[taskId].tTextSpeed);
         BattleScene_DrawChoices(gTasks[taskId].tBattleSceneOff);
@@ -352,6 +382,16 @@ static void Task_OptionMenuProcessInput(u8 taskId)
             if (previousOption != gTasks[taskId].tWindowFrameType)
                 FrameType_DrawChoices(gTasks[taskId].tWindowFrameType);
             break;
+#ifdef NATIVE
+        case MENUITEM_MUSIC:
+            if (JOY_NEW(DPAD_LEFT | DPAD_RIGHT))
+            {
+                gTasks[taskId].tMusic = (gTasks[taskId].tMusic + (JOY_NEW(DPAD_LEFT) ? 5 : 1)) % 6;
+                Music_DrawChoice(gTasks[taskId].tMusic);
+                sArrowPressed = TRUE;
+            }
+            break;
+#endif
         default:
             return;
         }
@@ -372,6 +412,9 @@ static void Task_OptionMenuSave(u8 taskId)
     gSaveBlock2Ptr->optionsSound = gTasks[taskId].tSound;
     gSaveBlock2Ptr->optionsButtonMode = gTasks[taskId].tButtonMode;
     gSaveBlock2Ptr->optionsWindowFrameType = gTasks[taskId].tWindowFrameType;
+#ifdef NATIVE
+    ModsSetMusic(gTasks[taskId].tMusic);
+#endif
 
     BeginNormalPaletteFade(PALETTES_ALL, 0, 0, 16, RGB_BLACK);
     gTasks[taskId].func = Task_OptionMenuFadeOut;
@@ -390,7 +433,8 @@ static void Task_OptionMenuFadeOut(u8 taskId)
 static void HighlightOptionMenuItem(u8 index)
 {
     SetGpuReg(REG_OFFSET_WIN0H, WIN_RANGE(16, DISPLAY_WIDTH - 16));
-    SetGpuReg(REG_OFFSET_WIN0V, WIN_RANGE(index * 16 + 40, index * 16 + 56));
+    SetGpuReg(REG_OFFSET_WIN0V, WIN_RANGE(index * OPTION_ROW_HEIGHT + OPTION_TOP,
+        (index + 1) * OPTION_ROW_HEIGHT + OPTION_TOP));
 }
 
 static void DrawOptionMenuChoice(const u8 *text, u8 x, u8 y, u8 style)
@@ -410,6 +454,14 @@ static void DrawOptionMenuChoice(const u8 *text, u8 x, u8 y, u8 style)
     dst[i] = EOS;
     AddTextPrinterParameterized(WIN_OPTIONS, FONT_NORMAL, dst, x, y + 1, TEXT_SKIP_DRAW, NULL);
 }
+
+#ifdef NATIVE
+static void Music_DrawChoice(u8 selection)
+{
+    FillWindowPixelRect(WIN_OPTIONS, PIXEL_FILL(1), 104, MENUITEM_MUSIC * OPTION_ROW_HEIGHT, 104, OPTION_ROW_HEIGHT);
+    DrawOptionMenuChoice(sMusicNames[selection % ARRAY_COUNT(sMusicNames)], 104, MENUITEM_MUSIC * OPTION_ROW_HEIGHT, 1);
+}
+#endif
 
 static u8 TextSpeed_ProcessInput(u8 selection)
 {
@@ -644,7 +696,7 @@ static void DrawOptionMenuTexts(void)
 
     FillWindowPixelBuffer(WIN_OPTIONS, PIXEL_FILL(1));
     for (i = 0; i < MENUITEM_COUNT; i++)
-        AddTextPrinterParameterized(WIN_OPTIONS, FONT_NORMAL, sOptionMenuItemsNames[i], 8, (i * 16) + 1, TEXT_SKIP_DRAW, NULL);
+        AddTextPrinterParameterized(WIN_OPTIONS, FONT_NORMAL, sOptionMenuItemsNames[i], 8, (i * OPTION_ROW_HEIGHT) + 1, TEXT_SKIP_DRAW, NULL);
     CopyWindowToVram(WIN_OPTIONS, COPYWIN_FULL);
 }
 
@@ -671,11 +723,11 @@ static void DrawBgWindowFrames(void)
     FillBgTilemapBufferRect(1, TILE_BOT_CORNER_R, 28,  3,  1,  1,  7);
 
     // Draw options list window frame
-    FillBgTilemapBufferRect(1, TILE_TOP_CORNER_L,  1,  4,  1,  1,  7);
-    FillBgTilemapBufferRect(1, TILE_TOP_EDGE,      2,  4, 26,  1,  7);
-    FillBgTilemapBufferRect(1, TILE_TOP_CORNER_R, 28,  4,  1,  1,  7);
-    FillBgTilemapBufferRect(1, TILE_LEFT_EDGE,     1,  5,  1, 18,  7);
-    FillBgTilemapBufferRect(1, TILE_RIGHT_EDGE,   28,  5,  1, 18,  7);
+    FillBgTilemapBufferRect(1, TILE_TOP_CORNER_L,  1, OPTION_TOP / 8 - 1, 1, 1, 7);
+    FillBgTilemapBufferRect(1, TILE_TOP_EDGE,      2, OPTION_TOP / 8 - 1, 26, 1, 7);
+    FillBgTilemapBufferRect(1, TILE_TOP_CORNER_R, 28, OPTION_TOP / 8 - 1, 1, 1, 7);
+    FillBgTilemapBufferRect(1, TILE_LEFT_EDGE,     1, OPTION_TOP / 8, 1, 19 - OPTION_TOP / 8, 7);
+    FillBgTilemapBufferRect(1, TILE_RIGHT_EDGE,   28, OPTION_TOP / 8, 1, 19 - OPTION_TOP / 8, 7);
     FillBgTilemapBufferRect(1, TILE_BOT_CORNER_L,  1, 19,  1,  1,  7);
     FillBgTilemapBufferRect(1, TILE_BOT_EDGE,      2, 19, 26,  1,  7);
     FillBgTilemapBufferRect(1, TILE_BOT_CORNER_R, 28, 19,  1,  1,  7);

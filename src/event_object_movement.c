@@ -1,4 +1,7 @@
 #include "global.h"
+#ifdef NATIVE
+#include "mods.h"
+#endif
 #include "malloc.h"
 #include "battle_anim.h"
 #include "battle_pyramid.h"
@@ -2352,7 +2355,11 @@ void UpdateFollowingPokemon(void)
     // 3. flag is set
     // 4. a follower NPC is present
     if (OW_POKEMON_OBJECT_EVENTS == FALSE
+#ifdef NATIVE
+     || !ModsHasRule(MOD_FOLLOWER)
+#else
      || OW_FOLLOWERS_ENABLED == FALSE
+#endif
      || FlagGet(B_FLAG_FOLLOWERS_DISABLED)
      || !GetFollowerInfo(&species, &shiny, &female)
      || SpeciesToGraphicsInfo(species, shiny, female) == NULL
@@ -2711,23 +2718,23 @@ void GetFollowerAction(struct ScriptContext *ctx) // Essentially a big switch fo
     {
         emotion = gFollowerConditionalMessages[multi].emotion;
         ObjectEventEmote(objEvent, emotion);
-        ctx->data[0] = (u32) gFollowerConditionalMessages[multi].text;
+        ctx->data[0] = (uintptr_t) gFollowerConditionalMessages[multi].text;
         // text choices are spread across array; pick a random one
         if (gFollowerConditionalMessages[multi].textSpread)
         {
             for (i = 0; i < 4; i++)
             {
-                if (!((u32*)gFollowerConditionalMessages[multi].text)[i])
+                if (!((const uintptr_t *)gFollowerConditionalMessages[multi].text)[i])
                     break;
             }
-            ctx->data[0] = i ? ((u32*)gFollowerConditionalMessages[multi].text)[Random() % i] : 0;
+            ctx->data[0] = i ? ((const uintptr_t *)gFollowerConditionalMessages[multi].text)[Random() % i] : 0;
         }
         ScriptCall(ctx, gFollowerConditionalMessages[multi].script ? gFollowerConditionalMessages[multi].script : gFollowerBasicMessages[emotion].script);
         return;
     }
     // otherwise, a basic or C-based message was picked
     ObjectEventEmote(objEvent, emotion);
-    ctx->data[0] = (u32) gFollowerBasicMessages[emotion].messages[multi].text; // Load message text
+    ctx->data[0] = (uintptr_t) gFollowerBasicMessages[emotion].messages[multi].text; // Load message text
     ScriptCall(ctx, gFollowerBasicMessages[emotion].messages[multi].script ?
                         gFollowerBasicMessages[emotion].messages[multi].script :
                         gFollowerBasicMessages[emotion].script);
@@ -6297,7 +6304,7 @@ void IsFollowerFieldMoveUser(struct ScriptContext *ctx)
     *var = FALSE;
     if (follower && obj && !obj->invisible)
     {
-        u16 followIndex = ((u32)follower - (u32)gParties[B_TRAINER_PLAYER]) / sizeof(struct Pokemon);
+        u16 followIndex = (follower - gParties[B_TRAINER_PLAYER]);
         *var = userIndex == followIndex;
     }
 }
@@ -11267,7 +11274,7 @@ static void CreateLevitateMovementTask(struct ObjectEvent *objectEvent)
     u8 taskId = CreateTask(ApplyLevitateMovement, 0xFF);
     struct Task *task = &gTasks[taskId];
 
-    StoreWordInTwoHalfwords((u16*) &task->data[0], (u32)objectEvent);
+    SetTaskPointerArg(taskId, 0, objectEvent);
     objectEvent->warpArrowSpriteId = taskId;
     task->data[3] = 0xFFFF;
 }
@@ -11278,7 +11285,7 @@ static void ApplyLevitateMovement(u8 taskId)
     struct Sprite *sprite;
     struct Task *task = &gTasks[taskId];
 
-    LoadWordFromTwoHalfwords((u16*) &task->data[0], (u32 *)&objectEvent); // load the map object pointer.
+    objectEvent = GetTaskPointerArg(taskId, 0);
     sprite = &gSprites[objectEvent->spriteId];
 
     if (!(task->data[2] & 3))
@@ -11295,7 +11302,7 @@ static void DestroyLevitateMovementTask(u8 taskId)
     struct ObjectEvent *objectEvent;
     struct Task *task = &gTasks[taskId];
 
-    LoadWordFromTwoHalfwords((u16*) &task->data[0], (u32 *)&objectEvent); // unused objectEvent
+    objectEvent = GetTaskPointerArg(taskId, 0); // unused objectEvent
     DestroyTask(taskId);
 }
 

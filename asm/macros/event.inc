@@ -29,27 +29,27 @@
 	@ Jumps to destination and continues script execution from there. The location of the calling script is remembered and can be returned to later.
 	.macro call destination:req
 	.byte SCR_OP_CALL
-	.4byte \destination
+	data_ptr \destination
 	.endm
 
 	@ Jumps to destination and continues script execution from there.
 	.macro goto destination:req
 	.byte SCR_OP_GOTO
-	.4byte \destination
+	data_ptr \destination
 	.endm
 
 	@ If the result of the last comparison matches condition (see Comparison operators), jumps to destination and continues script execution from there.
 	.macro goto_if condition:req, destination:req
 	.byte SCR_OP_GOTO_IF
 	.byte \condition
-	.4byte \destination
+	data_ptr \destination
 	.endm
 
 	@ If the result of the last comparison matches condition (see Comparison operators), calls destination.
 	.macro call_if condition:req, destination:req
 	.byte SCR_OP_CALL_IF
 	.byte \condition
-	.4byte \destination
+	data_ptr \destination
 	.endm
 
 	@ Jumps to the script in gStdScripts at index function.
@@ -106,7 +106,7 @@
 	.macro loadword destIndex:req, value:req
 	.byte SCR_OP_LOAD_WORD
 	.byte \destIndex
-	.4byte \value
+	data_ptr \value
 	.endm
 
 	@ Sets the value at the specified script data index to a fixed byte value.
@@ -120,21 +120,21 @@
 	.macro setptr value:req, ptr:req
 	.byte SCR_OP_SETPTR
 	.byte \value
-	.4byte \ptr
+	data_ptr \ptr
 	.endm
 
 	@ Sets the value at the specified script data index to the value at pointer 'source'.
 	.macro loadbytefromptr destIndex:req, source:req
 	.byte SCR_OP_LOADBYTEFROMPTR
 	.byte \destIndex
-	.4byte \source
+	data_ptr \source
 	.endm
 
 	@ Sets the value at pointer 'destination' to the contents of the script data at 'srcIndex'.
 	.macro setptrbyte srcIndex:req, destination:req
 	.byte SCR_OP_SETPTRBYTE
 	.byte \srcIndex
-	.4byte \destination
+	data_ptr \destination
 	.endm
 
 	@ Copies the contents of the script data from one index to another.
@@ -147,8 +147,8 @@
 	@ Copies the byte at source to destination, replacing whatever byte was previously there.
 	.macro copybyte destination:req, source:req
 	.byte SCR_OP_COPYBYTE
-	.4byte \destination
-	.4byte \source
+	data_ptr \destination
+	data_ptr \source
 	.endm
 
 	@ Changes the value of destination to value.
@@ -213,14 +213,14 @@
 	.macro compare_local_to_ptr local:req, ptr:req
 	.byte SCR_OP_COMPARE_LOCAL_TO_PTR
 	.byte \local
-	.4byte \ptr
+	data_ptr \ptr
 	.endm
 
 	@ Compares the value at 'ptr' to the value of the script data at index 'local'.
 	@ The result is stored in comparisonResult to be acted on by goto_if / call_if
 	.macro compare_ptr_to_local ptr:req, local:req
 	.byte SCR_OP_COMPARE_PTR_TO_LOCAL
-	.4byte \ptr
+	data_ptr \ptr
 	.byte \local
 	.endm
 
@@ -228,7 +228,7 @@
 	@ The result is stored in comparisonResult to be acted on by goto_if / call_if
 	.macro compare_ptr_to_value ptr:req, value:req
 	.byte SCR_OP_COMPARE_PTR_TO_VALUE
-	.4byte \ptr
+	data_ptr \ptr
 	.byte \value
 	.endm
 
@@ -236,8 +236,8 @@
 	@ The result is stored in comparisonResult to be acted on by goto_if / call_if
 	.macro compare_ptr_to_ptr ptr1:req, ptr2:req
 	.byte SCR_OP_COMPARE_PTR_TO_PTR
-	.4byte \ptr1
-	.4byte \ptr2
+	data_ptr \ptr1
+	data_ptr \ptr2
 	.endm
 
 	@ Compares the value of 'var' to a fixed value.
@@ -273,9 +273,9 @@
 	.macro callnative func:req, requests_effects=0, waitstate=0
 	.byte SCR_OP_CALLNATIVE
 	.if \requests_effects == 0
-	.4byte \func
+	data_ptr \func
 	.else
-	.4byte \func + ROM_SIZE
+	data_ptr \func + ROM_SIZE
 	.endif
 	.if \waitstate
 	waitstate implicit=1
@@ -286,9 +286,9 @@
 	.macro gotonative func:req, requests_effects=0
 	.byte SCR_OP_GOTONATIVE
 	.if \requests_effects == 0
-	.4byte \func
+	data_ptr \func
 	.else
-	.4byte \func + ROM_SIZE
+	data_ptr \func + ROM_SIZE
 	.endif
 	.endm
 
@@ -644,12 +644,12 @@
 		.ifb \map
 			.byte SCR_OP_APPLYMOVEMENT
 			.2byte \localId
-			.4byte \movements
+			data_ptr \movements
 		.else
 			@ Really only useful if the object has followed from one map to another (e.g. Wally during the catching event).
 			.byte SCR_OP_APPLYMOVEMENTAT
 			.2byte \localId
-			.4byte \movements
+			data_ptr \movements
 			map \map
 		.endif
 	.endm
@@ -769,16 +769,16 @@
 	.byte trainerbattle_flags
 	.byte \localIdA             @ objEventLocalIdA
 	.2byte \trainer_a           @ opponentA
-	.4byte \intro_text_a        @ introTextA
-	.4byte \lose_text_a         @ defeatTextA
-	.4byte \event_script_a      @ retAddrA
+	data_ptr \intro_text_a        @ introTextA
+	data_ptr \lose_text_a         @ defeatTextA
+	data_ptr \event_script_a      @ retAddrA
 	.byte  \localIdB            @ objEventLocalIdB
 	.2byte \trainer_b           @ opponentB
-	.4byte \intro_text_b        @ introTextB
-	.4byte \lose_text_b         @ defeatTextB
-	.4byte \event_script_b      @ retAddrB
-	.4byte \victory_text        @ victoryText
-	.4byte \cannot_battle       @ cannotBattle
+	data_ptr \intro_text_b        @ introTextB
+	data_ptr \lose_text_b         @ defeatTextB
+	data_ptr \event_script_b      @ retAddrB
+	data_ptr \victory_text        @ victoryText
+	data_ptr \cannot_battle       @ cannotBattle
 	.byte \rival_battle_flags	@ rivalBattleFlags
 	.endm
 
@@ -895,7 +895,7 @@
 	@ a pointer to the text. The 'loadword 0' in msgbox sets this value, for instance.
 	.macro message text:req
 	.byte SCR_OP_MESSAGE
-	.4byte \text
+	data_ptr \text
 	.endm
 
 	@ Closes the current message box.
@@ -1020,7 +1020,7 @@
 	@ bytes determined the box's size and position, but in Emerald these are calculated automatically).
 	.macro braillemessage text:req
 	.byte SCR_OP_BRAILLEMESSAGE
-	.4byte \text
+	data_ptr \text
 	.endm
 
 	@ Formatting for the braille window, to be put at the start of a pointer used by braillemessage.
@@ -1284,14 +1284,14 @@
 	.macro bufferstring stringVarId:req, text:req
 	.byte SCR_OP_BUFFERSTRING
 	stringvar \stringVarId
-	.4byte \text
+	data_ptr \text
 	.endm
 
 	@ Opens the Pokemart system, offering the specified products for sale.
 	@ Products should be a list of .2byte item values preceded by an .align 2
 	.macro pokemart products=Pokemart_DefaultItemList
 	.byte SCR_OP_POKEMART
-	.4byte \products
+	data_ptr \products
 	.endm
 
 	@ Used as the endpoint for a Pokemart item list
@@ -1305,13 +1305,13 @@
 	@ Products should be a list of .2byte decoration values preceded by an .align 2
 	.macro pokemartdecoration products:req
 	.byte SCR_OP_POKEMARTDECORATION
-	.4byte \products
+	data_ptr \products
 	.endm
 
 	@ Identical to pokemartdecoration, but with slight changes to the clerk dialogue. See uses of MART_TYPE_DECOR2.
 	.macro pokemartdecoration2 products:req
 	.byte SCR_OP_POKEMARTDECORATION2
-	.4byte \products
+	data_ptr \products
 	.endm
 
 	@ Starts up the slot machine minigame. id is a SLOT_MACHINE_* value that influences probabilities of certain reel outcomes.
@@ -1361,19 +1361,19 @@
 	@ Adds value to the player's money. If adding 'value' money would exceed MAX_MONEY, the player's money is set to MAX_MONEY.
 	.macro addmoney value:req
 	.byte SCR_OP_ADDMONEY
-	.4byte \value
+	data_ptr \value
 	.endm
 
 	@ Subtracts value from the player's money. If the player has less than 'value' money, their money is set to 0.
 	.macro removemoney value:req
 	.byte SCR_OP_REMOVEMONEY
-	.4byte \value
+	data_ptr \value
 	.endm
 
 	@ Checks if the player has money >= value. VAR_RESULT is set to TRUE if the player has enough money, or FALSE if they do not.
 	.macro checkmoney value:req
 	.byte SCR_OP_CHECKMONEY
-	.4byte \value
+	data_ptr \value
 	.endm
 
 	@ Creates a window showing how much money the player has.
@@ -1429,7 +1429,7 @@
 	@ Automatically scrolls through the message without player input and at a fixed speed.
 	.macro messageautoscroll text:req
 	.byte SCR_OP_MESSAGEAUTOSCROLL
-	.4byte \text
+	data_ptr \text
 	.endm
 
 	@ Executes the specified field effect animation (FLDEFF_*).
@@ -1647,52 +1647,52 @@
 	@ Sets a relative address to be used by the other vcommands as part of a Mystery Gift script.
 	.macro setvaddress pointer:req
 	.byte SCR_OP_SETVADDRESS
-	.4byte \pointer
+	data_ptr \pointer
 	.endm
 
 	@ Equivalent to goto using the relative address set by setvaddress.
 	.macro vgoto destination:req
 	.byte SCR_OP_VGOTO
-	.4byte \destination
+	data_ptr \destination
 	.endm
 
 	@ Equivalent to call using the relative address set by setvaddress.
 	.macro vcall destination:req
 	.byte SCR_OP_VCALL
-	.4byte \destination
+	data_ptr \destination
 	.endm
 
 	@ Equivalent to goto_if using the relative address set by setvaddress.
 	.macro vgoto_if condition:req, destination:req
 	.byte SCR_OP_VGOTO_IF
 	.byte \condition
-	.4byte \destination
+	data_ptr \destination
 	.endm
 
 	@ Equivalent to call_if using the relative address set by setvaddress.
 	.macro vcall_if condition:req, destination:req
 	.byte SCR_OP_VCALL_IF
 	.byte \condition
-	.4byte \destination
+	data_ptr \destination
 	.endm
 
 	@ Equivalent to message using the relative address set by setvaddress.
 	.macro vmessage text:req
 	.byte SCR_OP_VMESSAGE
-	.4byte \text
+	data_ptr \text
 	.endm
 
 	@ Expands the given text at the pointer (- the relative address set by setvaddress) into gStringVar4
 	.macro vbuffermessage text:req
 	.byte SCR_OP_VBUFFERMESSAGE
-	.4byte \text
+	data_ptr \text
 	.endm
 
 	@ Equivalent to bufferstring using the relative address set by setvaddress.
 	.macro vbufferstring stringVarIndex:req, text:req
 	.byte SCR_OP_VBUFFERSTRING
 	stringvar \stringVarIndex
-	.4byte \text
+	data_ptr \text
 	.endm
 
 	@ Create a window showing how many Coins the player has.
@@ -1747,7 +1747,7 @@
 	@ Used only in FireRed/LeafGreen, does nothing in Emerald.
 	.macro loadhelp text:req
 	.byte SCR_OP_LOADHELP
-	.4byte \text
+	data_ptr \text
 	.endm
 
 	@ Used only in FireRed/LeafGreen, does nothing in Emerald.
@@ -1769,7 +1769,7 @@
 	.macro comparehiddenvar a:req, value:req
 	.byte SCR_OP_COMPAREHIDDENVAR
 	.byte \a
-	.4byte \value
+	data_ptr \value
 	.endm
 
 	@ Sets the modernFatefulEncounter bit for the Pokemon in the specified slot of the player's party.
@@ -1867,7 +1867,7 @@
 	@ Does not wait for player input to continue.
 	.macro messageinstant text:req
 	.byte SCR_OP_MESSAGEINSTANT
-	.4byte \text
+	data_ptr \text
 	.endm
 
 	@ Equivalent to fadescreen but uses a hardware fade and darken/lighten blend modes,
@@ -1899,7 +1899,7 @@
 	@ Starts a Pokenav call with the given text.
 	.macro pokenavcall text:req
 	.byte SCR_OP_POKENAVCALL
-	.4byte \text
+	data_ptr \text
 	.endm
 
 	@ Warp with a fade to white. Used during the Sootopolis legendary fight.
@@ -1939,7 +1939,7 @@
 	.byte \callbacks
 	.byte (.Ldynmultichoice_\@_2 - .Ldynmultichoice_\@_1) / 4
 .Ldynmultichoice_\@_1:
-	.4byte \argv
+	data_ptr \argv
 .Ldynmultichoice_\@_2:
 	.endm
 
@@ -1954,7 +1954,7 @@
 	@ Creates an option to be collected with dynmultistack.
 	.macro dynmultipush name:req, id:req
 	.byte SCR_OP_DYNMULTIPUSH
-	.4byte \name
+	data_ptr \name
 	.2byte \id
 	.endm
 
@@ -1970,7 +1970,7 @@
 	@ Gets the width of the specified message in the Braille font and sets the result to VAR_0x8004.
 	.macro getbraillestringwidth msg:req
 	.byte SCR_OP_GETBRAILLESTRINGWIDTH
-	.4byte \msg
+	data_ptr \msg
 	.endm
 
 	.macro goto_if_unset flag:req, dest:req
@@ -2190,12 +2190,12 @@
 
 	.macro setdynamicaifunc func:req
 	callnative ScriptSetDynamicAiFunc, requests_effects=1
-	.4byte \func
+	data_ptr \func
 	.endm
 
 	.macro setdynamicswitchaifunc func:req
 	callnative ScriptSetDynamicAiSwitchFunc, requests_effects=1
-	.4byte \func
+	data_ptr \func
 	.endm
 
 	@ Set up a totem boost for the next battle.
@@ -2662,9 +2662,9 @@
 	.macro setmultitrainerbattle trainer_a:req, lose_text_a:req, trainer_b:req, lose_text_b:req, partnerId:req
 	callnative SetMultiTrainerBattle
 	.2byte \trainer_a
-	.4byte \lose_text_a
+	data_ptr \lose_text_a
 	.2byte \trainer_b
-	.4byte \lose_text_b
+	data_ptr \lose_text_b
 	.2byte \partnerId
 	.endm
 
@@ -2767,7 +2767,7 @@
 		.2byte \flags
 		.byte setScript
 		.2byte \battlePartner
-		.4byte \script
+		data_ptr \script
 		updatefollowingmon
 		1:
 	.else
@@ -2781,7 +2781,7 @@
 		callnative ScriptCreateFollowerNPC
 		.2byte \gfx
 		.2byte \flags
-		.4byte \script
+		data_ptr \script
 		.2byte \battlePartner
 	.else
 		.error "createfollowernpc unavailable with FNPC_ENABLE_NPC_FOLLOWERS defined as FALSE"
@@ -2836,7 +2836,7 @@
 	@ An SP_NAME_* constant can also be used, it'll take the name from gSpeakerNamesTable instead.
 	.macro setspeaker name:req
 	callnative SetSpeaker
-	.4byte \name
+	data_ptr \name
 	.endm
 
 	@ Gives a random berry between the index ranges

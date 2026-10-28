@@ -13,14 +13,14 @@
 	@ Defines a map script. 'type' is any MAP_SCRIPT_* constant (see include/constants/map_scripts.h)
 	.macro map_script type:req, script:req
 	.byte \type
-	.4byte \script
+	data_ptr \script
 	.endm
 
 	@ Defines an entry in a map script table (for either ON_WARP_INTO_MAP_TABLE or ON_FRAME_TABLE)
 	.macro map_script_2 var:req, compare:req, script:req
 	.2byte \var
 	.2byte \compare
-	.4byte \script
+	data_ptr \script
 	.endm
 
 	@ Defines an object event template for map data, to be used by a normal object. Mirrors the struct layout of ObjectEventTemplate in include/global.fieldmap.h
@@ -39,7 +39,7 @@
 	.space 1  @ Padding
 	.2byte \trainer_type
 	.2byte \sight_radius_tree_etc
-	.4byte \script
+	data_ptr \script
 	.2byte \event_flag
 	.space 2  @ Padding
 	inc _num_npcs
@@ -56,6 +56,7 @@
 	.2byte \target_map_id & 0xFF  @ map num
 	.2byte \target_map_id >> 8    @ map group
 	.space 8  @ Padding
+	native64_pad 4
 	inc _num_npcs
 	.endm
 
@@ -77,7 +78,8 @@
 	.2byte \var
 	.2byte \varValue
 	.space 2  @ Padding
-	.4byte \script
+	native64_pad 4
+	data_ptr \script
 	inc _num_traps
 	.endm
 
@@ -94,7 +96,12 @@
 	.byte \elevation
 	.byte \kind
 	.space 2  @ Padding
+	.if \kind == BG_EVENT_HIDDEN_ITEM || \kind == BG_EVENT_SECRET_BASE
 	.4byte \arg6
+	native64_pad 4
+	.else
+	data_ptr \arg6
+	.endif
 	inc _num_signs
 	.endm
 
@@ -125,7 +132,8 @@
 	@ Defines the table of event data for a map. Mirrors the struct layout of MapEvents in include/global.fieldmap.h
 	.macro map_events npcs:req, warps:req, traps:req, signs:req
 	.byte _num_npcs, _num_warps, _num_traps, _num_signs
-	.4byte \npcs, \warps, \traps, \signs
+	native64_pad 4
+	data_ptr \npcs, \warps, \traps, \signs
 	reset_map_events
 	.endm
 
