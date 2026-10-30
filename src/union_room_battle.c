@@ -18,6 +18,9 @@
 #include "link.h"
 #include "union_room.h"
 #include "union_room_battle.h"
+#ifdef NATIVE
+#include "mods.h"
+#endif
 #include "constants/rgb.h"
 #include "constants/trainers.h"
 
@@ -51,22 +54,37 @@ static const struct WindowTemplate sWindowTemplates[] = {
 
 static const u8 sTextColors[] = { TEXT_COLOR_WHITE, TEXT_COLOR_DARK_GRAY, TEXT_COLOR_LIGHT_GRAY };
 
-static void CB2_SetUpPartiesAndStartBattle(void)
+void PrepareUnionRoomBattleParty(void)
 {
     s32 i;
-    StartUnionRoomBattle(BATTLE_TYPE_LINK | BATTLE_TYPE_TRAINER);
+#ifdef NATIVE
+    ModsOwnedUnionPartyBegin(gSelectedOrderFromParty, UNION_ROOM_PARTY_SIZE);
+#endif
     for (i = 0; i < UNION_ROOM_PARTY_SIZE; i++)
     {
         gParties[B_TRAINER_OPPONENT_A][i] = gParties[B_TRAINER_PLAYER][gSelectedOrderFromParty[i] - 1];
     }
     for (i = 0; i < PARTY_SIZE; i++)
     {
+#ifdef NATIVE
+        ZeroMonDataWithOwnedReceipt(&gParties[B_TRAINER_PLAYER][i]);
+#else
         ZeroMonData(&gParties[B_TRAINER_PLAYER][i]);
+#endif
     }
     for (i = 0; i < UNION_ROOM_PARTY_SIZE; i++)
     {
         gParties[B_TRAINER_PLAYER][i] = gParties[B_TRAINER_OPPONENT_A][i];
     }
+#ifdef NATIVE
+    ModsOwnedUnionPartyPrepared();
+#endif
+}
+
+static void CB2_SetUpPartiesAndStartBattle(void)
+{
+    StartUnionRoomBattle(BATTLE_TYPE_LINK | BATTLE_TYPE_TRAINER);
+    PrepareUnionRoomBattleParty();
     IncrementGameStat(GAME_STAT_NUM_UNION_ROOM_BATTLES);
     CalculatePlayerPartyCount();
     TRAINER_BATTLE_PARAM.opponentA = TRAINER_UNION_ROOM;

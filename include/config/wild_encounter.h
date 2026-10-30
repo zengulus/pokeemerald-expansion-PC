@@ -17,8 +17,20 @@
 #define WE_FLAG_NO_RUNNING           0     // If this flag is set, the ability to escape from wild battles is disabled. Also makes Roar/Whirlwind and Teleport (under Gen8) fail.
 
 // Overworld Wild Encounters (OWEs)
-#define WE_OW_ENCOUNTERS                        FALSE   // If TRUE, OW Pokémon can spawn as Overworld Wild Encounters on the current map. Requires OW_POKEMON_OBJECT_EVENTS.
-                                                        // If WE_OW_ENCOUNTERS is TRUE, it is recommended that OW_GFX_COMPRESS be set to FALSE to prevent VRAM issues.
+#ifndef WE_OW_ENCOUNTERS
+#ifdef NATIVE
+#define WE_OW_ENCOUNTERS                        TRUE    // Native builds show ordinary encounters in the field by default.
+#else
+#define WE_OW_ENCOUNTERS                        FALSE   // Requires OW_POKEMON_OBJECT_EVENTS.
+#endif
+#endif
+#ifndef WE_NATIVE_OW_REPLACE_RANDOM
+#define WE_NATIVE_OW_REPLACE_RANDOM             TRUE    // Replace ordinary step encounters where native overworld spawns are supported.
+#endif
+#ifndef WE_NATIVE_OW_SPECIAL_AREAS
+#define WE_NATIVE_OW_SPECIAL_AREAS              FALSE   // Keep special facilities on their existing encounter paths.
+#endif
+// If WE_OW_ENCOUNTERS is TRUE, it is recommended that OW_GFX_COMPRESS be set to FALSE to prevent VRAM issues.
 #define WE_OWE_FLAG_DISABLED                    0       // Replace 0 with a flag to use it to enable/disable generated OWEs.
 #define WE_OWE_SPECIAL_ONLY                     FALSE   // If TRUE, generated OWEs can only be special spawns.
 #define WE_OWE_BATTLE_PIKE                      TRUE    // If TRUE, OWEs can spawn in the Battle Pike, if FALSE random encounters will be enabled instead. Requires WE_OW_ENCOUNTERS to be TRUE.
@@ -26,7 +38,9 @@
 #define WE_OWE_RESTRICT_METATILE                TRUE    // If TRUE, OWEs will stay within tiles with the same encounter metatile behavior as the one it is currently on, if any.
 #define WE_OWE_RESTRICT_MAP                     TRUE    // If TRUE, OWEs will stay within their current map bounds.
 #define WE_OWE_UNRESTRICT_SIGHT                 FALSE   // If TRUE, OWEs with movement behaviors that respond to the player, will ignore all movement restrictions when they can see the player.
+#ifndef WE_OWE_SPAWN_REPLACEMENT
 #define WE_OWE_SPAWN_REPLACEMENT                FALSE   // If TRUE, the oldest OWE objects will despawn after a short time and be replaced with a new spawn if possible.
+#endif
 #define WE_OWE_FLEE_DESPAWN                     TRUE    // If TRUE, a fleeing OWE will despawn if it is unable to take a step for a short time.
 #define WE_OWE_SHINY_SPARKLE                    FALSE   // If TRUE, shiny OWEs will spawn with a sparkle animation and play the shiny sound effect.
 #define WE_OWE_FEEBAS_SPOTS                     FALSE   // If TRUE, any spot that could result in a Feebas fishing encounter can spawn a Feebas OWE.

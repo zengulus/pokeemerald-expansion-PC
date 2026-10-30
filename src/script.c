@@ -1,5 +1,8 @@
 #include "global.h"
 #include "script.h"
+#ifdef NATIVE
+#include "mods.h"
+#endif
 #include "event_data.h"
 #include "field_screen_effect.h"
 #include "mystery_gift.h"
@@ -34,6 +37,15 @@ extern const u8 *gRamScriptRetAddr;
 static u8 sGlobalScriptContextStatus;
 static struct ScriptContext sGlobalScriptContext;
 static struct ScriptContext sImmediateScriptContext;
+#ifdef NATIVE
+static bool8 sGlobalScriptExplicitEnd;
+bool32 ScriptContext_IsGlobal(const struct ScriptContext *ctx)
+{ return ctx == &sGlobalScriptContext && sGlobalScriptContextStatus == CONTEXT_RUNNING; }
+void ScriptContext_RecordExplicitEnd(const struct ScriptContext *ctx)
+{ if (ScriptContext_IsGlobal(ctx)) sGlobalScriptExplicitEnd = TRUE; }
+static void ResetGlobalScriptCompletion(void)
+{ sGlobalScriptExplicitEnd = FALSE; ModsWildScriptCleanupDiscard(); }
+#endif
 static bool8 sLockFieldControls;
 EWRAM_DATA u8 gMsgIsSignPost = FALSE;
 EWRAM_DATA u8 gMsgBoxIsCancelable = FALSE;
@@ -60,6 +72,10 @@ void InitScriptContext(struct ScriptContext *ctx, void *cmdTable, void *cmdTable
 
     for (i = 0; i < (int)ARRAY_COUNT(ctx->data); i++)
         ctx->data[i] = 0;
+#ifdef NATIVE
+    ctx->wildPendingKey = ctx->wildPreparedKey = 0;
+    ctx->wildPreparedKind = 0;
+#endif
 
     for (i = 0; i < (int)ARRAY_COUNT(ctx->stack); i++)
         ctx->stack[i] = NULL;
@@ -289,6 +305,9 @@ bool8 ScriptContext_IsEnabled(void)
 // Re-initializes the global script context to zero.
 void ScriptContext_Init(void)
 {
+#ifdef NATIVE
+    ResetGlobalScriptCompletion();
+#endif
     InitScriptContext(&sGlobalScriptContext, gScriptCmdTable, gScriptCmdTableEnd);
     sGlobalScriptContextStatus = CONTEXT_SHUTDOWN;
 }
@@ -311,6 +330,11 @@ bool8 ScriptContext_RunScript(void)
     {
         sGlobalScriptContextStatus = CONTEXT_SHUTDOWN;
         UnlockPlayerFieldControls();
+#ifdef NATIVE
+        if (sGlobalScriptExplicitEnd) ModsWildScriptCleanupFinish();
+        else ModsWildScriptCleanupDiscard();
+        sGlobalScriptExplicitEnd = FALSE;
+#endif
         return FALSE;
     }
 
@@ -320,6 +344,9 @@ bool8 ScriptContext_RunScript(void)
 // Sets up a new script in the global context and enables the context
 void ScriptContext_SetupScript(const u8 *ptr)
 {
+#ifdef NATIVE
+    ResetGlobalScriptCompletion();
+#endif
     InitScriptContext(&sGlobalScriptContext, gScriptCmdTable, gScriptCmdTableEnd);
     SetupBytecodeScript(&sGlobalScriptContext, ptr);
     LockPlayerFieldControls();
@@ -331,6 +358,9 @@ void ScriptContext_SetupScript(const u8 *ptr)
 // Moves a script from a local context to the global context and enables it.
 void ScriptContext_ContinueScript(struct ScriptContext *ctx)
 {
+#ifdef NATIVE
+    ResetGlobalScriptCompletion();
+#endif
     sGlobalScriptContext = *ctx;
     LockPlayerFieldControls();
     sGlobalScriptContextStatus = CONTEXT_RUNNING;
@@ -369,6 +399,9 @@ void ScriptContext_SetupContextFromStack(struct ScriptStack *stk, struct ScriptC
 
 void ScriptContext_SetupGlobalContextFromStack(struct ScriptStack *stk)
 {
+#ifdef NATIVE
+    ResetGlobalScriptCompletion();
+#endif
     ScriptContext_SetupContextFromStack(stk, &sGlobalScriptContext);
 }
 

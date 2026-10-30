@@ -22,6 +22,7 @@
 #include "string_util.h"
 #include "trainer_see.h"
 #include "main.h"
+#include "mods.h"
 #include "load_save.h"
 #include "script.h"
 #include "malloc.h"
@@ -1210,9 +1211,35 @@ static void BattlePyramidStartMenu(void)
     ShowBattlePyramidStartMenu();
 }
 
+static void RestorePyramidPartyMon(int partyIndex, int selectedIndex)
+{
+    int k, l;
+    for (k = 0; k < MAX_MON_MOVES; k++)
+    {
+        for (l = 0; l < MAX_MON_MOVES; l++)
+            if (GetMonData(GetSavedPlayerPartyMon(partyIndex), MON_DATA_MOVE1 + l) == GetMonData(&gParties[B_TRAINER_PLAYER][selectedIndex], MON_DATA_MOVE1 + k))
+                break;
+        if (l == MAX_MON_MOVES)
+            SetMonMoveSlot(&gParties[B_TRAINER_PLAYER][selectedIndex], MOVE_SKETCH, k);
+    }
+    SavePlayerPartyMon(partyIndex, &gParties[B_TRAINER_PLAYER][selectedIndex]);
+    gSelectedOrderFromParty[selectedIndex] = partyIndex + 1;
+}
+
 static void RestorePyramidPlayerParty(void)
 {
-    int i, j, k, l;
+    int i, j;
+#ifdef NATIVE
+    u8 selected[MAX_FRONTIER_PARTY_SIZE] = {0};
+    if (ModsOwnedFrontierPartySelection(selected, ARRAY_COUNT(selected)) == FRONTIER_PARTY_SIZE)
+    {
+        for (j = 0; j < FRONTIER_PARTY_SIZE; ++j)
+            RestorePyramidPartyMon(selected[j] - 1, j);
+        for (i = 0; i < FRONTIER_PARTY_SIZE; ++i)
+            gSaveBlock2Ptr->frontier.selectedPartyMons[i] = gSelectedOrderFromParty[i];
+        return;
+    }
+#endif
 
     for (i = 0; i < FRONTIER_PARTY_SIZE; i++)
     {
@@ -1221,18 +1248,7 @@ static void RestorePyramidPlayerParty(void)
         {
             if (GetMonData(GetSavedPlayerPartyMon(partyIndex), MON_DATA_SPECIES) == GetMonData(&gParties[B_TRAINER_PLAYER][j], MON_DATA_SPECIES))
             {
-                for (k = 0; k < MAX_MON_MOVES; k++)
-                {
-                    for (l = 0; l < MAX_MON_MOVES; l++)
-                    {
-                        if (GetMonData(GetSavedPlayerPartyMon(partyIndex), MON_DATA_MOVE1 + l) == GetMonData(&gParties[B_TRAINER_PLAYER][j], MON_DATA_MOVE1 + k))
-                            break;
-                    }
-                    if (l == MAX_MON_MOVES)
-                        SetMonMoveSlot(&gParties[B_TRAINER_PLAYER][j], MOVE_SKETCH, k);
-                }
-                SavePlayerPartyMon(partyIndex, &gParties[B_TRAINER_PLAYER][j]);
-                gSelectedOrderFromParty[j] = partyIndex + 1;
+                RestorePyramidPartyMon(partyIndex, j);
                 break;
             }
         }
@@ -1427,12 +1443,17 @@ void GenerateBattlePyramidWildMon(enum Species forceSpecies)
         if (!forceSpecies)
             species = Random() % NUM_SPECIES;
 
+        // Disabled species have no form data and must not be passed to the
+        // sanitized species accessors below.
+        if (species == SPECIES_NONE || species >= NUM_SPECIES || !IsSpeciesEnabled(species))
+            continue;
+
         // check if base species
         if (GET_BASE_SPECIES_ID(species) != species)
             continue;
 
         // check type
-        if (reqs->type != TYPE_MYSTERY && GetSpeciesType(species, 0) != reqs->type && GetSpeciesType(species, 1) != reqs->type)
+        if (reqs->type != TYPE_MYSTERY && !IsSpeciesOfType(species, reqs->type))
             continue;
 
         // check base stat total

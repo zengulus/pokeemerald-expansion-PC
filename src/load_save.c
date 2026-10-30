@@ -1,4 +1,8 @@
 #include "global.h"
+#ifdef NATIVE
+#include "owned_identity_ledger.h"
+#include "mods.h"
+#endif
 #include "malloc.h"
 #include "berry_powder.h"
 #include "fake_rtc.h"
@@ -173,6 +177,9 @@ void ClearContinueGameWarpStatus2(void)
 void SavePlayerParty(void)
 {
     int i;
+#ifdef NATIVE
+    ModsOwnedFrontierBeforeSaveParty();
+#endif
     *GetSavedPlayerPartyCount() = gPartiesCount[B_TRAINER_PLAYER];
 
     for (i = 0; i < PARTY_SIZE; i++)
@@ -182,6 +189,13 @@ void SavePlayerParty(void)
 void LoadPlayerParty(void)
 {
     int i;
+#ifdef NATIVE
+    bool32 frontierProjection = ModsOwnedFrontierPartyActive();
+    bool32 rentalProjection = ModsOwnedRentalPartyActive();
+    if (frontierProjection) ModsOwnedUnionPartyBeforeRestore();
+    if (rentalProjection) ModsOwnedRentalPartyBeforeRestore();
+    NativeOwnedTrackBeforePartyLoad();
+#endif
 
     gPartiesCount[B_TRAINER_PLAYER] = *GetSavedPlayerPartyCount();
 
@@ -197,6 +211,22 @@ void LoadPlayerParty(void)
         data = gParties[B_TRAINER_PLAYER][i].status;
         SetBoxMonData(&gParties[B_TRAINER_PLAYER][i].box, MON_DATA_STATUS, &data);
     }
+#ifdef NATIVE
+    if (frontierProjection) ModsOwnedUnionPartyAfterRestore();
+    if (rentalProjection) ModsOwnedRentalPartyAfterRestore();
+#endif
+}
+
+/* A veto must undo the temporary tutorial party without applying the normal
+ * loader's migration to the player's saved Pokémon. */
+void RestorePlayerPartyAfterTutorialDenial(void)
+{
+#ifdef NATIVE
+    NativeOwnedTrackBeforePartyLoad();
+#endif
+    gPartiesCount[B_TRAINER_PLAYER] = *GetSavedPlayerPartyCount();
+    for (u32 i = 0; i < PARTY_SIZE; ++i)
+        gParties[B_TRAINER_PLAYER][i] = *GetSavedPlayerPartyMon(i);
 }
 
 void SaveObjectEvents(void)
@@ -207,6 +237,9 @@ void SaveObjectEvents(void)
     for (i = 0; i < OBJECT_EVENTS_COUNT; i++)
     {
         gSaveBlock1Ptr->objectEvents[i] = gObjectEvents[i];
+#ifdef NATIVE
+        ModsWildActorPrepareSaveObject(i, &gSaveBlock1Ptr->objectEvents[i]);
+#endif
         // Swap graphicsId bytes when saving and loading
         // This keeps compatibility with vanilla,
         // since the lower graphicsIds will be in the same place as vanilla

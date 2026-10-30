@@ -32,6 +32,7 @@ NavelRock_Summit_EventScript_TryRemoveHoOh::
 
 NavelRock_Summit_EventScript_HoOh::
 	lockall
+	specialvar VAR_TEMP_2, ScriptGetSavedWeather
 	setvar VAR_TEMP_1, 1
 	special SpawnCameraObject
 	setvar VAR_0x8004, 3  @ Num loops
@@ -55,7 +56,11 @@ NavelRock_Summit_EventScript_HoOh::
 	applymovement LOCALID_NAVEL_ROCK_HO_OH, Movement_HoOhApproach
 	waitmovement 0
 	special RemoveCameraObject
+NavelRock_Summit_EventScript_PrepareHoOh::
+	identifywildencounter "rhh:encounter/navel_rock_summit_frlg/ho_oh"
 	seteventmon SPECIES_HO_OH, 70
+	specialvar VAR_RESULT, ScriptedWildBattleAllowed
+	goto_if_eq VAR_RESULT, FALSE, NavelRock_Summit_EventScript_HoOhCancelled
 	setflag FLAG_SYS_CTRL_OBJ_DELETE
 	special BattleSetup_StartLegendaryBattle
 	clearflag FLAG_SYS_CTRL_OBJ_DELETE
@@ -65,6 +70,14 @@ NavelRock_Summit_EventScript_HoOh::
 	goto_if_eq VAR_RESULT, B_OUTCOME_RAN, NavelRock_Summit_EventScript_RanFromHoOh
 	goto_if_eq VAR_RESULT, B_OUTCOME_PLAYER_TELEPORTED, NavelRock_Summit_EventScript_RanFromHoOh
 	setflag FLAG_FOUGHT_HO_OH
+	releaseall
+	end
+
+NavelRock_Summit_EventScript_HoOhCancelled::
+	setobjectxy LOCALID_NAVEL_ROCK_HO_OH, 9, 6
+	copyvar VAR_0x8004, VAR_TEMP_2
+	special ScriptRestoreEncounterWeather
+	setvar VAR_TEMP_1, 0
 	releaseall
 	end
 

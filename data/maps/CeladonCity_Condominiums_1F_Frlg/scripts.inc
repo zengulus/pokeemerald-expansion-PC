@@ -75,15 +75,15 @@ CeladonCity_Condominiums_1F_Text_NothingBeatsThirstLikeTea::
 	.string "It really is the best.$"
 
 CeladonCity_Condominiums_1F_Text_MyDearMonsKeepMeCompany::
-	.string "My dear POKéMON keep me company.\n"
+	.string "My dear Pokémon keep me company.\n"
 	.string "MEOWTH even brings money home!$"
 
 CeladonCity_Condominiums_1F_Text_DaisyComesToBuyTea::
 	.string "Oh, hello, dearie.\n"
 	.string "Did you enjoy my TEA?\p"
 	.string "By the way, dear. Are you, by any\n"
-	.string "chance, from PALLET TOWN?\p"
-	.string "A girl from PALLET TOWN, DAISY,\n"
+	.string "chance, from PALLET Town?\p"
+	.string "A girl from PALLET Town, DAISY,\n"
 	.string "she enjoys TEA every day.\p"
 	.string "She visits the CELADON DEPT. STORE\n"
 	.string "to buy some TEA.$"

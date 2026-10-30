@@ -1,4 +1,14 @@
 #include "global.h"
+#ifdef NATIVE
+#include "mods.h"
+#include "native.h"
+#include "owned_identity_ledger.h"
+static bool32 sModsTradePcHeld;
+static bool32 sModsLinkTradeActive;
+bool32 ModsOwnedTradePcHeld(void) { return sModsTradePcHeld; }
+bool32 ModsOwnedLinkTradeActive(void) { return sModsLinkTradeActive; }
+void ModsOwnedTradeReset(void) { NativeOwnedTrackTradeEnd(); sModsTradePcHeld = FALSE; sModsLinkTradeActive = FALSE; }
+#endif
 #include "malloc.h"
 #include "battle_anim.h"
 #include "battle_interface.h"
@@ -257,7 +267,26 @@ static EWRAM_DATA struct {
     u8 wirelessWinTop;
     u8 wirelessWinRight;
     u8 wirelessWinBottom;
+    u8 pcDestinationBox, pcDestinationSlot;
+    bool8 pcSyncPending;
+#ifdef NATIVE
+    u16 modSourceBox, modSourceSlot;
+    bool8 modPcSource;
+    bool8 modLinkCapture;
+    bool8 modLinkConfirmed, modLinkTransport;
+    struct RhhLinkTrade modLinkTrade;
+    struct BoxPokemon modLinkRaw;
+    RhhContentKey modLinkExpectedSpecies;
+#endif
 } *sTradeAnim = NULL;
+#ifdef NATIVE
+bool32 ModsOwnedTradePcDestination(u32 *box, u32 *slot)
+{
+    if (!box || !slot || !sModsTradePcHeld || !sTradeAnim || !sTradeAnim->pcSyncPending
+        || sTradeAnim->pcDestinationBox >= TOTAL_BOXES_COUNT || sTradeAnim->pcDestinationSlot >= IN_BOX_COUNT) return FALSE;
+    *box = sTradeAnim->pcDestinationBox; *slot = sTradeAnim->pcDestinationSlot; return TRUE;
+}
+#endif
 
 static bool32 IsWirelessTrade(void);
 static void CB2_CreateTradeMenu(void);
@@ -2797,6 +2826,9 @@ void CB2_LinkTrade(void)
     switch (gMain.state)
     {
     case 0:
+#ifdef NATIVE
+        sModsLinkTradeActive = TRUE;
+#endif
         if (!gReceivedRemoteLinkPlayers)
         {
             gLinkType = LINKTYPE_TRADE_DISCONNECTED;
@@ -2969,10 +3001,23 @@ static void CB2_InitInGameTrade(void)
     {
     case 0:
         //If ChooseBoxMon points to a pc mon, we store it into gPartiesCount[B_TRAINER_OPPONENT_A]
+#ifdef NATIVE
+        sModsTradePcHeld = FALSE;
+#endif
         if (gSpecialVar_0x8004 == PC_MON_CHOSEN)
         {
             gSelectedTradeMonPositions[TRADE_PLAYER] = TRADEMON_FROM_PC;
+#ifdef NATIVE
+            sModsTradePcHeld = TRUE;
+#endif
+#ifdef NATIVE
+            RemoveSelectedPcMonWithOwnedReceipt(&gParties[B_TRAINER_OPPONENT_A][TRADEMON_FROM_PC]);
+#else
             RemoveSelectedPcMon(&gParties[B_TRAINER_OPPONENT_A][TRADEMON_FROM_PC]);
+#endif
+#ifdef NATIVE
+            NativeOwnedTrackTradePcPickup(gSpecialVar_MonBoxId, gSpecialVar_MonBoxPos);
+#endif
         }
         else
         {
@@ -2985,6 +3030,14 @@ static void CB2_InitInGameTrade(void)
         gLinkPlayers[0].language = GAME_LANGUAGE;
         gLinkPlayers[1].language = GetMonData(&gParties[B_TRAINER_OPPONENT_A][0], MON_DATA_LANGUAGE);
         sTradeAnim = AllocZeroed(sizeof(*sTradeAnim));
+#ifdef NATIVE
+        if (gSpecialVar_0x8004 == PC_MON_CHOSEN)
+        {
+            sTradeAnim->modPcSource = TRUE;
+            sTradeAnim->modSourceBox = gSpecialVar_MonBoxId;
+            sTradeAnim->modSourceSlot = gSpecialVar_MonBoxPos;
+        }
+#endif
         AllocateMonSpritesGfx();
         ResetTasks();
         ResetSpriteData();
@@ -3092,6 +3145,21 @@ static void TradeMons(u8 playerPartyIdx, u8 partnerPartyIdx)
     u16 playerMail = GetMonData(playerMon, MON_DATA_MAIL);
     partnerMon = &gParties[B_TRAINER_OPPONENT_A][partnerPartyIdx];
     u16 partnerMail = GetMonData(partnerMon, MON_DATA_MAIL);
+#ifdef NATIVE
+    struct RhhIngameTrade trade;
+    u8 occupied[TOTAL_BOXES_COUNT][IN_BOX_COUNT];
+    u32 sourceLocation = playerPartyIdx == PC_MON_CHOSEN ? RHH_MON_BOX : RHH_MON_PARTY;
+    u32 sourceBox = playerPartyIdx == PC_MON_CHOSEN ? sTradeAnim->modSourceBox : 0;
+    u32 sourceSlot = playerPartyIdx == PC_MON_CHOSEN ? sTradeAnim->modSourceSlot : playerPartyIdx;
+    bool32 notify = !sTradeAnim->isLinkTrade && (playerPartyIdx != PC_MON_CHOSEN || sTradeAnim->modPcSource)
+        && ModsIngameTradeCapture(&playerMon->box, &partnerMon->box, sourceLocation, sourceBox, sourceSlot, &trade);
+    bool32 notifyLink = sTradeAnim->isLinkTrade && playerPartyIdx < PARTY_SIZE
+        && ModsLinkTradeCapture(&playerMon->box, &partnerMon->box, playerPartyIdx, &sTradeAnim->modLinkTrade);
+    if (notify && playerPartyIdx == PC_MON_CHOSEN)
+        for (u32 box = 0; box < TOTAL_BOXES_COUNT; ++box)
+            for (u32 slot = 0; slot < IN_BOX_COUNT; ++slot)
+                occupied[box][slot] = gPokemonStoragePtr->boxes[box][slot].hasSpecies;
+#endif
 
     // The mail attached to the sent Pokémon no longer exists in your file.
     if (playerMail != MAIL_NONE)
@@ -3120,10 +3188,119 @@ static void TradeMons(u8 playerPartyIdx, u8 partnerPartyIdx)
     }
     UpdatePokedexForReceivedMon(playerPartyIdx);
     if (playerPartyIdx == PC_MON_CHOSEN)
-        CopyMonToPC(playerMon);
+    {
+#ifdef NATIVE
+        u8 result = notify ? CopyMonToPCWithOwnedReceipt(playerMon) : CopyMonToPC(playerMon);
+#else
+        u8 result = CopyMonToPC(playerMon);
+#endif
+#ifdef NATIVE
+        if (result == MON_GIVEN_TO_PC)
+        {
+            sTradeAnim->pcDestinationBox = gSpecialVar_MonBoxId;
+            sTradeAnim->pcDestinationSlot = gSpecialVar_MonBoxPos;
+            sTradeAnim->pcSyncPending = TRUE;
+        }
+        if (notify && result == MON_GIVEN_TO_PC && gSpecialVar_MonBoxId < TOTAL_BOXES_COUNT
+            && gSpecialVar_MonBoxPos < IN_BOX_COUNT && !occupied[gSpecialVar_MonBoxId][gSpecialVar_MonBoxPos])
+            ModsIngameTradeCommitted(GetBoxedMonPtr(gSpecialVar_MonBoxId, gSpecialVar_MonBoxPos),
+                                      RHH_MON_BOX, gSpecialVar_MonBoxId, gSpecialVar_MonBoxPos, &trade);
+        else NativeOwnedTrackerUnsupported();
+#else
+        if (result == MON_GIVEN_TO_PC)
+        {
+            sTradeAnim->pcDestinationBox = gSpecialVar_MonBoxId;
+            sTradeAnim->pcDestinationSlot = gSpecialVar_MonBoxPos;
+            sTradeAnim->pcSyncPending = TRUE;
+        }
+#endif
+    }
+#ifdef NATIVE
+    else if (notify)
+        ModsIngameTradeCommitted(&playerMon->box, RHH_MON_PARTY, 0, playerPartyIdx, &trade);
+    else if (!sTradeAnim->isLinkTrade) NativeOwnedTrackerUnsupported();
+    if (notifyLink && ModsLinkTradePlaced(&playerMon->box, &sTradeAnim->modLinkTrade))
+    {
+        sTradeAnim->modLinkRaw = playerMon->box;
+        sTradeAnim->modLinkCapture = TRUE;
+        NativeOwnedTrackLinkSwap(playerPartyIdx, partnerPartyIdx);
+    }
+    else if (sTradeAnim->isLinkTrade) NativeOwnedTrackerUnsupported();
+#endif
     if (gReceivedRemoteLinkPlayers)
         TryEnableNationalDexFromLinkPartner();
 }
+
+static void SyncIngameTradePcMon(void)
+{
+    if (!sTradeAnim->pcSyncPending) return;
+#ifdef NATIVE
+    if (NativeOwnedTrackTradePcPreSync(sTradeAnim->pcDestinationBox, sTradeAnim->pcDestinationSlot))
+        CopyMonWithOwnedReceipt(GetBoxedMonPtr(sTradeAnim->pcDestinationBox, sTradeAnim->pcDestinationSlot),
+                                &gParties[B_TRAINER_OPPONENT_A][TRADEMON_FROM_PC].box, sizeof(struct BoxPokemon));
+    else
+        CopyMon(GetBoxedMonPtr(sTradeAnim->pcDestinationBox, sTradeAnim->pcDestinationSlot),
+                &gParties[B_TRAINER_OPPONENT_A][TRADEMON_FROM_PC].box, sizeof(struct BoxPokemon));
+#else
+    CopyMon(GetBoxedMonPtr(sTradeAnim->pcDestinationBox, sTradeAnim->pcDestinationSlot),
+            &gParties[B_TRAINER_OPPONENT_A][TRADEMON_FROM_PC].box, sizeof(struct BoxPokemon));
+#endif
+#ifdef NATIVE
+    NativeOwnedTrackTradePcSync(sTradeAnim->pcDestinationBox, sTradeAnim->pcDestinationSlot);
+#endif
+    sTradeAnim->pcSyncPending = FALSE;
+#ifdef NATIVE
+    sModsTradePcHeld = FALSE;
+#endif
+}
+
+#if defined(NATIVE) && defined(RHH_OWNED_IDENTITY_TEST)
+static void ModsOwnedTradeTestRunCable(void);
+void ModsOwnedEvolutionTestCommit(u32 partySlot, enum Species species, bool32 trade);
+bool32 ModsOwnedTradeTestParty(u32 slot, bool32 link)
+{
+    if (slot >= PARTY_SIZE || sTradeAnim || sModsTradePcHeld) return FALSE;
+    typeof(*sTradeAnim) temp = {0};
+    sTradeAnim = &temp; sTradeAnim->isLinkTrade = link;
+    TradeMons(slot, 0);
+    sTradeAnim = NULL; NativeOwnedTrackTradeEnd(); return TRUE;
+}
+bool32 ModsOwnedTradeTestPartyEvolve(u32 slot, enum Species species)
+{
+    if (slot >= PARTY_SIZE || sTradeAnim || sModsTradePcHeld) return FALSE;
+    typeof(*sTradeAnim) temp = {0};
+    sTradeAnim = &temp;
+    TradeMons(slot, 0);
+    ModsOwnedEvolutionTestCommit(slot, species, TRUE);
+    sTradeAnim = NULL; NativeOwnedTrackTradeEnd(); return TRUE;
+}
+bool32 ModsOwnedTradeTestBeginPc(u32 box, u32 slot)
+{
+    if (box >= TOTAL_BOXES_COUNT || slot >= IN_BOX_COUNT || sTradeAnim || sModsTradePcHeld
+        || !gPokemonStoragePtr->boxes[box][slot].hasSpecies) return FALSE;
+    sTradeAnim = AllocZeroed(sizeof(*sTradeAnim));
+    if (!sTradeAnim) return FALSE;
+    sTradeAnim->modPcSource = TRUE; sTradeAnim->modSourceBox = box; sTradeAnim->modSourceSlot = slot;
+    gSpecialVar_MonBoxId = box; gSpecialVar_MonBoxPos = slot;
+    sModsTradePcHeld = TRUE;
+    RemoveSelectedPcMonWithOwnedReceipt(&gParties[B_TRAINER_OPPONENT_A][TRADEMON_FROM_PC]);
+    NativeOwnedTrackTradePcPickup(box, slot);
+    return TRUE;
+}
+bool32 ModsOwnedTradeTestFinishPc(void)
+{
+    if (!sTradeAnim || !sModsTradePcHeld || !sTradeAnim->modPcSource) return FALSE;
+    ModsOwnedTradeTestRunCable();
+    return sTradeAnim->pcSyncPending;
+}
+bool32 ModsOwnedTradeTestSyncPc(void)
+{
+    if (!sTradeAnim || !sModsTradePcHeld || !sTradeAnim->pcSyncPending) return FALSE;
+    SyncIngameTradePcMon();
+    Free(sTradeAnim); sTradeAnim = NULL;
+    return !sModsTradePcHeld;
+}
+#endif
 
 static void HandleLinkDataSend(void)
 {
@@ -3870,17 +4047,26 @@ static bool8 DoTradeAnim_Cable(void)
             sTradeAnim->state++;
         break;
     case STATE_TRY_EVOLUTION: // Only if in-game trade, link trades use CB2_TryLinkTradeEvolution
-        TradeMons(gSpecialVar_0x8005, 0);
+        TradeMons(gSpecialVar_0x8004, 0);
         gCB2_AfterEvolution = CB2_InGameTrade;
-        evoTarget = GetEvolutionTargetSpecies(&gParties[B_TRAINER_PLAYER][gSelectedTradeMonPositions[TRADE_PLAYER]], EVO_MODE_TRADE, ITEM_NONE, &gParties[B_TRAINER_OPPONENT_A][0], NULL, CHECK_EVO);
+        struct Pokemon *canEvolveMon;
+        if (gSpecialVar_0x8004 == PC_MON_CHOSEN)
+            canEvolveMon = &gParties[B_TRAINER_OPPONENT_A][TRADEMON_FROM_PC];
+        else
+            canEvolveMon = &gParties[B_TRAINER_PLAYER][gSpecialVar_0x8004];
+        evoTarget = GetEvolutionTargetSpecies(canEvolveMon, EVO_MODE_TRADE, ITEM_NONE, &gParties[B_TRAINER_OPPONENT_A][0], NULL, CHECK_EVO);
         if (evoTarget != SPECIES_NONE)
         {
-            GetEvolutionTargetSpecies(&gParties[B_TRAINER_PLAYER][gSelectedTradeMonPositions[TRADE_PLAYER]], EVO_MODE_TRADE, ITEM_NONE, &gParties[B_TRAINER_OPPONENT_A][0], NULL, DO_EVO);
-            TradeEvolutionScene(&gParties[B_TRAINER_PLAYER][gSelectedTradeMonPositions[TRADE_PLAYER]], evoTarget, sTradeAnim->monSpriteIds[TRADE_PARTNER], gSelectedTradeMonPositions[TRADE_PLAYER]);
+            GetEvolutionTargetSpecies(canEvolveMon, EVO_MODE_TRADE, ITEM_NONE, &gParties[B_TRAINER_OPPONENT_A][0], NULL, DO_EVO);
+            TradeEvolutionScene(canEvolveMon, evoTarget, sTradeAnim->monSpriteIds[TRADE_PARTNER], gSpecialVar_0x8004);
         }
         sTradeAnim->state++;
         break;
     case STATE_FADE_OUT_END:
+        SyncIngameTradePcMon();
+#ifdef NATIVE
+        NativeOwnedTrackTradeEnd();
+#endif
         BeginNormalPaletteFade(PALETTES_ALL, 0, 0, 16, RGB_BLACK);
         sTradeAnim->state++;
         break;
@@ -3909,6 +4095,16 @@ static bool8 DoTradeAnim_Cable(void)
 #define tIdx               data[0]
 #define tCounter           data[1]
 #define tSignalComingBack  data[2]
+
+#if defined(NATIVE) && defined(RHH_OWNED_IDENTITY_TEST)
+static void ModsOwnedTradeTestRunCable(void)
+{
+    gSpecialVar_0x8004 = PC_MON_CHOSEN;
+    gSpecialVar_0x8005 = 1; /* Trade ID intentionally differs from the selected Pokémon. */
+    sTradeAnim->state = STATE_TRY_EVOLUTION;
+    DoTradeAnim_Cable();
+}
+#endif
 
 static bool8 DoTradeAnim_Wireless(void)
 {
@@ -4386,6 +4582,10 @@ static bool8 DoTradeAnim_Wireless(void)
         sTradeAnim->state++;
         break;
     case STATE_FADE_OUT_END:
+        SyncIngameTradePcMon();
+#ifdef NATIVE
+        NativeOwnedTrackTradeEnd();
+#endif
         BeginNormalPaletteFade(PALETTES_ALL, 0, 0, 16, RGB_BLACK);
         sTradeAnim->state++;
         break;
@@ -4418,6 +4618,23 @@ static void CB2_TryLinkTradeEvolution(void)
     switch (gMain.state)
     {
     case 0:
+#ifdef NATIVE
+        if (sTradeAnim->modLinkCapture)
+        {
+            u32 slot = sTradeAnim->modLinkTrade.party_slot;
+            if (!HasLinkErrorOccurred() && gReceivedRemoteLinkPlayers && slot < PARTY_SIZE
+                && !memcmp(&gParties[B_TRAINER_PLAYER][slot].box, &sTradeAnim->modLinkRaw, sizeof(sTradeAnim->modLinkRaw)))
+            {
+                sTradeAnim->modLinkConfirmed = TRUE;
+                sTradeAnim->modLinkTransport = IsWirelessTrade() ? RHH_LINK_TRADE_WIRELESS : RHH_LINK_TRADE_CABLE;
+                sTradeAnim->modLinkExpectedSpecies = (sTradeAnim->modLinkTrade.flags
+                    & (RHH_LINK_TRADE_RECEIVED_BEFORE_VALID | RHH_LINK_TRADE_RECEIVED_AFTER_VALID))
+                    == (RHH_LINK_TRADE_RECEIVED_BEFORE_VALID | RHH_LINK_TRADE_RECEIVED_AFTER_VALID)
+                    ? sTradeAnim->modLinkTrade.received_after.species : 0;
+            }
+            sTradeAnim->modLinkCapture = FALSE;
+        }
+#endif
         gMain.state = 4;
         gSoftResetDisabled = TRUE;
         break;
@@ -4442,6 +4659,99 @@ static void CB2_TryLinkTradeEvolution(void)
     BuildOamBuffer();
     UpdatePaletteFade();
 }
+
+#ifdef NATIVE
+void ModsLinkTradeEvolutionCommitted(const struct RhhOwnedEvolution *evolution)
+{
+    if (!sTradeAnim || !sTradeAnim->modLinkConfirmed || !sTradeAnim->modLinkExpectedSpecies) return;
+    const struct RhhLinkTrade *trade = &sTradeAnim->modLinkTrade;
+    if (!evolution || evolution->struct_size != sizeof(*evolution) || evolution->run_id != trade->run_id
+        || evolution->cause != RHH_EVOLUTION_CHANGED
+        || (evolution->flags & (RHH_EVOLUTION_TRADE | RHH_EVOLUTION_LINK_TRADE
+                                 | RHH_EVOLUTION_BEFORE_VALID | RHH_EVOLUTION_AFTER_VALID))
+            != (RHH_EVOLUTION_TRADE | RHH_EVOLUTION_LINK_TRADE | RHH_EVOLUTION_BEFORE_VALID | RHH_EVOLUTION_AFTER_VALID)
+        || evolution->source_location != RHH_MON_PARTY || evolution->source_slot != trade->party_slot
+        || evolution->destination_location != RHH_MON_PARTY || evolution->destination_slot != trade->party_slot
+        || evolution->destination_box || evolution->before.species != sTradeAnim->modLinkExpectedSpecies
+        || evolution->before.identity != trade->received_before.identity
+        || evolution->after.identity != evolution->before.identity
+        || evolution->before.is_egg != evolution->after.is_egg
+        || memcmp(evolution->before.ivs, evolution->after.ivs, sizeof(evolution->before.ivs)))
+    { sTradeAnim->modLinkConfirmed = FALSE; return; }
+    sTradeAnim->modLinkExpectedSpecies = evolution->after.species;
+}
+static void FinishLinkTradeSave(bool32 saved)
+{
+    NativeOwnedTrackLinkFinish(saved && sTradeAnim && sTradeAnim->modLinkConfirmed);
+    ModsLinkTradeHistoryFinish(saved && sTradeAnim && sTradeAnim->modLinkConfirmed);
+    if (!sTradeAnim || !sTradeAnim->modLinkConfirmed) return;
+    sTradeAnim->modLinkConfirmed = FALSE;
+    if (saved)
+        ModsLinkTradeSaved(sTradeAnim->modLinkTransport, &sTradeAnim->modLinkTrade);
+}
+static bool8 BeginLinkTradeSave(void)
+{
+    if (sTradeAnim && sTradeAnim->modLinkConfirmed)
+    {
+        u32 slot = sTradeAnim->modLinkTrade.party_slot;
+        struct BoxPokemon *received = slot < PARTY_SIZE ? &gParties[B_TRAINER_PLAYER][slot].box : NULL;
+        if (!received || received->personality != sTradeAnim->modLinkRaw.personality
+            || received->otId != sTradeAnim->modLinkRaw.otId
+            || memcmp(received->otName, sTradeAnim->modLinkRaw.otName, PLAYER_NAME_LENGTH)
+            || !ModsLinkTradePlaced(received, &sTradeAnim->modLinkTrade)
+            || (sTradeAnim->modLinkExpectedSpecies && (!(sTradeAnim->modLinkTrade.flags & RHH_LINK_TRADE_RECEIVED_AFTER_VALID)
+                || sTradeAnim->modLinkTrade.received_after.species != sTradeAnim->modLinkExpectedSpecies))
+            || !ModsLinkTradeHistoryStage(sTradeAnim->modLinkTransport, &sTradeAnim->modLinkTrade))
+            sTradeAnim->modLinkConfirmed = FALSE;
+    }
+    NativeOwnedTrackLinkPrepareSave(sTradeAnim ? sTradeAnim->modLinkTrade.party_slot : 0,
+                                    sTradeAnim && sTradeAnim->modLinkConfirmed);
+    bool8 failure = LinkFullSave_Init();
+    if (failure)
+    {
+        NativeOwnedTrackLinkFinish(FALSE);
+        ModsLinkTradeHistoryFinish(FALSE);
+        if (sTradeAnim) sTradeAnim->modLinkConfirmed = FALSE;
+    }
+    return failure;
+}
+static void CompleteLinkTradeSave(void)
+{
+    bool32 hadTransaction = NativeSaveTransactionActive();
+    LinkFullSave_SetLastSectorSignature();
+    FinishLinkTradeSave(hadTransaction && !NativeSaveTransactionActive() && !gDamagedSaveSectors);
+}
+#endif
+
+#if defined(NATIVE) && defined(RHH_OWNED_IDENTITY_TEST)
+bool32 ModsOwnedLinkTradeTestBeginAt(u32 slot, u32 partnerSlot)
+{
+    if (slot >= PARTY_SIZE || partnerSlot >= PARTY_SIZE || sTradeAnim || sModsTradePcHeld || sModsLinkTradeActive
+        || !gReceivedRemoteLinkPlayers) return FALSE;
+    sTradeAnim = AllocZeroed(sizeof(*sTradeAnim));
+    if (!sTradeAnim) return FALSE;
+    sTradeAnim->isLinkTrade = TRUE; sModsLinkTradeActive = TRUE;
+    TradeMons(slot, partnerSlot);
+    return TRUE;
+}
+bool32 ModsOwnedLinkTradeTestBegin(u32 slot) { return ModsOwnedLinkTradeTestBeginAt(slot, 0); }
+void ModsOwnedLinkTradeTestConfirm(void)
+{
+    u8 oldState = gMain.state;
+    gMain.state = 0;
+    CB2_TryLinkTradeEvolution();
+    gMain.state = oldState;
+}
+void ModsOwnedLinkTradeTestEnd(void)
+{
+    NativeOwnedTrackLinkFinish(FALSE);
+    if (sTradeAnim) Free(sTradeAnim);
+    sTradeAnim = NULL; sModsLinkTradeActive = FALSE; gSoftResetDisabled = FALSE;
+}
+void ModsOwnedLinkTradeTestSaved(bool32 saved) { FinishLinkTradeSave(saved); }
+void ModsOwnedLinkTradeTestCompleteSave(void) { CompleteLinkTradeSave(); }
+bool8 ModsOwnedLinkTradeTestBeginSave(void) { return BeginLinkTradeSave(); }
+#endif
 
 static void HandleLinkDataReceive(void)
 {
@@ -4554,7 +4864,10 @@ static void BufferInGameTradeMonName(void)
 {
     u8 nickname[max(32, POKEMON_NAME_BUFFER_SIZE)];
     const struct InGameTrade *inGameTrade = &sIngameTrades[gSpecialVar_0x8005];
-    GetMonData(&gParties[B_TRAINER_PLAYER][gSpecialVar_0x8005], MON_DATA_NICKNAME, nickname);
+    struct Pokemon *received = gSpecialVar_0x8004 == PC_MON_CHOSEN
+        ? &gParties[B_TRAINER_OPPONENT_A][TRADEMON_FROM_PC]
+        : &gParties[B_TRAINER_PLAYER][gSpecialVar_0x8004];
+    GetMonData(received, MON_DATA_NICKNAME, nickname);
     StringCopy_Nickname(gStringVar1, nickname);
     StringCopy(gStringVar2, GetSpeciesName(inGameTrade->species));
 }
@@ -4729,7 +5042,11 @@ static void CB2_SaveAndEndTrade(void)
             MysteryGift_TryIncrementStat(CARD_STAT_NUM_TRADES, gLinkPlayers[GetMultiplayerId() ^ 1].trainerId);
 
         SetContinueGameWarpStatusToDynamicWarp();
+#ifdef NATIVE
+        BeginLinkTradeSave();
+#else
         LinkFullSave_Init();
+#endif
         gMain.state++;
         sTradeAnim->timer = 0;
         break;
@@ -4779,7 +5096,11 @@ static void CB2_SaveAndEndTrade(void)
     case 42:
         if (_IsLinkTaskFinished())
         {
+#ifdef NATIVE
+            CompleteLinkTradeSave();
+#else
             LinkFullSave_SetLastSectorSignature();
+#endif
             gMain.state = 5;
         }
         break;
@@ -4843,6 +5164,10 @@ static void CB2_FreeTradeAnim(void)
 {
     if (!gPaletteFade.active)
     {
+#ifdef NATIVE
+        NativeOwnedTrackTradeEnd();
+        sModsLinkTradeActive = FALSE;
+#endif
         FreeAllWindowBuffers();
         Free(GetBgTilemapBuffer(3));
         Free(GetBgTilemapBuffer(1));
@@ -5026,7 +5351,11 @@ static void CB2_SaveAndEndWirelessTrade(void)
             StringExpandPlaceholders(gStringVar4, gText_SavingDontTurnOffPower);
             DrawTextOnTradeWindow(0, gStringVar4, 0);
             IncrementGameStat(GAME_STAT_POKEMON_TRADES);
+#ifdef NATIVE
+            BeginLinkTradeSave();
+#else
             LinkFullSave_Init();
+#endif
             sTradeAnim->timer = 0;
         }
         break;
@@ -5074,7 +5403,11 @@ static void CB2_SaveAndEndWirelessTrade(void)
     case 8:
         if (_IsLinkTaskFinished())
         {
+#ifdef NATIVE
+            CompleteLinkTradeSave();
+#else
             LinkFullSave_SetLastSectorSignature();
+#endif
             gMain.state = 9;
         }
         break;

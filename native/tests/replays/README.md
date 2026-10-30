@@ -11,7 +11,9 @@ and save; reload, visit the rival, enter Route 101, choose Torchic, win the
 starter battle, nickname it, finish Birch's dialogue and save. Fresh processes
 then Continue, Save again and Continue again, comparing persistent state.
 
-Every run creates a new artifact directory containing the real save, reports,
-traces, logs and BMP screenshots. The subsystem and gameplay regression
-binaries are separate checks. Interactive controls are Z/X, Enter, Backspace,
-arrow keys and A/S for the shoulder buttons.
+Every run creates a temporary directory containing the real save, reports,
+traces, logs and BMP screenshots and removes it afterward, including on failure.
+Pass `--output PATH` to retain those artifacts for inspection. The subsystem and gameplay regression
+binaries are separate checks. The default interactive controls are Z/X, Enter,
+either Shift, arrow keys and A/S for the shoulder buttons. The logical replay
+events are independent of the player's keyboard bindings.

@@ -7,6 +7,10 @@
 #include "text.h"
 #include "battle_anim.h"
 #include "test/test.h"
+#ifdef NATIVE
+#include "mods.h"
+#include "photo_visibility.h"
+#endif
 
 #define MAX_SPRITE_COPY_REQUESTS 64
 
@@ -278,6 +282,9 @@ void ResetSpriteData(void)
     ResetOamRange(0, 128);
     sOamDummyIndex = 0;
     ResetAllSprites();
+#ifdef NATIVE
+    ModsReclaimCustomTypeIcons();
+#endif
     ClearSpriteCopyRequests();
     ResetAffineAnimData();
     FreeSpriteTileRanges();
@@ -383,9 +390,19 @@ void BuildOamBuffer(void)
     oamLoadDisabled = gMain.oamLoadDisabled;
     gMain.oamLoadDisabled = TRUE;
 
+#ifdef NATIVE
+    NativePhotoOamBegin();
+#endif
     for (i = 0, oamIndex = 0; i < toSort; i++)
     {
-        if (AddSpriteToOamBuffer(&gSprites[spritePriorities[i] & 0xFF], &oamIndex))
+        u8 first = oamIndex;
+        bool8 full = AddSpriteToOamBuffer(&gSprites[spritePriorities[i] & 0xFF], &oamIndex);
+#ifdef NATIVE
+        NativePhotoOamAdd(first, oamIndex, spritePriorities[i] & 0xFF);
+#else
+        (void)first;
+#endif
+        if (full)
             break;
     }
 
@@ -590,7 +607,12 @@ void ResetOamRange(u32 start, u32 end)
 void LoadOam(void)
 {
     if (!gMain.oamLoadDisabled)
+    {
         CpuCopy32(gMain.oamBuffer, (void *)OAM, sizeof(gMain.oamBuffer));
+#ifdef NATIVE
+        NativePhotoOamLoaded(gMain.oamBuffer);
+#endif
+    }
 }
 
 void ClearSpriteCopyRequests(void)
@@ -1482,7 +1504,7 @@ void FreeOamMatrix(u8 matrixNum)
     SetOamMatrix(matrixNum, 0x100, 0, 0, 0x100);
 }
 
-void InitSpriteAffineAnim(struct Sprite *sprite)
+bool8 TryInitSpriteAffineAnim(struct Sprite *sprite)
 {
     u8 matrixNum = AllocOamMatrix();
     if (matrixNum != 0xFF)
@@ -1491,7 +1513,14 @@ void InitSpriteAffineAnim(struct Sprite *sprite)
         sprite->oam.matrixNum = matrixNum;
         sprite->affineAnimBeginning = TRUE;
         AffineAnimStateReset(matrixNum);
+        return TRUE;
     }
+    return FALSE;
+}
+
+void InitSpriteAffineAnim(struct Sprite *sprite)
+{
+    (void)TryInitSpriteAffineAnim(sprite);
 }
 
 void SetOamMatrixRotationScaling(u8 matrixNum, s16 xScale, s16 yScale, u16 rotation)
@@ -1733,6 +1762,14 @@ void FreeSpritePaletteByTag(u16 tag)
     if (index != 0xFF)
         sSpritePaletteTags[index] = TAG_NONE;
 }
+
+#ifdef NATIVE
+void FreeSpritePaletteSlotByTag(u8 paletteNum, u16 tag)
+{
+    if (paletteNum < 16 && sSpritePaletteTags[paletteNum] == tag)
+        sSpritePaletteTags[paletteNum] = TAG_NONE;
+}
+#endif
 
 void SetSubspriteTables(struct Sprite *sprite, const struct SubspriteTable *subspriteTables)
 {

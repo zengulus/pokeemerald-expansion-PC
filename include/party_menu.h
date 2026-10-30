@@ -101,6 +101,9 @@ bool8 MonKnowsMove(struct Pokemon *mon, enum Move move);
 bool8 BoxMonKnowsMove(struct BoxPokemon *boxMon, enum Move move);
 void ItemUseCB_TMHM(u8 taskId, TaskFunc task);
 void ItemUseCB_RareCandy(u8 taskId, TaskFunc task);
+#ifdef NATIVE
+bool32 StartPartyExperienceFlow(u32 slot);
+#endif
 void ItemUseCB_DynamaxCandy(u8 taskId, TaskFunc task);
 void ItemUseCB_SacredAsh(u8 taskId, TaskFunc task);
 void ItemUseCB_EvolutionStone(u8 taskId, TaskFunc task);

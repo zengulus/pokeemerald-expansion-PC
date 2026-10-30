@@ -200,7 +200,15 @@ bool8 ObjectEventIsHeldMovementActive(struct ObjectEvent *objectEvent);
 u8 ObjectEventClearHeldMovementIfFinished(struct ObjectEvent *objectEvent);
 u8 GetObjectEventIdByPosition(u16 x, u16 y, u8 elevation);
 void SetTrainerMovementType(struct ObjectEvent *objectEvent, u8 movementType);
+#ifdef NATIVE
+bool8 ObjectEventUsesStandardMovementCallback(const struct ObjectEvent *objectEvent, const struct Sprite *sprite);
+#endif
 u8 GetCollisionInDirection(struct ObjectEvent *, enum Direction);
+#ifdef NATIVE
+u8 GetCollisionInDirectionNoEffects(struct ObjectEvent *, enum Direction, u8 *overwrite);
+u8 GetCollisionInDirectionNoEffectsIgnoring(struct ObjectEvent *, const struct ObjectEvent *ignore,
+                                            enum Direction, u8 *overwrite);
+#endif
 u8 GetTrainerFacingDirectionMovementType(enum Direction direction);
 const u8 *GetObjectEventScriptPointerByObjectEventId(u8 objectEventId);
 u8 GetCollisionFlagsAtCoords(struct ObjectEvent *objectEvent, s16 x, s16 y, enum Direction direction);

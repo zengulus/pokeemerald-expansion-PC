@@ -77,6 +77,9 @@
 #include "vs_seeker.h"
 #include "load_save.h"
 #include "battle_partner.h"
+#ifdef NATIVE
+#include "mods.h"
+#endif
 
 enum FollowerNPCCreateDebugMenu
 {
@@ -3636,6 +3639,25 @@ static enum Species GetNextSpecies(enum Species species)
     return species;
 }
 
+bool32 DebugStoreBoxMon(u32 box, u32 position, struct BoxPokemon *mon)
+{
+    if (!gPokemonStoragePtr || !mon || !mon->hasSpecies || box >= TOTAL_BOXES_COUNT || position >= IN_BOX_COUNT)
+        return FALSE;
+    struct BoxPokemon *destination = &gPokemonStoragePtr->boxes[box][position];
+    if (destination->hasSpecies) return FALSE;
+#ifdef NATIVE
+    struct RhhOwnedGift gift;
+    bool32 captured = ModsOwnedGiftCapture(mon, RHH_GIFT_DEBUG, &gift);
+    if (captured) ModsOwnedGiftDestination(destination, RHH_MON_BOX, box, position, &gift);
+#endif
+    *destination = *mon;
+#ifdef NATIVE
+    if (captured) ModsOwnedGiftCommitted(destination, &gift);
+    else NativeOwnedTrackerUnsupported();
+#endif
+    return TRUE;
+}
+
 static void DebugAction_PCBag_Fill_PCBoxes_Fast(u8 taskId) //Credit: Sierraffinity
 {
     int boxId, boxPosition;
@@ -3656,7 +3678,7 @@ static void DebugAction_PCBag_Fill_PCBoxes_Fast(u8 taskId) //Credit: Sierraffini
                 SetBoxMonData(&boxMon, MON_DATA_NICKNAME, &speciesName);
                 SetBoxMonData(&boxMon, MON_DATA_SPECIES, &species);
                 GiveBoxMonInitialMoveset(&boxMon);
-                gPokemonStoragePtr->boxes[boxId][boxPosition] = boxMon;
+                DebugStoreBoxMon(boxId, boxPosition, &boxMon);
                 species = GetNextSpecies(species);
             }
         }
@@ -3686,7 +3708,7 @@ static void DebugAction_PCBag_Fill_PCBoxes_Slow(u8 taskId)
                 CreateBoxMon(&boxMon, species, 100, Random32(), OTID_STRUCT_PLAYER_ID);
                 SetBoxMonIVs(&boxMon, USE_RANDOM_IVS);
                 GiveBoxMonInitialMoveset(&boxMon);
-                gPokemonStoragePtr->boxes[boxId][boxPosition] = boxMon;
+                DebugStoreBoxMon(boxId, boxPosition, &boxMon);
                 species = GetNextSpecies(species);
                 spaceAvailable = TRUE;
             }

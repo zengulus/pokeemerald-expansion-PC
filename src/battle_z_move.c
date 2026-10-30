@@ -6,6 +6,7 @@
 #include "battle_controllers.h"
 #include "battle_interface.h"
 #include "battle_message.h"
+#include "battle_main.h"
 #include "battle_z_move.h"
 #include "battle_scripts.h"
 #include "battle_stat_change.h"
@@ -253,10 +254,25 @@ enum Move GetTypeBasedZMove(enum Move move)
     if (gBattleStruct->dynamicMoveType && GetMoveEffect(move) == EFFECT_WEATHER_BALL)
         moveType = gBattleStruct->dynamicMoveType;
 
+    // Dynamic types may not have an engine-defined Z-Move.
+    if (moveType >= NUMBER_OF_MON_TYPES)
+        moveType = TYPE_MYSTERY;
     // Get Z-Move from type
     if (gTypesInfo[moveType].zMove == MOVE_NONE) // failsafe
         return gTypesInfo[0].zMove;
     return gTypesInfo[moveType].zMove;
+}
+
+bool32 IsMoveSelectionCurseGhost(enum BattlerId battler, const struct ChooseMoveStruct *moveInfo)
+{
+#ifdef NATIVE
+    if (!(gBattleTypeFlags & (BATTLE_TYPE_LINK | BATTLE_TYPE_RECORDED | BATTLE_TYPE_RECORDED_LINK)))
+        return IS_BATTLER_OF_TYPE(battler, TYPE_GHOST);
+#else
+    (void)battler;
+#endif
+    return moveInfo->monTypes[0] == TYPE_GHOST || moveInfo->monTypes[1] == TYPE_GHOST
+        || moveInfo->monTypes[2] == TYPE_GHOST;
 }
 
 bool32 MoveSelectionDisplayZMove(enum Move zmove, enum BattlerId battler)
@@ -285,7 +301,7 @@ bool32 MoveSelectionDisplayZMove(enum Move zmove, enum BattlerId battler)
 
             if (zEffect == Z_EFFECT_CURSE)
             {
-                if (moveInfo->monTypes[0] == TYPE_GHOST || moveInfo->monTypes[1] == TYPE_GHOST || moveInfo->monTypes[2] == TYPE_GHOST)
+                if (IsMoveSelectionCurseGhost(battler, moveInfo))
                     zEffect = Z_EFFECT_RECOVER_HP;
                 else
                     zEffect = Z_EFFECT_ATK_UP_1;
@@ -426,7 +442,7 @@ static void ZMoveSelectionDisplayMoveType(enum Move zMove, enum BattlerId battle
     *(txtPtr)++ = EXT_CTRL_CODE_FONT;
     *(txtPtr)++ = FONT_NORMAL;
 
-    end = StringCopy(txtPtr, gTypesInfo[zMoveType].name);
+    end = StringCopy(txtPtr, GetTypeName(zMoveType));
     PrependFontIdToFit(txtPtr, end, FONT_NORMAL, WindowWidthPx(B_WIN_MOVE_TYPE) - 25);
     BattlePutTextOnWindow(gDisplayedStringBattle, B_WIN_MOVE_TYPE);
 }

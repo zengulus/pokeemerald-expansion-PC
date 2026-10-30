@@ -1,4 +1,9 @@
 #include "global.h"
+#ifdef NATIVE
+#include "native_speed.h"
+#include "mods.h"
+#include "owned_identity_ledger.h"
+#endif
 #include "battle.h"
 #include "battle_anim.h"
 #include "battle_ai_main.h"
@@ -293,6 +298,26 @@ const struct OamData gOamData_BattleSpritePlayerSide =
 static const s8 sCenterToCornerVecXs[8] ={-32, -16, -16, -32, -32};
 
 #include "data/types_info.h"
+
+const u8 *GetTypeName(u32 type)
+{
+    if (type < NUMBER_OF_MON_TYPES) return gTypesInfo[type].name;
+#ifdef NATIVE
+    const u8 *custom = ModsCustomTypeName(type, FALSE);
+    if (custom) return custom;
+#endif
+    return gTypesInfo[TYPE_MYSTERY].name;
+}
+
+const u8 *GetTypeGenericName(u32 type)
+{
+    if (type < NUMBER_OF_MON_TYPES) return gTypesInfo[type].generic;
+#ifdef NATIVE
+    const u8 *custom = ModsCustomTypeName(type, TRUE);
+    if (custom) return custom;
+#endif
+    return gTypesInfo[TYPE_NONE].generic;
+}
 
 // [TRAINER_CLASS_XYZ] = { _("name"), <money=5>, <ball=BALL_POKE> }
 const struct TrainerClass gTrainerClasses[TRAINER_CLASS_COUNT] =
@@ -607,6 +632,9 @@ static void CB2_InitBattleInternal(void)
             TryFormChange(&gParties[B_TRAINER_OPPONENT_A][1], FORM_CHANGE_BEGIN_WILD_ENCOUNTER, B_TRAINER_OPPONENT_A);
     }
 
+#ifdef NATIVE
+    ModsWildFirstBattleReady();
+#endif
     for (enum BattleTrainer trainer = B_TRAINER_PLAYER; trainer < MAX_BATTLE_TRAINERS; trainer++)
         gPartiesCount[trainer] = CalculatePartyCount(trainer);
 
@@ -1159,7 +1187,11 @@ static void CB2_HandleStartMultiPartnerBattle(void)
         {
             // Recv partner's Pokémon 1-2, put each player's mons in their own party
             ResetBlockReceivedFlags();
+#ifdef NATIVE
+            NativeOwnedTrackLocalEcho(gParties[B_TRAINER_PLAYER], gBlockRecvBuffer[playerMultiplayerId], sizeof(struct Pokemon) * 2);
+#else
             memcpy(gParties[B_TRAINER_PLAYER], gBlockRecvBuffer[playerMultiplayerId], sizeof(struct Pokemon) * 2);
+#endif
             memcpy(gParties[B_TRAINER_PARTNER], gBlockRecvBuffer[partnerMultiplayerId], sizeof(struct Pokemon) * 2);
             gBattleCommunication[MULTIUSE_STATE]++;
         }
@@ -1177,7 +1209,11 @@ static void CB2_HandleStartMultiPartnerBattle(void)
         {
             // Recv partner's Pokémon 3, put each player's mon in their own party
             ResetBlockReceivedFlags();
+#ifdef NATIVE
+            NativeOwnedTrackLocalEcho(&gParties[B_TRAINER_PLAYER][2], gBlockRecvBuffer[playerMultiplayerId], sizeof(struct Pokemon));
+#else
             memcpy(&gParties[B_TRAINER_PLAYER][2], gBlockRecvBuffer[playerMultiplayerId], sizeof(struct Pokemon));
+#endif
             memcpy(&gParties[B_TRAINER_PARTNER][2], gBlockRecvBuffer[partnerMultiplayerId], sizeof(struct Pokemon));
             gBattleCommunication[MULTIUSE_STATE]++;
         }
@@ -1620,7 +1656,12 @@ static void CB2_HandleStartMultiBattle(void)
                     trainer = B_TRAINER_OPPONENT_A;
                 else
                     trainer = B_TRAINER_OPPONENT_B;
-                memcpy(gParties[trainer], gBlockRecvBuffer[id], sizeof(struct Pokemon) * 2);
+#ifdef NATIVE
+                if (trainer == B_TRAINER_PLAYER)
+                    NativeOwnedTrackLocalEcho(gParties[trainer], gBlockRecvBuffer[id], sizeof(struct Pokemon) * 2);
+                else
+#endif
+                    memcpy(gParties[trainer], gBlockRecvBuffer[id], sizeof(struct Pokemon) * 2);
             }
             gBattleCommunication[MULTIUSE_STATE]++;
         }
@@ -1650,7 +1691,12 @@ static void CB2_HandleStartMultiBattle(void)
                     trainer = B_TRAINER_OPPONENT_A;
                 else
                     trainer = B_TRAINER_OPPONENT_B;
-                memcpy(&gParties[trainer][2], gBlockRecvBuffer[id], sizeof(struct Pokemon));
+#ifdef NATIVE
+                if (trainer == B_TRAINER_PLAYER)
+                    NativeOwnedTrackLocalEcho(&gParties[trainer][2], gBlockRecvBuffer[id], sizeof(struct Pokemon));
+                else
+#endif
+                    memcpy(&gParties[trainer][2], gBlockRecvBuffer[id], sizeof(struct Pokemon));
             }
 
             for (enum BattleTrainer trainerParty = B_TRAINER_PLAYER; trainerParty < MAX_BATTLE_TRAINERS; trainerParty++)
@@ -1730,10 +1776,29 @@ static void CB2_HandleStartMultiBattle(void)
 void BattleMainCB2(void)
 {
     AnimateSprites();
+#ifndef NATIVE
     BuildOamBuffer();
+#endif
     RunTextPrinters();
     UpdatePaletteFade();
     RunTasks();
+#ifdef NATIVE
+    static unsigned phase;
+    if (gSaveBlock2Ptr && gAnimScriptActive && !(gBattleTypeFlags & (BATTLE_TYPE_LINK | BATTLE_TYPE_RECORDED | BATTLE_TYPE_FRONTIER)))
+    {
+        unsigned extra = NativeSpeedExtraSteps(gSaveBlock2Ptr->optionsBattleSpeed, &phase);
+        while (extra-- && gAnimScriptActive && gMain.callback2 == BattleMainCB2)
+        {
+            u32 before = gNativeAnimStepCount;
+            AnimateSprites();
+            RunTasks();
+            if (gAnimScriptActive && before == gNativeAnimStepCount)
+                NativeBattleAnimStep();
+        }
+    }
+    else phase = 0;
+    BuildOamBuffer();
+#endif
 
     if (JOY_HELD(B_BUTTON) && gBattleTypeFlags & BATTLE_TYPE_RECORDED && RecordedBattle_CanStopPlayback())
     {
@@ -1781,6 +1846,9 @@ void CB2_QuitRecordedBattle(void)
             gCurrentActionFuncId = B_ACTION_FINISHED;
             sEndTurnFuncsTable[gBattleOutcome & 0x7F](); // Contains TestRunner_Battle_AfterLastTurn
         }
+#ifdef NATIVE
+        ModsBattleEnd(gBattleOutcome, TRUE);
+#endif
         FreeRestoreBattleData();
         FreeAllWindowBuffers();
         SetMainCallback2(gMain.savedCallback);
@@ -2952,6 +3020,11 @@ static void ClearSetDataOnLeave(enum BattlerId battler)
 void SwitchInClearSetData(enum BattlerId battler, struct Volatiles *volatilesCopy)
 {
     enum BattleMoveEffects effect = GetMoveEffect(gCurrentMove);
+#ifdef NATIVE
+    struct ModsGasChangeCapture gasChange = {0};
+    if (gBattleMons[battler].volatiles.neutralizingGas && !gBattleMons[battler].volatiles.gastroAcid)
+        ModsGasChangeCapture(&gasChange);
+#endif
 
     // Data cleared both on switch and faint
     ClearSetDataOnLeave(battler);
@@ -3043,10 +3116,18 @@ void SwitchInClearSetData(enum BattlerId battler, struct Volatiles *volatilesCop
     #endif // TESTING
 
     Ai_UpdateSwitchInData(battler);
+#ifdef NATIVE
+    ModsGasChangeCommitted(&gasChange, RHH_GAS_SWITCHED_OUT, battler, 0);
+#endif
 }
 
 void FaintClearSetData(enum BattlerId battler)
 {
+#ifdef NATIVE
+    struct ModsGasChangeCapture gasChange = {0};
+    if (gBattleMons[battler].volatiles.neutralizingGas && !gBattleMons[battler].volatiles.gastroAcid)
+        ModsGasChangeCapture(&gasChange);
+#endif
     // Data cleared both on switch and faint
     ClearSetDataOnLeave(battler);
 
@@ -3085,6 +3166,9 @@ void FaintClearSetData(enum BattlerId battler)
 
     Ai_UpdateFaintData(battler);
     TryBattleFormChange(battler, FORM_CHANGE_FAINT, GetBattlerAbility(battler));
+#ifdef NATIVE
+    ModsGasChangeCommitted(&gasChange, RHH_GAS_FAINTED, battler, 0);
+#endif
 }
 
 static void DoBattleIntro(void)
@@ -3133,10 +3217,14 @@ static void DoBattleIntro(void)
             }
             else
             {
-                memcpy(&gBattleMons[battler], &gBattleResources->bufferB[battler][4], sizeof(struct BattlePokemon));
+                memcpy(&gBattleMons[battler], &gBattleResources->bufferB[battler][4], BATTLE_POKEMON_TRANSFER_SIZE);
                 gBattleMons[battler].types[0] = GetSpeciesType(gBattleMons[battler].species, 0);
                 gBattleMons[battler].types[1] = GetSpeciesType(gBattleMons[battler].species, 1);
                 gBattleMons[battler].types[2] = TYPE_MYSTERY;
+#ifdef NATIVE
+                ModsBattleMonSpeciesTypes(&gBattleMons[battler]);
+                CaptureBattlerNature(battler);
+#endif
                 gBattleMons[battler].ability = GetAbilityBySpecies(gBattleMons[battler].species, gBattleMons[battler].abilityNum);
                 gBattleStruct->battlerState[battler].hpOnSwitchout = gBattleMons[battler].hp;
                 memset(&gBattleMons[battler].volatiles, 0, sizeof(struct Volatiles));
@@ -3454,6 +3542,9 @@ static void TryDoEventsBeforeFirstTurn(void)
 
         gBattleStruct->speedTieBreaks = RandomUniform(RNG_SPEED_TIE, 0, Factorial(MAX_BATTLERS_COUNT) - 1);
         gBattleTurnCounter = 0;
+#ifdef NATIVE
+        ModsBattleBegin();
+#endif
         gBattleStruct->eventState.beforeFirstTurn++;
         break;
     case FIRST_TURN_EVENTS_OVERWORLD_WEATHER:
@@ -3602,9 +3693,13 @@ void BattleTurnPassed(void)
 
 bool32 EndTurnEvents(void) // Called from Battle Script
 {
-    gBattleStruct->speedTieBreaks = RandomUniform(RNG_SPEED_TIE, 0, Factorial(MAX_BATTLERS_COUNT) - 1);
-
-    TurnValuesCleanUp(TRUE);
+#ifdef NATIVE
+    if (!ModsConsumeEndTurnMessageResume())
+#endif
+    {
+        gBattleStruct->speedTieBreaks = RandomUniform(RNG_SPEED_TIE, 0, Factorial(MAX_BATTLERS_COUNT) - 1);
+        TurnValuesCleanUp(TRUE);
+    }
 
     if (DoEndTurnEffects())
         return TRUE;
@@ -3653,7 +3748,14 @@ bool32 EndTurnEvents(void) // Called from Battle Script
             gSideTimers[i].retaliateTimer--;
     }
 
+#ifdef NATIVE
+    struct RhhBattleFieldRules beforeFieldRules;
+    bool32 fieldRulesCaptured = ModsBattleFieldRulesCapture(&beforeFieldRules);
+#endif
     gFieldStatuses &= ~STATUS_FIELD_ION_DELUGE;
+#ifdef NATIVE
+    if (fieldRulesCaptured) ModsBattleFieldRulesCommitted(&beforeFieldRules, RHH_BATTLE_FIELD_CAUSE_CLEARED, RHH_BATTLE_NO_BATTLER, MOVE_NONE);
+#endif
 
     BattlePutTextOnWindow(gText_EmptyString3, B_WIN_MSG);
     AssignUsableGimmicks();
@@ -4370,7 +4472,7 @@ void SwapTurnOrder(u8 id1, u8 id2)
 }
 
 // For AI, so it doesn't 'cheat' by knowing player's ability
-u32 GetBattlerTotalSpeedStat(enum BattlerId battler, enum Ability ability, enum HoldEffect holdEffect)
+static u32 GetBattlerTotalSpeedStatInternal(enum BattlerId battler, enum Ability ability, enum HoldEffect holdEffect, bool32 ai)
 {
     u32 speed = gBattleMons[battler].speed;
 
@@ -4378,7 +4480,12 @@ u32 GetBattlerTotalSpeedStat(enum BattlerId battler, enum Ability ability, enum 
     speed *= gStatStageRatios[gBattleMons[battler].statStages[STAT_SPEED]][0];
     speed /= gStatStageRatios[gBattleMons[battler].statStages[STAT_SPEED]][1];
 
-    u32 weather = GetWeather();
+    u32 weather = GetWeather(), terrain = gFieldTimers.terrain;
+#ifdef NATIVE
+    ai = ai || (gAiLogicData && gAiLogicData->aiCalcInProgress);
+    u32 forecast;
+    if (ai && ModsAiSwitchFieldView(&forecast, &terrain, NULL)) weather = AI_ApplyWeatherSuppression(forecast);
+#endif
     // weather abilities
     if (ability == ABILITY_SWIFT_SWIM       && holdEffect != HOLD_EFFECT_UTILITY_UMBRELLA && weather  & B_WEATHER_RAIN)
         speed *= 2;
@@ -4392,13 +4499,13 @@ u32 GetBattlerTotalSpeedStat(enum BattlerId battler, enum Ability ability, enum 
     // other abilities
     if (ability == ABILITY_QUICK_FEET && gBattleMons[battler].status1 & STATUS1_ANY)
         speed = (speed * 150) / 100;
-    else if (ability == ABILITY_SURGE_SURFER && gFieldTimers.terrain == B_TERRAIN_ELECTRIC)
+    else if (ability == ABILITY_SURGE_SURFER && terrain == B_TERRAIN_ELECTRIC)
         speed *= 2;
     else if (ability == ABILITY_SLOW_START && gBattleMons[battler].volatiles.slowStartTimer != 0)
         speed /= 2;
     else if ((ability == ABILITY_PROTOSYNTHESIS && !gBattleMons[battler].volatiles.transformed && weather & B_WEATHER_SUN) || gBattleMons[battler].volatiles.boosterEnergyActivated)
         speed = (GetParadoxBoostedStatId(battler) == STAT_SPEED) ? (speed * 150) / 100 : speed;
-    else if (ability == ABILITY_QUARK_DRIVE && !(gBattleMons[battler].volatiles.transformed) && (gFieldTimers.terrain == B_TERRAIN_ELECTRIC || gBattleMons[battler].volatiles.boosterEnergyActivated))
+    else if (ability == ABILITY_QUARK_DRIVE && !(gBattleMons[battler].volatiles.transformed) && (terrain == B_TERRAIN_ELECTRIC || gBattleMons[battler].volatiles.boosterEnergyActivated))
         speed = (GetParadoxBoostedStatId(battler) == STAT_SPEED) ? (speed * 150) / 100 : speed;
     else if (ability == ABILITY_UNBURDEN && gBattleMons[battler].volatiles.unburdenActive)
         speed *= 2;
@@ -4432,10 +4539,23 @@ u32 GetBattlerTotalSpeedStat(enum BattlerId battler, enum Ability ability, enum 
     if (gSideStatuses[GetBattlerSide(battler)] & SIDE_STATUS_SWAMP)
         speed /= 4;
 
+#ifdef NATIVE
+    return ModsBattlerSpeed(battler, ability, holdEffect, weather, terrain, speed, ai);
+#else
+    (void)ai;
     return speed;
+#endif
 }
 
-s32 GetChosenMovePriority(enum BattlerId battler, enum Ability ability)
+u32 GetBattlerTotalSpeedStat(enum BattlerId battler, enum Ability ability, enum HoldEffect holdEffect)
+{ return GetBattlerTotalSpeedStatInternal(battler, ability, holdEffect, FALSE); }
+
+u32 GetAiBattlerTotalSpeedStat(enum BattlerId battler, enum Ability ability, enum HoldEffect holdEffect)
+{ return GetBattlerTotalSpeedStatInternal(battler, ability, holdEffect, TRUE); }
+
+static s32 GetBattleMovePriorityInternal(enum BattlerId battler, enum Ability ability, enum Move move, bool32 ai);
+
+static s32 GetChosenMovePriorityInternal(enum BattlerId battler, enum Ability ability, bool32 ai)
 {
     enum Move move;
 
@@ -4450,25 +4570,61 @@ s32 GetChosenMovePriority(enum BattlerId battler, enum Ability ability)
     else
         move = GetBattlerChosenMove(battler);
 
-    return GetBattleMovePriority(battler, ability, move);
+    return GetBattleMovePriorityInternal(battler, ability, move, ai);
+}
+
+s32 GetChosenMovePriority(enum BattlerId battler, enum Ability ability)
+{
+    return GetChosenMovePriorityInternal(battler, ability, FALSE);
+}
+
+s32 GetAiChosenMovePriority(enum BattlerId battler, enum Ability ability)
+{
+    return GetChosenMovePriorityInternal(battler, ability, TRUE);
 }
 
 s32 GetBattleMovePriority(enum BattlerId battler, enum Ability ability, enum Move move)
 {
+    return GetBattleMovePriorityInternal(battler, ability, move, FALSE);
+}
+
+s32 GetAiBattleMovePriority(enum BattlerId battler, enum Ability ability, enum Move move)
+{
+    return GetBattleMovePriorityInternal(battler, ability, move, TRUE);
+}
+
+static s32 GetBattleMovePriorityInternal(enum BattlerId battler, enum Ability ability, enum Move move, bool32 ai)
+{
     s32 priority = 0;
+#ifdef NATIVE
+    enum Move chosenMove = move;
+    ai = ai || (gAiLogicData && gAiLogicData->aiCalcInProgress);
+#else
+    (void)ai;
+#endif
 
     if (GetActiveGimmick(battler) == GIMMICK_Z_MOVE && !IsBattleMoveStatus(move))
         move = GetUsableZMove(battler, move);
 
     priority = GetMovePriority(move);
+#ifdef NATIVE
+    s32 basePriority = priority;
+#endif
 
     // Max Guard check
     if (GetActiveGimmick(battler) == GIMMICK_DYNAMAX && GetMoveCategory(move) == DAMAGE_CATEGORY_STATUS)
-        return GetMovePriority(MOVE_MAX_GUARD);
+    {
+        priority = GetMovePriority(MOVE_MAX_GUARD);
+#ifdef NATIVE
+        return ModsMoveBattlerPriority(battler, ability, chosenMove, MOVE_MAX_GUARD, priority, priority, TRUE, ai);
+#else
+        return priority;
+#endif
+    }
 
     if (gProtectStructs[battler].quash)
     {
-        priority = -8;
+        return -8;
     }
     else if (ability == ABILITY_GALE_WINGS
           && (GetConfig(B_GALE_WINGS) < GEN_7 || IsBattlerAtMaxHp(battler))
@@ -4492,7 +4648,11 @@ s32 GetBattleMovePriority(enum BattlerId battler, enum Ability ability, enum Mov
         priority += 3;
     }
 
+#ifdef NATIVE
+    return ModsMoveBattlerPriority(battler, ability, chosenMove, move, basePriority, priority, FALSE, ai);
+#else
     return priority;
+#endif
 }
 
 s32 GetWhichBattlerFasterArgs(struct BattleCalcValues *calcValues, bool32 ignoreChosenMoves, u32 speedBattler1, u32 speedBattler2, s32 priority1, s32 priority2)
@@ -4555,18 +4715,18 @@ s32 GetWhichBattlerFasterArgs(struct BattleCalcValues *calcValues, bool32 ignore
     return strikesFirst;
 }
 
-s32 GetWhichBattlerFasterOrTies(struct BattleCalcValues *calcValues, bool32 ignoreChosenMoves)
+static s32 GetWhichBattlerFasterOrTiesInternal(struct BattleCalcValues *calcValues, bool32 ignoreChosenMoves, bool32 ai)
 {
     s32 priority1 = 0, priority2 = 0;
-    u32 speedBattler1 = GetBattlerTotalSpeedStat(calcValues->battlerAtk, calcValues->abilities[calcValues->battlerAtk], calcValues->holdEffects[calcValues->battlerAtk]);
-    u32 speedBattler2 = GetBattlerTotalSpeedStat(calcValues->battlerDef, calcValues->abilities[calcValues->battlerDef], calcValues->holdEffects[calcValues->battlerDef]);
+    u32 speedBattler1 = GetBattlerTotalSpeedStatInternal(calcValues->battlerAtk, calcValues->abilities[calcValues->battlerAtk], calcValues->holdEffects[calcValues->battlerAtk], ai);
+    u32 speedBattler2 = GetBattlerTotalSpeedStatInternal(calcValues->battlerDef, calcValues->abilities[calcValues->battlerDef], calcValues->holdEffects[calcValues->battlerDef], ai);
 
     if (!ignoreChosenMoves)
     {
         if (gChosenActionByBattler[calcValues->battlerAtk] == B_ACTION_USE_MOVE)
-            priority1 = GetChosenMovePriority(calcValues->battlerAtk, calcValues->abilities[calcValues->battlerAtk]);
+            priority1 = GetChosenMovePriorityInternal(calcValues->battlerAtk, calcValues->abilities[calcValues->battlerAtk], ai);
         if (gChosenActionByBattler[calcValues->battlerDef] == B_ACTION_USE_MOVE)
-            priority2 = GetChosenMovePriority(calcValues->battlerDef, calcValues->abilities[calcValues->battlerDef]);
+            priority2 = GetChosenMovePriorityInternal(calcValues->battlerDef, calcValues->abilities[calcValues->battlerDef], ai);
     }
 
     return GetWhichBattlerFasterArgs(
@@ -4577,6 +4737,12 @@ s32 GetWhichBattlerFasterOrTies(struct BattleCalcValues *calcValues, bool32 igno
         priority1,
         priority2);
 }
+
+s32 GetWhichBattlerFasterOrTies(struct BattleCalcValues *calcValues, bool32 ignoreChosenMoves)
+{ return GetWhichBattlerFasterOrTiesInternal(calcValues, ignoreChosenMoves, FALSE); }
+
+s32 GetAiWhichBattlerFasterOrTies(struct BattleCalcValues *calcValues, bool32 ignoreChosenMoves)
+{ return GetWhichBattlerFasterOrTiesInternal(calcValues, ignoreChosenMoves, TRUE); }
 
 // 24 == MAX_BATTLERS_COUNT!.
 // These are the possible orders if all the battlers speed tie.
@@ -5281,6 +5447,9 @@ static void HandleEndTurn_FinishBattle(void)
             TryPutBreakingNewsOnAir();
         }
 
+#ifdef NATIVE
+        ModsBattleEnd(gBattleOutcome, FALSE);
+#endif
         BeginFastPaletteFade(3);
         FadeOutMapMusic(5);
         TryRestoreHeldItems();
@@ -5545,6 +5714,9 @@ enum Type GetDynamicMoveType(struct Pokemon *mon, enum Move move, enum BattlerId
         types[0] = GetSpeciesType(species, 0);
         types[1] = GetSpeciesType(species, 1);
         types[2] = TYPE_MYSTERY;
+#ifdef NATIVE
+        ModsSpeciesTypes(species, (u8 *)types);
+#endif
         gimmick = GIMMICK_NONE;
     }
 
@@ -5631,6 +5803,11 @@ enum Type GetDynamicMoveType(struct Pokemon *mon, enum Move move, enum BattlerId
         {
             if (state == MON_IN_BATTLE)
             {
+#ifdef NATIVE
+                struct BattleTypeList current;
+                GetBattlerTypeList(battler, FALSE, &current);
+                return current.count ? current.types[0] : TYPE_MYSTERY;
+#else
                 enum Type teraType;
                 if (gimmick == GIMMICK_TERA && ((teraType = GetMonData(mon, MON_DATA_TERA_TYPE)) != TYPE_STELLAR))
                     return teraType;
@@ -5638,12 +5815,13 @@ enum Type GetDynamicMoveType(struct Pokemon *mon, enum Move move, enum BattlerId
                     return types[0];
                 if (types[1] != TYPE_MYSTERY && !(gBattleMons[battler].volatiles.roostActive && types[1] == TYPE_FLYING))
                     return types[1];
-                if (gBattleMons[battler].volatiles.roostActive)
-                    return (B_ROOST_PURE_FLYING >= GEN_5 ? TYPE_NORMAL : TYPE_MYSTERY);
                 if (types[2] != TYPE_MYSTERY)
                     return types[2];
+                if (gBattleMons[battler].volatiles.roostActive)
+                    return (B_ROOST_PURE_FLYING >= GEN_5 ? TYPE_NORMAL : TYPE_MYSTERY);
 
                 return TYPE_MYSTERY;
+#endif
             }
             else
             {
@@ -5657,7 +5835,8 @@ enum Type GetDynamicMoveType(struct Pokemon *mon, enum Move move, enum BattlerId
         case SPECIES_TAUROS_PALDEA_COMBAT:
         case SPECIES_TAUROS_PALDEA_BLAZE:
         case SPECIES_TAUROS_PALDEA_AQUA:
-            return GetSpeciesType(species, 1);
+            GetSpeciesTypes(species, types);
+            return types[1];
         default:
             break;
         }
@@ -5671,7 +5850,8 @@ enum Type GetDynamicMoveType(struct Pokemon *mon, enum Move move, enum BattlerId
         case SPECIES_OGERPON_HEARTHFLAME_TERA:
         case SPECIES_OGERPON_CORNERSTONE:
         case SPECIES_OGERPON_CORNERSTONE_TERA:
-            return GetSpeciesType(species, 1);
+            GetSpeciesTypes(species, types);
+            return types[1];
         default:
             break;
         }
@@ -5706,7 +5886,13 @@ enum Type GetDynamicMoveType(struct Pokemon *mon, enum Move move, enum BattlerId
         break;
     case EFFECT_TERA_BLAST:
         if (gimmick == GIMMICK_TERA)
-            return GetMonData(mon, MON_DATA_TERA_TYPE);
+        {
+            enum Type teraType = GetMonData(mon, MON_DATA_TERA_TYPE);
+#ifdef NATIVE
+            if (state == MON_IN_BATTLE) teraType = ModsBattleTeraType(battler, teraType, mon);
+#endif
+            return teraType;
+        }
         break;
     case EFFECT_TERA_STARSTORM:
         if (species == SPECIES_TERAPAGOS_STELLAR)

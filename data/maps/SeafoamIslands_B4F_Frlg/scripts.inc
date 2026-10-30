@@ -154,7 +154,9 @@ SeafoamIslands_B4F_Movement_WalkUp::
 SeafoamIslands_B4F_EventScript_Articuno::
 	lock
 	faceplayer
+	identifywildencounter "rhh:encounter/seafoam_islands_b4f_frlg/articuno"
 	setwildbattle SPECIES_ARTICUNO, 50
+	guardwildbattle release
 	waitse
 	playmoncry SPECIES_ARTICUNO, CRY_MODE_ENCOUNTER
 	message Text_Gyaoo
@@ -206,7 +208,7 @@ Text_RockSlideDeclined::
 	.string "Oh, so you are scared after all.$"
 
 Text_RockSlideWhichMon::
-	.string "Which POKéMON should I teach\n"
+	.string "Which Pokémon should I teach\n"
 	.string "ROCK SLIDE?$"
 
 Text_RockSlideTaught::

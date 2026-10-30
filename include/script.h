@@ -34,6 +34,8 @@ struct ScriptContext
     ScrCmdFunc *cmdTableEnd;
 #ifdef NATIVE
     uintptr_t data[4];
+    u64 wildPendingKey, wildPreparedKey;
+    u32 wildPreparedKind;
 #else
     u32 data[4];
 #endif
@@ -85,6 +87,10 @@ void UnlockPlayerFieldControls(void);
 bool8 ArePlayerFieldControlsLocked(void);
 void ScriptContext_Init(void);
 bool8 ScriptContext_IsEnabled(void);
+#ifdef NATIVE
+bool32 ScriptContext_IsGlobal(const struct ScriptContext *ctx);
+void ScriptContext_RecordExplicitEnd(const struct ScriptContext *ctx);
+#endif
 bool8 ScriptContext_RunScript(void);
 void ScriptContext_SetupScript(const u8 *ptr);
 void ScriptContext_ContinueScript(struct ScriptContext *ctx);

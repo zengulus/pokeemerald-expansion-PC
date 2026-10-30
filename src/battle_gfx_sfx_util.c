@@ -177,7 +177,7 @@ u16 ChooseMoveAndTargetInBattlePalace(enum BattlerId battler)
     // Otherwise use move from "Support" group
     for (; i < maxGroupNum; i++)
     {
-        if (gNaturesInfo[GetNatureFromPersonality(gBattleMons[battler].personality)].battlePalacePercents[i] > percent)
+        if (gNaturesInfo[GetBattlerNature(battler)].battlePalacePercents[i] > percent)
             break;
     }
     selectedGroup = i - minGroupNum;
@@ -373,7 +373,7 @@ static u16 GetBattlePalaceTarget(enum BattlerId battler)
         if (gBattleMons[opposing1].hp == gBattleMons[opposing2].hp)
             return (GetBattlerLeftFoe(battler) + (Random() & 2)) << 8;
 
-        switch (gNaturesInfo[GetNatureFromPersonality(gBattleMons[battler].personality)].battlePalaceSmokescreen)
+        switch (gNaturesInfo[GetBattlerNature(battler)].battlePalaceSmokescreen)
         {
         case PALACE_TARGET_STRONGER:
             if (gBattleMons[opposing1].hp > gBattleMons[opposing2].hp)
@@ -537,7 +537,7 @@ bool8 TryHandleLaunchBattleTableAnimation(u8 activeBattler, u8 atkBattler, u8 de
 
 static void Task_ClearBitWhenBattleTableAnimDone(u8 taskId)
 {
-    gAnimScriptCallback();
+    BATTLE_ANIM_STEP();
     if (!gAnimScriptActive)
     {
         gBattleSpritesDataPtr->healthBoxesData[gTasks[taskId].tBattlerId].animFromTableActive = 0;
@@ -586,7 +586,7 @@ void InitAndLaunchSpecialAnimation(enum BattlerId activeBattler, enum BattlerId 
 
 static void Task_ClearBitWhenSpecialAnimDone(u8 taskId)
 {
-    gAnimScriptCallback();
+    BATTLE_ANIM_STEP();
     if (!gAnimScriptActive)
     {
         gBattleSpritesDataPtr->healthBoxesData[gTasks[taskId].tBattlerId].specialAnimActive = 0;

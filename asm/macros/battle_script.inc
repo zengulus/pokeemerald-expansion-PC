@@ -1364,6 +1364,10 @@
 	callnative BS_RemoveWeather
 	.endm
 
+	.macro removeweatherteraformzero
+	callnative BS_RemoveWeatherTeraformZero
+	.endm
+
 	.macro applyterastallization
 	callnative BS_ApplyTerastallization
 	.endm
@@ -1437,6 +1441,14 @@
 
 	.macro removeterrain
 	callnative BS_RemoveTerrain
+	.endm
+
+	.macro removeterrainmove
+	callnative BS_RemoveTerrainMove
+	.endm
+
+	.macro removeterrainteraformzero
+	callnative BS_RemoveTerrainTeraformZero
 	.endm
 
 	.macro setmoveresultflags flags:req

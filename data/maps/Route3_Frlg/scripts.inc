@@ -23,7 +23,7 @@ Route3_Text_ColtonDefeat::
 	.string "You beat me again!$"
 
 Route3_Text_ColtonPostBattle::
-	.string "There are other kinds of POKéMON\n"
+	.string "There are other kinds of Pokémon\n"
 	.string "than the ones you find in forests.$"
 
 Route3_Text_BenIntro::
@@ -36,10 +36,10 @@ Route3_Text_BenDefeat::
 	.string "I don't believe it!$"
 
 Route3_Text_BenPostBattle::
-	.string "Are you using a POKéMON CENTER's\n"
-	.string "PC for storing your POKéMON?\p"
+	.string "Are you using a Pokémon CENTER's\n"
+	.string "PC for storing your Pokémon?\p"
 	.string "Each BOX can hold up to\n"
-	.string "30 POKéMON.$"
+	.string "30 Pokémon.$"
 
 Route3_Text_JaniceIntro::
 	.string "Excuse me!\n"
@@ -53,15 +53,15 @@ Route3_Text_JanicePostBattle::
 	.string "don't want to battle!$"
 
 Route3_Text_GregIntro::
-	.string "Are you a TRAINER?\n"
+	.string "Are you a Trainer?\n"
 	.string "Let's get with it right away!$"
 
 Route3_Text_GregDefeat::
-	.string "If I had new POKéMON, I would've\n"
+	.string "If I had new Pokémon, I would've\n"
 	.string "won!$"
 
 Route3_Text_GregPostBattle::
-	.string "If a POKéMON BOX on the PC gets\n"
+	.string "If a Pokémon BOX on the PC gets\n"
 	.string "full, just switch to another BOX.$"
 
 Route3_Text_SallyIntro::
@@ -73,7 +73,7 @@ Route3_Text_SallyDefeat::
 
 Route3_Text_SallyPostBattle::
 	.string "You can avoid battles by not\n"
-	.string "letting TRAINERS see you.$"
+	.string "letting Trainers see you.$"
 
 Route3_Text_CalvinIntro::
 	.string "Hey! You're not wearing shorts!\n"
@@ -88,14 +88,14 @@ Route3_Text_CalvinPostBattle::
 	.string "winter. That's my policy.$"
 
 Route3_Text_JamesIntro::
-	.string "I'll battle you with the POKéMON\n"
+	.string "I'll battle you with the Pokémon\n"
 	.string "I just caught.$"
 
 Route3_Text_JamesDefeat::
 	.string "Done like dinner!$"
 
 Route3_Text_JamesPostBattle::
-	.string "Trained POKéMON are stronger than\n"
+	.string "Trained Pokémon are stronger than\n"
 	.string "the wild ones.$"
 
 Route3_Text_RobinIntro::
@@ -106,10 +106,10 @@ Route3_Text_RobinDefeat::
 	.string "That's it?$"
 
 Route3_Text_RobinPostBattle::
-	.string "ROUTE 4 is at the foot of\n"
+	.string "Route 4 is at the foot of\n"
 	.string "MT. MOON.$"
 
 Route3_Text_RouteSign::
-	.string "ROUTE 3\n"
+	.string "Route 3\n"
 	.string "MT. MOON AHEAD$"
 

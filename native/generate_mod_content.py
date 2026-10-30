@@ -9,6 +9,7 @@ SOURCES = [
     ('move', 'RHH_MOVE', 'MOVE_', ['moves.h']),
     ('item', 'RHH_ITEM', 'ITEM_', ['items.h']),
     ('ability', 'RHH_ABILITY', 'ABILITY_', ['abilities.h']),
+    ('type', 'RHH_TYPE', 'TYPE_', ['pokemon.h']),
     ('trainer', 'RHH_TRAINER', 'TRAINER_', ['opponents.h', 'opponents_frlg.h']),
     ('map', 'RHH_MAP', 'MAP_', ['map_groups.h']),
     ('area', 'RHH_AREA', 'MAPSEC_', ['region_map_sections.h']),

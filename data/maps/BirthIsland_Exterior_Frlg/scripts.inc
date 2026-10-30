@@ -46,7 +46,7 @@ BirthIsland_Exterior_Frlg_EventScript_Triangle::
 	case 0, BirthIsland_Exterior_EventScript_NotSolved1
 	case 1, BirthIsland_Exterior_EventScript_NotSolved2
 	case 2, BirthIsland_Exterior_Frlg_EventScript_Deoxys
-	case 3, BirthIsland_Exterior_EventScript_NotSolved3
+	case 3, BirthIsland_Exterior_Frlg_EventScript_Deoxys
 	end
 
 BirthIsland_Exterior_EventScript_NotSolved1::
@@ -77,7 +77,10 @@ BirthIsland_Exterior_Frlg_EventScript_Deoxys::
 	delay 40
 	waitmoncry
 	setvar VAR_LAST_TALKED, LOCALID_BIRTH_ISLAND_DEOXYS
+	identifywildencounter "rhh:encounter/birth_island_exterior_frlg/deoxys"
 	seteventmon SPECIES_DEOXYS, 30
+	specialvar VAR_RESULT, ScriptedWildBattleAllowed
+	goto_if_eq VAR_RESULT, FALSE, BirthIsland_Exterior_Frlg_EventScript_DeoxysCancelled
 	setflag FLAG_SYS_CTRL_OBJ_DELETE
 	special BattleSetup_StartLegendaryBattle
 	clearflag FLAG_SYS_CTRL_OBJ_DELETE
@@ -86,6 +89,17 @@ BirthIsland_Exterior_Frlg_EventScript_Deoxys::
 	goto_if_eq VAR_RESULT, B_OUTCOME_RAN, BirthIsland_Exterior_Frlg_EventScript_RanFromDeoxys
 	goto_if_eq VAR_RESULT, B_OUTCOME_PLAYER_TELEPORTED, BirthIsland_Exterior_Frlg_EventScript_RanFromDeoxys
 	setflag FLAG_FOUGHT_DEOXYS
+	release
+	end
+
+BirthIsland_Exterior_Frlg_EventScript_DeoxysCancelled::
+	setvar VAR_0x8004, LOCALID_BIRTH_ISLAND_DEOXYS
+	special ScriptRemoveObjectWithoutFlag
+	clearflag FLAG_HIDE_BIRTH_ISLAND_METEORITE
+	addobject LOCALID_BIRTH_ISLAND_EXTERIOR_ROCK
+	setobjectxy LOCALID_BIRTH_ISLAND_EXTERIOR_ROCK, 15, 10
+	special ScriptRestoreDeoxysRockPalette
+	fadedefaultbgm
 	release
 	end
 

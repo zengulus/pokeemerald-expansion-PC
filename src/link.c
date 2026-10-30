@@ -27,6 +27,9 @@
 #include "link_rfu.h"
 #include "constants/rgb.h"
 #include "constants/trade.h"
+#ifdef NATIVE
+#include "mods.h"
+#endif
 
 // Window IDs for the link error screens
 enum {
@@ -99,6 +102,15 @@ EWRAM_DATA u32 gBerryBlenderKeySendAttempts = 0;
 EWRAM_DATA u16 gBlockRecvBuffer[MAX_RFU_PLAYERS][BLOCK_BUFFER_SIZE / 2] = {};
 EWRAM_DATA u8 gBlockSendBuffer[BLOCK_BUFFER_SIZE] = {};
 static EWRAM_DATA bool8 sLinkOpen = FALSE;
+#ifdef NATIVE
+bool8 NativeLinkSessionOpen(void) { return sLinkOpen || gWirelessCommType; }
+bool32 NativeNatureRejectLink(void)
+{
+    if (!ModsNatureFormatEnabled()) return FALSE;
+    gLinkErrorOccurred = TRUE; gReceivedRemoteLinkPlayers = FALSE;
+    SetMainCallback2(CB2_LinkError); return TRUE;
+}
+#endif
 EWRAM_DATA u16 gLinkType = 0;
 static EWRAM_DATA u16 sTimeOutCounter = 0;
 EWRAM_DATA struct LinkPlayer gLocalLinkPlayer = {};
@@ -358,6 +370,10 @@ static void Task_TriggerHandshake(u8 taskId)
 void OpenLink(void)
 {
     int i;
+
+#ifdef NATIVE
+    if (NativeNatureRejectLink()) return;
+#endif
 
     if (!gWirelessCommType)
     {
@@ -904,6 +920,9 @@ static void ResetBlockSend(void)
 
 static bool32 InitBlockSend(const void *src, size_t size)
 {
+#ifdef NATIVE
+    if (NativeNatureRejectLink()) return FALSE;
+#endif
     if (sBlockSend.active)
     {
         return FALSE;

@@ -296,8 +296,11 @@ const u32 *GetIndicatorSpriteSrc(enum BattlerId battler)
             return (u32 *)&sAlphaIndicatorGfx;
     }
 
-    if (gimmick == GIMMICK_TERA) // special case
-        return (u32 *)sTeraIndicatorDataPtrs[GetBattlerTeraType(battler)];
+    if (gimmick == GIMMICK_TERA) // custom types use the generic indicator
+    {
+        u32 type = GetBattlerTeraType(battler);
+        return (u32 *)sTeraIndicatorDataPtrs[type < ARRAY_COUNT(sTeraIndicatorDataPtrs) ? type : TYPE_MYSTERY];
+    }
 
     if (gGimmicksInfo[gimmick].indicatorData != NULL)
         return (u32 *)gGimmicksInfo[gimmick].indicatorData;

@@ -73,21 +73,21 @@ SlateportCity_SternsShipyard_1F_Text_CantMakeHeadsOrTails:
 SlateportCity_SternsShipyard_1F_Text_MeetDockDeliverToStern:
 	.string "Hm?\n"
 	.string "Hi, I'm DOCK.\p"
-	.string "CAPT. STERN commissioned me to\n"
+	.string "CAPT. Stern commissioned me to\n"
 	.string "design a ferry.\p"
 	.string "Oh! That there…\n"
-	.string "Are they DEVON GOODS?\p"
+	.string "Are they Devon GOODS?\p"
 	.string "But, hmm…\n"
 	.string "This won't do…\p"
-	.string "CAPT. STERN went off somewhere.\n"
+	.string "CAPT. Stern went off somewhere.\n"
 	.string "He said he had some work to do.\p"
 	.string "Could I get you to go find CAPT.\n"
-	.string "STERN and deliver that to him?$"
+	.string "Stern and deliver that to him?$"
 
 SlateportCity_SternsShipyard_1F_Text_CouldYouFindStern:
-	.string "DOCK: Where could CAPT. STERN have\n"
+	.string "DOCK: Where could CAPT. Stern have\n"
 	.string "gone off to?\p"
-	.string "Could you go find CAPT. STERN and\n"
+	.string "Could you go find CAPT. Stern and\n"
 	.string "deliver that parcel to him?$"
 
 SlateportCity_SternsShipyard_1F_Text_CouldUseAdviceFromVeteran:

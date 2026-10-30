@@ -10,6 +10,8 @@ struct SignatureZMove
     enum Move move;
     enum Move zmove;
 };
+struct ChooseMoveStruct;
+bool32 IsMoveSelectionCurseGhost(enum BattlerId battler, const struct ChooseMoveStruct *moveInfo);
 
 bool32 IsZMove(enum Move move);
 bool32 CanUseZMove(enum BattlerId battler);

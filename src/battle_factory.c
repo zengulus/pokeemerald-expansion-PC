@@ -1,6 +1,8 @@
 #include "global.h"
 #include "battle.h"
 #include "battle_factory.h"
+#include "battle_type_set.h"
+#include "battle_main.h"
 #include "battle_factory_screen.h"
 #include "event_data.h"
 #include "battle_setup.h"
@@ -8,6 +10,10 @@
 #include "frontier_util.h"
 #include "battle_tower.h"
 #include "random.h"
+#include "string_util.h"
+#ifdef NATIVE
+#include "mods.h"
+#endif
 #include "constants/battle_ai.h"
 #include "constants/battle_factory.h"
 #include "constants/battle_frontier.h"
@@ -218,6 +224,9 @@ static void FactoryDummy2(void)
 
 static void SelectInitialRentalMons(void)
 {
+#ifdef NATIVE
+    ModsOwnedRentalPartyBegin();
+#endif
     ZeroPlayerPartyMons();
     DoBattleFactorySelectScreen();
 }
@@ -410,6 +419,9 @@ static void SetPlayerAndOpponentParties(void)
             monLevel = FRONTIER_MAX_LEVEL_50;
     }
 
+#ifdef NATIVE
+    ModsOwnedRentalPartyBegin();
+#endif
     ZeroPlayerPartyMons();
     for (u32 i = 0; i < FRONTIER_PARTY_SIZE; i++)
     {
@@ -523,52 +535,29 @@ static void GenerateInitialRentalMons(void)
 // and NUMBER_OF_MON_TYPES is the result.
 static void GetOpponentMostCommonMonType(void)
 {
-    u8 i;
-    u8 typeCounts[NUMBER_OF_MON_TYPES];
-    u8 mostCommonTypes[2];
+    u32 i;
+    u8 typeCounts[BATTLE_TYPE_SET_CAPACITY] = {0};
 
     gFacilityTrainerMons = gBattleFrontierMons;
 
     // Count the number of times each type occurs in the opponent's party.
-    for (i = TYPE_NORMAL; i < NUMBER_OF_MON_TYPES; i++)
-        typeCounts[i] = 0;
     for (i = 0; i < FRONTIER_PARTY_SIZE; i++)
     {
         enum Species species = gFacilityTrainerMons[gFrontierTempParty[i]].species;
-        typeCounts[GetSpeciesType(species, 0)]++;
-        if (GetSpeciesType(species, 0) != GetSpeciesType(species, 1))
-            typeCounts[GetSpeciesType(species, 1)]++;
+        struct BattleTypeList types;
+        GetSpeciesTypeList(species, &types);
+        for (u32 j = 0; j < types.count; ++j) ++typeCounts[types.types[j]];
     }
 
-    // Determine which are the two most-common types.
-    // The second most-common type is only updated if
-    // its count is equal to the most-common type.
-    mostCommonTypes[0] = 0;
-    mostCommonTypes[1] = 0;
-    for (i = 1; i < NUMBER_OF_MON_TYPES; i++)
+    u32 leader = BattleTypeCountsUniqueLeader(typeCounts);
+    gSpecialVar_Result = leader < NUMBER_OF_MON_TYPES ? leader : NUMBER_OF_MON_TYPES;
+#ifdef NATIVE
+    if (leader >= NUMBER_OF_MON_TYPES && leader < BATTLE_TYPE_SET_CAPACITY && ModsCustomTypeName(leader, FALSE))
     {
-        if (typeCounts[mostCommonTypes[0]] < typeCounts[i])
-            mostCommonTypes[0] = i;
-        else if (typeCounts[mostCommonTypes[0]] == typeCounts[i])
-            mostCommonTypes[1] = i;
+        StringCopy(gStringVar1, GetTypeName(leader));
+        gSpecialVar_Result = FACTORY_CUSTOM_TYPE_HINT;
     }
-
-    if (typeCounts[mostCommonTypes[0]] != 0)
-    {
-        // The most-common type must be strictly greater than
-        // the second-most-common type, or the top two must be
-        // the same type.
-        if (typeCounts[mostCommonTypes[0]] > typeCounts[mostCommonTypes[1]])
-            gSpecialVar_Result = mostCommonTypes[0];
-        else if (mostCommonTypes[0] == mostCommonTypes[1])
-            gSpecialVar_Result = mostCommonTypes[0];
-        else
-            gSpecialVar_Result = NUMBER_OF_MON_TYPES;
-    }
-    else
-    {
-        gSpecialVar_Result = NUMBER_OF_MON_TYPES;
-    }
+#endif
 }
 
 static void GetOpponentBattleStyle(void)

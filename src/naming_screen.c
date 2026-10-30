@@ -1,4 +1,7 @@
 #include "global.h"
+#ifdef NATIVE
+#include "native_text_input.h"
+#endif
 #include "naming_screen.h"
 #include "malloc.h"
 #include "palette.h"
@@ -200,7 +203,7 @@ static const u8 *const sTransferredToPCMessages[] =
 };
 
 
-static const u8 sText_RivalsName[] = _("RIVAL's NAME?");
+static const u8 sText_RivalsName[] = _("Rival's name?");
 static const u8 sText_AlphabetUpperLower[] = _("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz!");
 
 static const struct BgTemplate sBgTemplates[] =
@@ -651,6 +654,9 @@ static bool8 MainState_WaitFadeIn(void)
 {
     if (!gPaletteFade.active)
     {
+#ifdef NATIVE
+        NativeTextBegin();
+#endif
         SetInputState(INPUT_STATE_ENABLED);
         SetCursorFlashing(TRUE);
         sNamingScreen->state++;
@@ -660,6 +666,28 @@ static bool8 MainState_WaitFadeIn(void)
 
 static bool8 MainState_HandleInput(void)
 {
+#ifdef NATIVE
+    int key;
+    while ((key = NativeTextPop()) >= 0)
+    {
+        if (key == NATIVE_TEXT_ACCEPT)
+        {
+            NativeTextEnd(); sNamingScreen->state = STATE_PRESSED_OK; return TRUE;
+        }
+        if (key == NATIVE_TEXT_BACKSPACE) DeleteTextCharacter();
+        else
+        {
+            u32 i;
+            for (i = 0; i < sNamingScreen->template->maxChars; ++i)
+                if (sNamingScreen->textBuffer[i] == EOS) break;
+            if (i < sNamingScreen->template->maxChars)
+            {
+                sNamingScreen->textBuffer[i] = key;
+                DrawTextEntry(); CopyBgTilemapBufferToVram(3);
+            }
+        }
+    }
+#endif
     return HandleKeyboardEvent();
 }
 
@@ -695,6 +723,9 @@ static bool8 MainState_Exit(void)
 {
     if (!gPaletteFade.active)
     {
+#ifdef NATIVE
+        NativeTextEnd();
+#endif
         if (sNamingScreen->templateNum == NAMING_SCREEN_PLAYER)
             SeedRngAndSetTrainerId();
         if (sNamingScreen->templateNum == NAMING_SCREEN_CAUGHT_MON
@@ -2064,7 +2095,12 @@ static void PrintControls(void)
     const u8 color[3] = { TEXT_DYNAMIC_COLOR_6, TEXT_COLOR_WHITE, TEXT_COLOR_DARK_GRAY };
 
     FillWindowPixelBuffer(sNamingScreen->windows[WIN_BANNER], PIXEL_FILL(15));
+#ifdef NATIVE
+    AddTextPrinterParameterized3(sNamingScreen->windows[WIN_BANNER], FONT_SMALL, 2, 1, color, 0,
+        COMPOUND_STRING("Type  Enter: OK  Backspace: delete"));
+#else
     AddTextPrinterParameterized3(sNamingScreen->windows[WIN_BANNER], FONT_SMALL, 2, 1, color, 0, sText_MoveOkBack);
+#endif
     PutWindowTilemap(sNamingScreen->windows[WIN_BANNER]);
     CopyWindowToVram(sNamingScreen->windows[WIN_BANNER], COPYWIN_FULL);
 }
@@ -2077,6 +2113,16 @@ static void CB2_NamingScreen(void)
     if (gMain.callback2 != CB2_NamingScreen)
         return;
     AnimateSprites();
+#ifdef NATIVE
+    for (u32 i = 0; i < MAX_SPRITES; ++i)
+    {
+        const struct SpriteTemplate *t = gSprites[i].template;
+        if (gSprites[i].inUse && (t == &sSpriteTemplate_Cursor || t == &sSpriteTemplate_PageSwapFrame
+            || t == &sSpriteTemplate_PageSwapButton || t == &sSpriteTemplate_PageSwapText
+            || t == &sSpriteTemplate_BackButton || t == &sSpriteTemplate_OkButton))
+            gSprites[i].invisible = TRUE;
+    }
+#endif
     BuildOamBuffer();
     UpdatePaletteFade();
 }
@@ -2108,8 +2154,13 @@ static void VBlankCB_NamingScreen(void)
 static void NamingScreen_ShowBgs(void)
 {
     ShowBg(0);
+#ifdef NATIVE
+    HideBg(1);
+    HideBg(2);
+#else
     ShowBg(1);
     ShowBg(2);
+#endif
     ShowBg(3);
 }
 
@@ -2160,7 +2211,7 @@ static const struct NamingScreenTemplate sPlayerNamingScreenTemplate =
     .addGenderIcon = FALSE,
     .initialPage = KBPAGE_LETTERS_UPPER,
     .unused = 35,
-    .title = COMPOUND_STRING("YOUR NAME?"),
+    .title = COMPOUND_STRING("Your name?"),
 };
 
 static const struct NamingScreenTemplate sPCBoxNamingTemplate =
@@ -2171,7 +2222,7 @@ static const struct NamingScreenTemplate sPCBoxNamingTemplate =
     .addGenderIcon = FALSE,
     .initialPage = KBPAGE_LETTERS_UPPER,
     .unused = 19,
-    .title = COMPOUND_STRING("BOX NAME?"),
+    .title = COMPOUND_STRING("Box name?"),
 };
 
 static const struct NamingScreenTemplate sMonNamingScreenTemplate =

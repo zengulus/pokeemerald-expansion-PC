@@ -158,7 +158,7 @@ JaggedPass_Text_EricDefeat:
 	.string "Losing left me bitter!$"
 
 JaggedPass_Text_EricPostBattle:
-	.string "Yes, I did lose at POKéMON…\p"
+	.string "Yes, I did lose at Pokémon…\p"
 	.string "But, when it comes to the love of\n"
 	.string "the mountains, I have you beat!$"
 
@@ -181,7 +181,7 @@ JaggedPass_Text_DianaRegister:
 
 JaggedPass_Text_DianaRematchIntro:
 	.string "Picnics are fun wherever you go.\n"
-	.string "Just like POKéMON!$"
+	.string "Just like Pokémon!$"
 
 JaggedPass_Text_DianaRematchDefeat:
 	.string "I only lost because the ground is\n"
@@ -200,13 +200,13 @@ JaggedPass_Text_EthanDefeat:
 	.string "trying to find a good footing…$"
 
 JaggedPass_Text_EthanPostBattle:
-	.string "If I had an ACRO BIKE, I'd be able to\n"
+	.string "If I had an ACRO Bike, I'd be able to\n"
 	.string "jump ledges.$"
 
 JaggedPass_Text_EthanRegister:
 	.string "When I get more used to this bumpiness,\n"
 	.string "I'll be sure to win!\p"
-	.string "Can you register me in your POKéNAV?$"
+	.string "Can you register me in your PokéNav?$"
 
 JaggedPass_Text_EthanRematchIntro:
 	.string "I got used to this bumpiness.\n"
@@ -217,8 +217,8 @@ JaggedPass_Text_EthanRematchDefeat:
 	.string "bumpy ground…$"
 
 JaggedPass_Text_EthanPostRematch:
-	.string "I should get an ACRO BIKE from RYDEL\n"
-	.string "in MAUVILLE CITY…$"
+	.string "I should get an ACRO Bike from RYDEL\n"
+	.string "in Mauville City…$"
 
 JaggedPass_Text_GruntIntro:
 	.string "Wah!\n"
@@ -239,7 +239,7 @@ JaggedPass_Text_GoWhereverYouWant:
 
 JaggedPass_Text_BoulderShakingInResponseToEmblem:
 	.string "Oh! This boulder is shaking in response\n"
-	.string "to the MAGMA EMBLEM!$"
+	.string "to the Magma EMBLEM!$"
 
 JaggedPass_Text_JulioIntro:
 	.string "Aiyeeh! It's awfully scary to shoot\n"

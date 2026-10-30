@@ -15,6 +15,9 @@
 #include "text.h"
 #include "constants/event_object_movement.h"
 #include "constants/items.h"
+#ifdef NATIVE
+#include "mods.h"
+#endif
 
 static u8 BerryTreeGetNumStagesWatered(struct BerryTree *tree);
 static u8 GetNumStagesWateredByBerryTreeId(u8 id);
@@ -2379,10 +2382,8 @@ struct BerryTree *GetBerryTreeInfo(u8 id)
     return &gSaveBlock1Ptr->berryTrees[id];
 }
 
-bool32 ObjectEventInteractionWaterBerryTree(void)
+bool32 WaterBerryTreeState(struct BerryTree *tree)
 {
-    struct BerryTree *tree = GetBerryTreeInfo(GetObjectEventBerryTreeId(gSelectedObjectEvent));
-
     if (OW_BERRY_MOISTURE)
     {
         tree->moistureLevel = 100;
@@ -2413,6 +2414,18 @@ bool32 ObjectEventInteractionWaterBerryTree(void)
         return FALSE;
     }
     return TRUE;
+}
+bool32 ObjectEventInteractionWaterBerryTree(void)
+{
+#ifdef NATIVE
+    struct RhhBerryManualWater capture;
+    bool32 captured = ModsBerryManualCapture(gSelectedObjectEvent, &capture);
+#endif
+    bool32 result = WaterBerryTreeState(GetBerryTreeInfo(GetObjectEventBerryTreeId(gSelectedObjectEvent)));
+#ifdef NATIVE
+    if (captured && result) ModsBerryManualCommitted(&capture);
+#endif
+    return result;
 }
 
 bool8 IsPlayerFacingEmptyBerryTreePatch(void)
@@ -2717,7 +2730,12 @@ static u32 GetBerryTreeAge(u8 id, u8 stage)
 
 static u8 GetBerryCountByBerryTreeId(u8 id)
 {
-    return gSaveBlock1Ptr->berryTrees[id].berryYield;
+    u8 base = gSaveBlock1Ptr->berryTrees[id].berryYield;
+#ifdef NATIVE
+    return ModsBerryHarvestYield(gSelectedObjectEvent, id, base);
+#else
+    return base;
+#endif
 }
 
 static u16 GetStageDurationByBerryType(u8 berry)
@@ -2819,16 +2837,30 @@ void Bag_ChooseMulch(void)
 
 void ObjectEventInteractionPlantBerryTree(void)
 {
+#ifdef NATIVE
+    struct RhhBerryPlotInteraction change;
+    bool32 report = ModsBerryInteractionCapture(gSelectedObjectEvent, RHH_BERRY_INTERACTION_PLANTED, &change);
+#endif
     PlantBerryTree(GetObjectEventBerryTreeId(gSelectedObjectEvent), ItemIdToBerryType(gSpecialVar_ItemId), BERRY_STAGE_PLANTED, TRUE);
     ObjectEventInteractionGetBerryTreeData();
+#ifdef NATIVE
+    if (report) ModsBerryInteractionCommitted(&change);
+#endif
 }
 
 void ObjectEventInteractionApplyMulch(void)
 {
+#ifdef NATIVE
+    struct RhhBerryPlotInteraction change;
+    bool32 report = ModsBerryInteractionCapture(gSelectedObjectEvent, RHH_BERRY_INTERACTION_MULCHED, &change);
+#endif
     u8 mulch = ITEM_TO_MULCH(gSpecialVar_ItemId);
 
     gSaveBlock1Ptr->berryTrees[GetObjectEventBerryTreeId(gSelectedObjectEvent)].mulch = mulch;
     StringExpandPlaceholders(gStringVar1, gItemsInfo[gSpecialVar_ItemId].name);
+#ifdef NATIVE
+    if (report) ModsBerryInteractionCommitted(&change);
+#endif
 }
 
 void ObjectEventInteractionPickBerryTree(void)
@@ -2836,38 +2868,75 @@ void ObjectEventInteractionPickBerryTree(void)
     u8 id = GetObjectEventBerryTreeId(gSelectedObjectEvent);
     u8 berry = GetBerryTypeByBerryTreeId(id);
     u8 mutation = GetTreeMutationValue(id);
+    u8 count = GetBerryCountByBerryTreeId(id);
+#ifdef NATIVE
+    struct RhhBerryHarvest harvest;
+    bool32 report = ModsBerryHarvestCapture(gSelectedObjectEvent, &harvest);
+#endif
 
     if (!OW_BERRY_MUTATIONS || mutation == 0)
     {
-        gSpecialVar_0x8004 = AddBagItem(BerryTypeToItemId(berry), GetBerryCountByBerryTreeId(id));
+        gSpecialVar_0x8004 = AddBagItem(BerryTypeToItemId(berry), count);
+#ifdef NATIVE
+        if (report && gSpecialVar_0x8004)
+            ModsBerryHarvestCommitted(&harvest, BerryTypeToItemId(berry), count, ITEM_NONE, 0);
+#endif
         return;
     }
-    gSpecialVar_0x8004 = (CheckBagHasSpace(BerryTypeToItemId(berry), GetBerryCountByBerryTreeId(id)) && CheckBagHasSpace(BerryTypeToItemId(mutation), 1)) + 2;
+    gSpecialVar_0x8004 = (CheckBagHasSpace(BerryTypeToItemId(berry), count) && CheckBagHasSpace(BerryTypeToItemId(mutation), 1)) + 2;
     if (gSpecialVar_0x8004 == 3)
     {
-        AddBagItem(BerryTypeToItemId(berry), GetBerryCountByBerryTreeId(id));
-        AddBagItem(BerryTypeToItemId(mutation), 1);
+        bool32 berryAdded = AddBagItem(BerryTypeToItemId(berry), count);
+        bool32 mutationAdded = AddBagItem(BerryTypeToItemId(mutation), 1);
+#ifdef NATIVE
+        if (report && (berryAdded || mutationAdded))
+            ModsBerryHarvestCommitted(&harvest, BerryTypeToItemId(berry), berryAdded ? count : 0,
+                                      BerryTypeToItemId(mutation), mutationAdded ? 1 : 0);
+#else
+        (void)berryAdded; (void)mutationAdded;
+#endif
     }
 }
 
 void ObjectEventInteractionRemoveBerryTree(void)
 {
+#ifdef NATIVE
+    struct RhhBerryPlotInteraction change;
+    bool32 report = ModsBerryInteractionCapture(gSelectedObjectEvent, RHH_BERRY_INTERACTION_REMOVED, &change);
+#endif
     RemoveBerryTree(GetObjectEventBerryTreeId(gSelectedObjectEvent));
     SetBerryTreeJustPicked(gSpecialVar_LastTalked, gSaveBlock1Ptr->location.mapNum, gSaveBlock1Ptr->location.mapGroup);
+#ifdef NATIVE
+    if (report) ModsBerryInteractionCommitted(&change);
+#endif
 }
 
 void ObjectEventInteractionPullBerryWeed(void)
 {
+#ifdef NATIVE
+    struct RhhBerryPlotInteraction change;
+    bool32 report = ModsBerryInteractionCapture(gSelectedObjectEvent, RHH_BERRY_INTERACTION_WEED_CLEARED, &change);
+#endif
     struct BerryTree *tree = GetBerryTreeInfo(GetObjectEventBerryTreeId(gSelectedObjectEvent));
     tree->weeds = FALSE;
     AddTreeBonus(tree, GetWeedingBonusByBerryType(tree->berry));
+#ifdef NATIVE
+    if (report) ModsBerryInteractionCommitted(&change);
+#endif
 }
 
 void ObjectEventInteractionClearBerryPests(void)
 {
+#ifdef NATIVE
+    struct RhhBerryPlotInteraction change;
+    bool32 report = ModsBerryInteractionCapture(gSelectedObjectEvent, RHH_BERRY_INTERACTION_PESTS_CLEARED, &change);
+#endif
     struct BerryTree *tree = GetBerryTreeInfo(GetObjectEventBerryTreeId(gSelectedObjectEvent));
     tree->pests = FALSE;
     AddTreeBonus(tree, GetPestsBonusByBerryType(tree->berry));
+#ifdef NATIVE
+    if (report) ModsBerryInteractionCommitted(&change);
+#endif
 }
 
 bool8 PlayerHasBerries(void)

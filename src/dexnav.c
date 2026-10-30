@@ -1,4 +1,5 @@
 #include "global.h"
+#include "battle_type_set.h"
 #include "battle_main.h"
 #include "battle_setup.h"
 #include "bg.h"
@@ -49,6 +50,9 @@
 #include "text.h"
 #include "text_window.h"
 #include "wild_encounter.h"
+#ifdef NATIVE
+#include "mods.h"
+#endif
 #include "window.h"
 #include "constants/species.h"
 #include "constants/maps.h"
@@ -95,6 +99,10 @@ struct DexNavSearch
     u8 monLevel;
     u8 proximity;
     u8 environment;
+#ifdef NATIVE
+    u8 modArea;
+    u8 modTableTime;
+#endif
     s16 tileX;
     s16 tileY;
     u8 fldEffSpriteId;
@@ -126,7 +134,21 @@ struct DexNavGUI
     u8 cursorCol;
     u8 environment;
     u8 potential;
-    u8 typeIconSpriteIds[2];
+    u8 typeIconSpriteIds[
+#ifdef NATIVE
+        3
+#else
+        2
+#endif
+    ];
+#ifdef NATIVE
+    u8 typeIconMatrix;
+    u8 typeOverflow[BATTLE_TYPE_SET_CAPACITY];
+    u8 typeOverflowCount, typeOverflowIcon;
+    u8 typeOverflowTimer;
+    bool8 typeOverflowActive;
+    u8 typeOverflowIndex;
+#endif
     u8 starSpriteIds[3];
 };
 
@@ -142,6 +164,9 @@ EWRAM_DATA enum Species gDexNavSpecies = SPECIES_NONE;
 static void Task_DexNavWaitFadeIn(u8 taskId);
 static void Task_DexNavMain(u8 taskId);
 static void PrintCurrentSpeciesInfo(void);
+#ifdef NATIVE
+static void AdvanceTypeIconOverflow(void);
+#endif
 // SEARCH
 static bool8 TryStartHiddenMonFieldEffect(enum EncounterType environment, u8 xSize, u8 ySize, bool8 smallScan);
 static void DexNavGenerateMoveset(enum Species species, u8 searchLevel, u8 encounterLevel, u16 *moveDst);
@@ -570,6 +595,16 @@ static void DexNavProximityUpdate(void)
 {
     sDexNavSearchDataPtr->proximity = GetPlayerDistance(sDexNavSearchDataPtr->tileX, sDexNavSearchDataPtr->tileY);
 }
+
+#if defined(NATIVE) && defined(RHH_DEXNAV_TEST_FIXTURE)
+/* Let the integration test walk onto a real search's selected tile. */
+bool32 DexNavTestGetTile(s16 *x, s16 *y)
+{
+    if (!sDexNavSearchDataPtr || !FlagGet(DN_FLAG_SEARCHING)) return FALSE;
+    *x = sDexNavSearchDataPtr->tileX; *y = sDexNavSearchDataPtr->tileY;
+    return TRUE;
+}
+#endif
 
 //Pick a specific tile based on environment
 static bool8 DexNavPickTile(enum EncounterType environment, u8 areaX, u8 areaY, bool8 smallScan)
@@ -1095,9 +1130,29 @@ bool32 OnStep_DexNavSearch(void)
 
     if (sDexNavSearchDataPtr->proximity < 1)
     {
+#ifdef NATIVE
+        struct RhhWildCheckpoint checkpoint;
+        struct RhhWildEncounterContext context;
+        struct RhhWildEncounterCancellation cancel;
+        ModsWildCheckpointSave(&checkpoint);
+        if (!ModsWildSpecialPermission(sDexNavSearchDataPtr->species, sDexNavSearchDataPtr->modArea,
+                                       RHH_WILD_DEXNAV, UINT32_MAX, sDexNavSearchDataPtr->monLevel,
+                                       sDexNavSearchDataPtr->modTableTime,
+                                       sDexNavSearchDataPtr->tileX - MAP_OFFSET,
+                                       sDexNavSearchDataPtr->tileY - MAP_OFFSET, 0, &context, &cancel))
+        {
+            ModsWildCheckpointRestore(&checkpoint);
+            ModsWildCancelled(&cancel);
+            EndDexNavSearchSetupScript(EventScript_PokemonGotAway);
+            return TRUE;
+        }
+#endif
         gDexNavSpecies = sDexNavSearchDataPtr->species;
         CreateDexNavWildMon(sDexNavSearchDataPtr->species, sDexNavSearchDataPtr->potential, sDexNavSearchDataPtr->monLevel,
                             sDexNavSearchDataPtr->abilityNum, sDexNavSearchDataPtr->heldItem, sDexNavSearchDataPtr->moves);
+#ifdef NATIVE
+        ModsWildSpecialCreated(&context, &gParties[B_TRAINER_OPPONENT_A][0]);
+#endif
 
         ScriptContext_SetupScript(EventScript_StartDexNavBattle);
         FREE_AND_SET_NULL(sDexNavSearchDataPtr);
@@ -1478,6 +1533,11 @@ static u8 GetEncounterLevelFromMapData(enum Species species, enum EncounterType 
     if (headerId == HEADER_NONE)
         return MON_LEVEL_NONEXISTENT;
 
+#ifdef NATIVE
+    sDexNavSearchDataPtr->modArea = environment == ENCOUNTER_TYPE_HIDDEN ? WILD_AREA_HIDDEN
+        : environment == ENCOUNTER_TYPE_WATER ? WILD_AREA_WATER : WILD_AREA_LAND;
+    sDexNavSearchDataPtr->modTableTime = TIMES_OF_DAY_COUNT;
+#endif
     switch (environment)
     {
     case ENCOUNTER_TYPE_LAND:    // grass
@@ -1538,6 +1598,9 @@ static u8 GetEncounterLevelFromMapData(enum Species species, enum EncounterType 
         return MON_LEVEL_NONEXISTENT;
     }
 
+#ifdef NATIVE
+    sDexNavSearchDataPtr->modTableTime = timeOfDay;
+#endif
     if (max == 0)
         return MON_LEVEL_NONEXISTENT;
 
@@ -1574,6 +1637,9 @@ static void DexNav_VBlankCB(void)
 static void DexNav_MainCB(void)
 {
     RunTasks();
+#ifdef NATIVE
+    AdvanceTypeIconOverflow();
+#endif
     AnimateSprites();
     BuildOamBuffer();
     DoScheduledBgTilemapCopiesToVram();
@@ -1811,7 +1877,24 @@ static void DexNav_InitWindows(void)
 
 static void DexNavGuiFreeResources(void)
 {
+#ifdef NATIVE
+    for (u32 i = 0; i < ARRAY_COUNT(sDexNavUiDataPtr->typeIconSpriteIds); ++i)
+    {
+        u8 id = sDexNavUiDataPtr->typeIconSpriteIds[i];
+        if (id < MAX_SPRITES)
+        {
+            gSprites[id].invisible = TRUE;
+            ModsClearCustomTypeIcon(&gSprites[id]);
+        }
+    }
+    if (sDexNavUiDataPtr->typeIconMatrix != 0xFF)
+    {
+        FreeOamMatrix(sDexNavUiDataPtr->typeIconMatrix);
+    }
+    ModsReclaimCustomTypeIcons();
+#endif
     Free(sDexNavUiDataPtr);
+    sDexNavUiDataPtr = NULL;
     Free(sBg1TilemapBuffer);
     FreeAllWindowBuffers();
 }
@@ -2024,7 +2107,7 @@ static enum Species DexNavGetSpecies(void)
         return SPECIES_NONE;
     }
 
-    if (!GetSetPokedexFlag(SpeciesToNationalPokedexNum(species), FLAG_GET_SEEN))
+    if (species == SPECIES_NONE || !GetSetPokedexFlag(SpeciesToNationalPokedexNum(species), FLAG_GET_SEEN))
         return SPECIES_NONE;
 
     return species;
@@ -2032,7 +2115,8 @@ static enum Species DexNavGetSpecies(void)
 
 static void SetSpriteInvisibility(u8 spriteArrayId, bool8 invisible)
 {
-    gSprites[sDexNavUiDataPtr->typeIconSpriteIds[spriteArrayId]].invisible = invisible;
+    if (sDexNavUiDataPtr->typeIconSpriteIds[spriteArrayId] < MAX_SPRITES)
+        gSprites[sDexNavUiDataPtr->typeIconSpriteIds[spriteArrayId]].invisible = invisible;
 }
 
 // different from pokemon_summary_screen
@@ -2065,7 +2149,21 @@ static void SetTypeIconPosAndPal(u8 typeId, u8 x, u8 y, u8 spriteArrayId)
 {
     struct Sprite *sprite;
 
+    if (sDexNavUiDataPtr->typeIconSpriteIds[spriteArrayId] >= MAX_SPRITES)
+        return;
     sprite = &gSprites[sDexNavUiDataPtr->typeIconSpriteIds[spriteArrayId]];
+#ifdef NATIVE
+    if (typeId >= NUMBER_OF_MON_TYPES)
+    {
+        if (ModsSetCustomTypeIcon(sprite, typeId, FALSE))
+        {
+            sprite->x = x + 16; sprite->y = y + 8;
+            SetSpriteInvisibility(spriteArrayId, FALSE); return;
+        }
+        typeId = TYPE_MYSTERY;
+    }
+    ModsClearCustomTypeIcon(sprite);
+#endif
     StartSpriteAnim(sprite, typeId);
     sprite->oam.paletteNum = sMoveTypeToOamPaletteNum[typeId];
     sprite->x = x + 16;
@@ -2073,14 +2171,85 @@ static void SetTypeIconPosAndPal(u8 typeId, u8 x, u8 y, u8 spriteArrayId)
     SetSpriteInvisibility(spriteArrayId, FALSE);
 }
 
+#ifdef NATIVE
+static void AdvanceTypeIconOverflow(void)
+{
+    if (sDexNavUiDataPtr && sDexNavUiDataPtr->typeOverflowActive && ++sDexNavUiDataPtr->typeOverflowTimer >= 90)
+    {
+        sDexNavUiDataPtr->typeOverflowTimer = 0;
+        sDexNavUiDataPtr->typeOverflowIndex = (sDexNavUiDataPtr->typeOverflowIndex + 1) % sDexNavUiDataPtr->typeOverflowCount;
+        u32 icon = sDexNavUiDataPtr->typeOverflowIcon;
+        SetTypeIconPosAndPal(sDexNavUiDataPtr->typeOverflow[sDexNavUiDataPtr->typeOverflowIndex], icon == 2 ? 212 : 201, 69, icon);
+    }
+}
+#endif
+
+static void PrintSpeciesTypeIcons(enum Species species)
+{
+    enum Type type1 = GetSpeciesType(species, 0), type2 = GetSpeciesType(species, 1);
+#ifdef NATIVE
+    struct BattleTypeList types = {0};
+    if (species != SPECIES_NONE)
+        GetSpeciesTypeList(species, &types);
+    type1 = types.count ? types.types[0] : TYPE_MYSTERY;
+    type2 = types.count > 1 ? types.types[1] : type1;
+    sDexNavUiDataPtr->typeOverflowActive = FALSE;
+    bool32 compact = types.count >= 3;
+    if (compact && sDexNavUiDataPtr->typeIconMatrix == 0xFF)
+        sDexNavUiDataPtr->typeIconMatrix = AllocOamMatrix();
+    if (compact && sDexNavUiDataPtr->typeIconMatrix == 0xFF)
+    {
+        compact = FALSE;
+    }
+    u32 firstOverflow = compact ? 2 : 1;
+    if (types.count > firstOverflow + 1)
+    {
+        sDexNavUiDataPtr->typeOverflowCount = types.count - firstOverflow;
+        for (u32 i = 0; i < sDexNavUiDataPtr->typeOverflowCount; ++i)
+            sDexNavUiDataPtr->typeOverflow[i] = types.types[firstOverflow + i];
+        sDexNavUiDataPtr->typeOverflowTimer = sDexNavUiDataPtr->typeOverflowIndex = 0;
+        sDexNavUiDataPtr->typeOverflowIcon = firstOverflow;
+        sDexNavUiDataPtr->typeOverflowActive = TRUE;
+    }
+    if (compact)
+        SetOamMatrix(sDexNavUiDataPtr->typeIconMatrix, 0x180, 0, 0, 0x100);
+    for (u32 i = 0; i < ARRAY_COUNT(sDexNavUiDataPtr->typeIconSpriteIds); ++i)
+    {
+        u8 id = sDexNavUiDataPtr->typeIconSpriteIds[i];
+        if (id < MAX_SPRITES)
+        {
+            gSprites[id].oam.affineMode = compact ? ST_OAM_AFFINE_NORMAL : ST_OAM_AFFINE_OFF;
+            gSprites[id].oam.matrixNum = compact ? sDexNavUiDataPtr->typeIconMatrix : 0;
+        }
+    }
+    if (compact)
+    {
+        // Three 32-pixel icons scaled to two thirds fit the 72-pixel panel.
+        SetTypeIconPosAndPal(type1, 164, 69, 0);
+        SetTypeIconPosAndPal(type2, 188, 69, 1);
+        SetTypeIconPosAndPal(types.types[2], 212, 69, 2);
+        return;
+    }
+    SetSpriteInvisibility(2, TRUE);
+#endif
+    if (species == SPECIES_NONE)
+        type1 = type2 = TYPE_MYSTERY;
+    if (type1 == type2)
+    {
+        SetTypeIconPosAndPal(type1, 186, 69, 0);
+        SetSpriteInvisibility(1, TRUE);
+    }
+    else
+    {
+        SetTypeIconPosAndPal(type1, 168, 69, 0);
+        SetTypeIconPosAndPal(type2, 201, 69, 1);
+    }
+}
+
 static void PrintCurrentSpeciesInfo(void)
 {
     enum Species species = DexNavGetSpecies();
     enum NationalDexOrder dexNum = SpeciesToNationalPokedexNum(species);
-    enum Type type1, type2;
-
-    if (!GetSetPokedexFlag(dexNum, FLAG_GET_SEEN))
-        species = SPECIES_NONE;
 
     // clear windows
     FillWindowPixelBuffer(WINDOW_INFO, PIXEL_FILL(TEXT_COLOR_TRANSPARENT));
@@ -2092,21 +2261,7 @@ static void PrintCurrentSpeciesInfo(void)
         AddTextPrinterParameterized3(WINDOW_INFO, FONT_SMALL, 0, SPECIES_INFO_Y, sFontColor_Black, 0, GetSpeciesName(species));
 
     //type icon(s)
-    type1 = GetSpeciesType(species, 0);
-    type2 = GetSpeciesType(species, 1);
-    if (species == SPECIES_NONE)
-        type1 = type2 = TYPE_MYSTERY;
-
-    if (type1 == type2)
-    {
-        SetTypeIconPosAndPal(type1, 186, 69, 0);
-        SetSpriteInvisibility(1, TRUE);
-    }
-    else
-    {
-        SetTypeIconPosAndPal(type1, 168, 69, 0);
-        SetTypeIconPosAndPal(type2, 168 + 33, 69, 1);
-    }
+    PrintSpeciesTypeIcons(species);
 
     //search level
     if (species == SPECIES_NONE)
@@ -2177,10 +2332,10 @@ static void CreateTypeIconSprites(void)
 
     LoadCompressedSpriteSheet(&gSpriteSheet_MoveTypes);
     LoadPalette(gMoveTypes_Pal, OBJ_PLTT_ID(13), 3 * PLTT_SIZE_4BPP);
-    for (i = 0; i < 2; i++)
+    for (i = 0; i < ARRAY_COUNT(sDexNavUiDataPtr->typeIconSpriteIds); i++)
     {
         if (sDexNavUiDataPtr->typeIconSpriteIds[i] == 0xFF)
-            sDexNavUiDataPtr->typeIconSpriteIds[i] = CreateSprite(&gSpriteTemplate_MoveTypes, 10, 10, 2);
+            sDexNavUiDataPtr->typeIconSpriteIds[i] = CreateSpriteUnchecked(&gSpriteTemplate_MoveTypes, 10, 10, 2);
 
         SetSpriteInvisibility(i, TRUE);
     }
@@ -2249,8 +2404,7 @@ static bool8 DexNav_DoGfxSetup(void)
         gMain.state++;
         break;
     case 9:
-        sDexNavUiDataPtr->typeIconSpriteIds[0] = 0xFF;
-        sDexNavUiDataPtr->typeIconSpriteIds[1] = 0xFF;
+        memset(sDexNavUiDataPtr->typeIconSpriteIds, 0xFF, sizeof(sDexNavUiDataPtr->typeIconSpriteIds));
         CreateTypeIconSprites();
         gMain.state++;
         break;
@@ -2299,9 +2453,34 @@ static void DexNavGuiInit(MainCallback callback)
     }
 
     sDexNavUiDataPtr->state = 0;
+#ifdef NATIVE
+    sDexNavUiDataPtr->typeIconMatrix = 0xFF;
+#endif
     sDexNavUiDataPtr->savedCallback = callback;
     SetMainCallback2(DexNav_RunSetup);
 }
+
+#if defined(NATIVE) && defined(RHH_DEXNAV_TEST_FIXTURE)
+bool32 DexNavTestOpenGui(void)
+{
+    gMain.state = 0;
+    DexNavGuiInit(NULL);
+    return sDexNavUiDataPtr != NULL;
+}
+bool32 DexNavTestSetupGuiStep(void) { return DexNav_DoGfxSetup(); }
+void DexNavTestSelectGuiSpecies(enum Species species)
+{
+    sDexNavUiDataPtr->cursorRow = ROW_LAND_TOP;
+    sDexNavUiDataPtr->cursorCol = 0;
+    sDexNavUiDataPtr->landSpecies[0] = species;
+    UpdateCursorPosition();
+}
+u8 DexNavTestGuiTypeSprite(u32 index) { return sDexNavUiDataPtr->typeIconSpriteIds[index]; }
+void DexNavTestGuiSetType(u8 type) { SetTypeIconPosAndPal(type, 164, 69, 0); }
+u8 DexNavTestGuiTypeMatrix(void) { return sDexNavUiDataPtr->typeIconMatrix; }
+void DexNavTestGuiFrame(void) { DexNav_MainCB(); DexNav_VBlankCB(); CopyBufferedValuesToGpuRegs(); }
+void DexNavTestCloseGui(void) { DexNavGuiFreeResources(); sDexNavUiDataPtr = NULL; }
+#endif
 
 void Task_OpenDexNavFromStartMenu(u8 taskId)
 {

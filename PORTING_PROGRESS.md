@@ -79,8 +79,9 @@ the original 40 KiB vblank budget.
 Verified real input replay through RHH intro, new game, naming, truck scene,
 truck exit, moving-in NPC scripts, and the house Start/Save menu. The renderer
 capture `/tmp/rhh-save-game.bmp` shows the actual house after saving.
-`/tmp/rhh-game-progress.sav` is a 128 KiB file written by the existing RHH Save
-flow. Fresh-process Linux and Wine Continue checks are being collected.
+The save produced by that earlier test used the former 128 KiB cartridge-style
+format. Current builds use the PC-native format described in `PORTING.md`;
+that earlier save is incompatible.
 
 The expanded subsystem suite passes on Linux x64 and Wine x86, including the
 production RHH RNG, save validation, graphics transfers and Smol asset modes

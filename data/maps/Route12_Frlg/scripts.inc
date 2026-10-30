@@ -17,7 +17,9 @@ Route12_EventScript_Snorlax::
 	msgbox Text_WantToUsePokeFlute, MSGBOX_YESNO
 	goto_if_eq VAR_RESULT, NO, Route12_EventScript_DontUsePokeFlute
 	call EventScript_AwakenSnorlax
+	identifywildencounter "rhh:encounter/route12_frlg/snorlax"
 	setwildbattle SPECIES_SNORLAX, 30
+	guardwildbattle release
 	waitse
 	playmoncry SPECIES_SNORLAX, CRY_MODE_ENCOUNTER
 	delay 40
@@ -57,7 +59,7 @@ Route12_EventScript_FishingSign::
 	end
 
 Route12_Text_MonSprawledOutInSlumber::
-	.string "A POKéMON is sprawled out in\n"
+	.string "A Pokémon is sprawled out in\n"
 	.string "a deep and comfortable slumber.$"
 
 Text_SnorlaxWokeUp::
@@ -96,7 +98,7 @@ Route12_Text_ChipDefeat::
 
 Route12_Text_ChipPostBattle::
 	.string "With a better ROD, I could catch\n"
-	.string "better POKéMON…$"
+	.string "better Pokémon…$"
 
 Route12_Text_JustinIntro::
 	.string "I'm searching for a MOON STONE.\n"
@@ -106,13 +108,13 @@ Route12_Text_JustinDefeat::
 	.string "Oww!$"
 
 Route12_Text_JustinPostBattle::
-	.string "I could have made my POKéMON\n"
+	.string "I could have made my Pokémon\n"
 	.string "evolve with a MOON STONE.\p"
 	.string "I would have won then, I bet.$"
 
 Route12_Text_LucaIntro::
 	.string "Electricity is my specialty.\p"
-	.string "I don't know a thing about POKéMON\n"
+	.string "I don't know a thing about Pokémon\n"
 	.string "of the sea, though.$"
 
 Route12_Text_LucaDefeat::
@@ -120,10 +122,10 @@ Route12_Text_LucaDefeat::
 
 Route12_Text_LucaPostBattle::
 	.string "Water conducts electricity, so you\n"
-	.string "should zap sea POKéMON.$"
+	.string "should zap sea Pokémon.$"
 
 Route12_Text_HankIntro::
-	.string "The FISHING FOOL versus POKéMON\n"
+	.string "The FISHING FOOL versus Pokémon\n"
 	.string "KID!$"
 
 Route12_Text_HankDefeat::
@@ -132,7 +134,7 @@ Route12_Text_HankDefeat::
 Route12_Text_HankPostBattle::
 	.string "I guess you get to be good at\n"
 	.string "what you like.\p"
-	.string "Well, you beat me at POKéMON,\n"
+	.string "Well, you beat me at Pokémon,\n"
 	.string "but you can't top me at fishing.$"
 
 Route12_Text_ElliotIntro::
@@ -161,7 +163,7 @@ Route12_Text_AndrewPostBattle::
 	.string "But, boy are they wimpy.$"
 
 Route12_Text_RouteSign::
-	.string "ROUTE 12 \n"
+	.string "Route 12 \n"
 	.string "North to LAVENDER$"
 
 Route12_Text_SportfishingArea::
@@ -183,7 +185,7 @@ Route12_Text_JesNotEnoughMons::
 	.string "JES: GIA and I, we'll be\n"
 	.string "together forever.\p"
 	.string "We won't battle unless you have\n"
-	.string "two POKéMON of your own.$"
+	.string "two Pokémon of your own.$"
 
 Route12_Text_GiaIntro::
 	.string "GIA: Hey, JES…\p"
@@ -199,4 +201,4 @@ Route12_Text_GiaPostBattle::
 Route12_Text_GiaNotEnoughMons::
 	.string "GIA: I can't bear to battle\n"
 	.string "without my JES!\p"
-	.string "Don't you have one more POKéMON?$"
+	.string "Don't you have one more Pokémon?$"

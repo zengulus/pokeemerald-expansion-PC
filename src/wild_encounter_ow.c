@@ -1,9 +1,16 @@
 #include "global.h"
+#ifdef NATIVE
+#include "mods.h"
+#include "mod_host.h"
+#endif
 #include "wild_encounter_ow.h"
 #include "battle_setup.h"
 #include "battle_main.h"
 #include "battle_pike.h"
 #include "battle_pyramid.h"
+#ifdef NATIVE
+#include "battle_frontier.h"
+#endif
 #include "event_data.h"
 #include "event_object_movement.h"
 #include "fieldmap.h"
@@ -21,6 +28,9 @@
 #include "sound.h"
 #include "task.h"
 #include "trainer_hill.h"
+#ifdef NATIVE
+#include "safari_zone.h"
+#endif
 #include "wild_encounter.h"
 #include "constants/battle_frontier.h"
 #include "constants/event_objects.h"
@@ -79,6 +89,11 @@ struct InfoOWE
     bool8 isShiny;
     bool8 isFemale;
     bool8 noDespawn;
+#ifdef NATIVE
+    bool8 cancelled, hasPreservedMon;
+    bool8 deferActorNotification, restoreFacing;
+    struct Pokemon preservedMon;
+#endif
 };
 
 
@@ -145,14 +160,47 @@ static bool32 CreateEnemyPartyOWE(struct InfoOWE *info, s32 x, s32 y);
 static bool32 OWE_DoesOWERoamerExist(void);
 static bool32 StartWildBattleWithOWE_CheckRoamer(enum CategoryOWE category);
 static bool32 StartWildBattleWithOWE_CheckBattleFrontier(u32 headerId);
+static void PrepareOWEFacilityOpponent(bool32 pike);
 static bool32 StartWildBattleWithOWE_CheckMassOutbreak(enum CategoryOWE category, enum Species speciesId, u32 level);
 static bool32 StartWildBattleWithOWE_CheckDoubleBattle(struct ObjectEvent *owe, u32 headerId);
 static bool32 CheckCurrentWildMonHeaderForOWE(bool32 shouldSpawnWaterMons);
+#ifdef NATIVE
+/* Keep step encounters in unsupported areas. A bounded search mirrors the
+ * ordinary spawn tile rules without consuming the encounter RNG. */
+bool32 NativeOWEReplacesRandom(u16 behavior)
+{
+    if (!WE_OW_ENCOUNTERS || !WE_NATIVE_OW_REPLACE_RANDOM || WE_OWE_SPECIAL_ONLY
+        || FlagGet(WE_OWE_FLAG_DISABLED) || FlagGet(DN_FLAG_SEARCHING) || GetSafariZoneFlag()
+        || InTrainerHillChallenge() || GetCurrentMapWildMonHeaderId() == HEADER_NONE) return FALSE;
+    bool32 water = ShouldSpawnWaterOWE();
+    if ((water && !MetatileBehavior_IsWaterWildEncounter(behavior))
+        || (!water && !MetatileBehavior_IsLandWildEncounter(behavior))
+        || !CheckCurrentWildMonHeaderForOWE(water)) return FALSE;
+    if (GetNumberOfActiveOWEs(OWE_GENERATED)) return TRUE;
+    s16 px, py; PlayerGetDestCoords(&px, &py);
+    s32 distance = water ? OWE_SPAWN_DISTANCE_WATER : OWE_SPAWN_DISTANCE_LAND;
+    for (s32 dy = -OWE_SPAWN_HEIGHT_RADIUS; dy <= OWE_SPAWN_HEIGHT_RADIUS; ++dy)
+        for (s32 dx = -OWE_SPAWN_WIDTH_RADIUS; dx <= OWE_SPAWN_WIDTH_RADIUS; ++dx)
+        {
+            if (abs(dx) < distance || abs(dy) < distance) continue;
+            s16 x = px + dx, y = py + dy;
+            if (!AreCoordsInsidePlayerMap(x, y) || MapGridGetCollisionAt(x, y)) continue;
+            u32 elevation = MapGridGetElevationAt(x, y);
+            if (elevation == ELEVATION_TRANSITION || elevation == ELEVATION_MULTI_LEVEL) continue;
+            u32 candidate = MapGridGetMetatileBehaviorAt(x, y);
+            if ((water ? MetatileBehavior_IsWaterWildEncounter(candidate) : MetatileBehavior_IsLandWildEncounter(candidate))
+                && GetObjectEventIdByPosition(x, y, 0) == OBJECT_EVENTS_COUNT) return TRUE;
+        }
+    return FALSE;
+}
+#endif
+
 static u32 GetOldestActiveOWESlot(bool32 forceRemove);
 static u32 GetNextOWESpawnSlot(void);
 static enum Species GetSpeciesByOWESpawnSlot(u32 spawnSlot);
 static bool32 TrySelectTileForOWE(s32* outX, s32* outY);
 static void SetSpeciesInfoForOWE(struct InfoOWE *info, u32 x, u32 y);
+static void SetSpeciesInfoFromPreparedOWE(struct InfoOWE *info);
 static u32 GetGraphicsIdForOWE(const struct InfoOWE *info);
 static bool32 CheckCanLoadOWE(enum Species speciesId, bool32 isFemale, bool32 isShiny, s32 x, s32 y);
 static bool32 CheckCanLoadOWE_Palette(enum Species speciesId, bool32 isFemale, bool32 isShiny, s32 x, s32 y);
@@ -228,6 +276,34 @@ const struct FieldEffectInfoOWE gOverworldWildEncounterFieldEffectInfo[] =
     },
 };
 
+static u32 SpawnGeneratedOWE(const struct InfoOWE *info, s32 x, s32 y, bool32 allowReplacement)
+{
+    struct ObjectEventTemplate template = {
+        .localId = info->localId, .graphicsId = GetGraphicsIdForOWE(info),
+        .x = x - MAP_OFFSET, .y = y - MAP_OFFSET, .elevation = MapGridGetElevationAt(x, y),
+        .movementType = OWE_GetMovementTypeFromSpecies(info->speciesId),
+        .trainerType = TRAINER_TYPE_OW_WILD_ENCOUNTER,
+    };
+    u32 id = GetObjectEventIdByLocalId(info->localId);
+    if (id < OBJECT_EVENTS_COUNT && allowReplacement && ShouldDespawnGeneratedForNewOWE(&gObjectEvents[id]))
+        RemoveObjectEvent(&gObjectEvents[id]);
+    id = SpawnSpecialObjectEvent(&template);
+    if (id >= OBJECT_EVENTS_COUNT) return OBJECT_EVENTS_COUNT;
+    struct ObjectEvent *owe = &gObjectEvents[id];
+    owe->disableCoveringGroundEffects = TRUE;
+    owe->sOverworldEncounterLevel = info->noDespawn ? (info->level | OWE_NO_DESPAWN_FLAG) : info->level;
+    owe->sOverworldEncounterCategory = info->category;
+    ObjectEventTurn(owe,
+#ifdef NATIVE
+        info->restoreFacing ? info->restoreFacing :
+#endif
+        gStandardDirections[Random() & 3]);
+#ifdef NATIVE
+    if (!info->deferActorNotification)
+        ModsWildActorSpawned(owe, info->hasPreservedMon ? &info->preservedMon : NULL);
+#endif
+    return id;
+}
 
 void UpdateOverworldWildEncounter(void)
 {
@@ -244,7 +320,14 @@ void UpdateOverworldWildEncounter(void)
      || FlagGet(DN_FLAG_SEARCHING)
      || (gMapHeader.mapLayoutId == LAYOUT_BATTLE_FRONTIER_BATTLE_PIKE_ROOM_WILD_MONS && !WE_OWE_BATTLE_PIKE)
      || (gMapHeader.mapLayoutId == LAYOUT_BATTLE_FRONTIER_BATTLE_PYRAMID_FLOOR && !WE_OWE_BATTLE_PYRAMID)
-     || InTrainerHillChallenge())
+     || InTrainerHillChallenge()
+#ifdef NATIVE
+     || GetSafariZoneFlag()
+     || (!WE_NATIVE_OW_SPECIAL_AREAS
+         && (gMapHeader.mapLayoutId == LAYOUT_BATTLE_FRONTIER_BATTLE_PIKE_ROOM_WILD_MONS
+             || gMapHeader.mapLayoutId == LAYOUT_BATTLE_FRONTIER_BATTLE_PYRAMID_FLOOR))
+#endif
+     )
     {
         if (sOWESpawnCountdown != OWE_NO_ENCOUNTER_SET)
         {
@@ -300,21 +383,7 @@ void UpdateOverworldWildEncounter(void)
     }
 
     // Spawn the Pokemon.
-    
-    struct ObjectEventTemplate objectEventTemplate = {
-        .localId = infoOWE.localId,
-        .graphicsId = GetGraphicsIdForOWE(&infoOWE),
-        .x = x - MAP_OFFSET,
-        .y = y - MAP_OFFSET,
-        .elevation = MapGridGetElevationAt(x, y),
-        .movementType = OWE_GetMovementTypeFromSpecies(infoOWE.speciesId),
-        .trainerType = TRAINER_TYPE_OW_WILD_ENCOUNTER,
-    };
-    u32 objectEventId = GetObjectEventIdByLocalId(infoOWE.localId);
-    struct ObjectEvent *owe = &gObjectEvents[objectEventId];
-    if (ShouldDespawnGeneratedForNewOWE(owe))
-        RemoveObjectEvent(owe);
-    objectEventId = SpawnSpecialObjectEvent(&objectEventTemplate);
+    u32 objectEventId = SpawnGeneratedOWE(&infoOWE, x, y, TRUE);
 
     assertf(objectEventId < OBJECT_EVENTS_COUNT, "could not spawn generated overworld encounter. too many object events exist")
     {
@@ -322,14 +391,163 @@ void UpdateOverworldWildEncounter(void)
         return;
     }
 
-    owe = &gObjectEvents[objectEventId];
-    owe->disableCoveringGroundEffects = TRUE;
-    owe->sOverworldEncounterLevel = infoOWE.noDespawn ? (infoOWE.level | OWE_NO_DESPAWN_FLAG) : infoOWE.level;
-    owe->sOverworldEncounterCategory = infoOWE.category;
-
-    ObjectEventTurn(owe, gStandardDirections[Random() & 3]);
     SetNewOWESpawnCountdown();
 }
+
+#ifdef NATIVE
+/* Common deterministic placement checks, shared with the mod preflight. */
+u32 PreflightModOverworldWildEncounter(s32 x, s32 y, u32 *slot, bool32 *outWater)
+{
+    bool32 water = ShouldSpawnWaterOWE();
+    if (outWater) *outWater = water;
+    if (!WE_OW_ENCOUNTERS || !slot || ArePlayerFieldControlsLocked()
+        || FlagGet(WE_OWE_FLAG_DISABLED) || FlagGet(WE_FLAG_NO_ENCOUNTER) || FlagGet(DN_FLAG_SEARCHING)
+        || (gMapHeader.mapLayoutId == LAYOUT_BATTLE_FRONTIER_BATTLE_PIKE_ROOM_WILD_MONS && !WE_OWE_BATTLE_PIKE)
+        || (gMapHeader.mapLayoutId == LAYOUT_BATTLE_FRONTIER_BATTLE_PYRAMID_FLOOR && !WE_OWE_BATTLE_PYRAMID)
+        || InTrainerHillChallenge() || !CheckCurrentWildMonHeaderForOWE(water)
+        || (water && AreLegendariesInSootopolisPreventingEncounters())) return RHH_WILD_ACTOR_UNAVAILABLE;
+    if (gPlayerAvatar.objectEventId >= OBJECT_EVENTS_COUNT || !gObjectEvents[gPlayerAvatar.objectEventId].active)
+        return RHH_WILD_ACTOR_UNAVAILABLE;
+    struct ObjectEvent *player = &gObjectEvents[gPlayerAvatar.objectEventId];
+    if (player->currentCoords.x != player->previousCoords.x || player->currentCoords.y != player->previousCoords.y)
+        return RHH_WILD_ACTOR_BLOCKED;
+    if (GetNumberOfActiveOWEs(OWE_GENERATED) >= OWE_SPAWNS_MAX) return RHH_WILD_ACTOR_FULL;
+    u32 spawnSlot = GetNextOWESpawnSlot();
+    if (spawnSlot == OWE_INVALID_SPAWN_SLOT || spawnSlot >= OWE_SPAWNS_MAX) return RHH_WILD_ACTOR_FULL;
+    x += MAP_OFFSET; y += MAP_OFFSET;
+    s16 px, py; PlayerGetDestCoords(&px, &py);
+    s32 dx = abs(x - px), dy = abs(y - py);
+    u32 close = water ? OWE_SPAWN_DISTANCE_WATER : OWE_SPAWN_DISTANCE_LAND;
+    if (dx < close || dy < close || dx > OWE_SPAWN_WIDTH_RADIUS || dy > OWE_SPAWN_HEIGHT_RADIUS
+        || !AreCoordsInsidePlayerMap(x, y)) return RHH_WILD_ACTOR_BLOCKED;
+    u32 elevation = MapGridGetElevationAt(x, y), behavior = MapGridGetMetatileBehaviorAt(x, y);
+    if (elevation == ELEVATION_TRANSITION || elevation == ELEVATION_MULTI_LEVEL
+        || MapGridGetCollisionAt(x, y) || GetObjectEventIdByPosition(x, y, 0) != OBJECT_EVENTS_COUNT)
+        return RHH_WILD_ACTOR_BLOCKED;
+    if (!(water ? MetatileBehavior_IsWaterWildEncounter(behavior) : MetatileBehavior_IsLandWildEncounter(behavior))
+        && gMapHeader.mapLayoutId != LAYOUT_BATTLE_FRONTIER_BATTLE_PIKE_ROOM_WILD_MONS
+        && gMapHeader.mapLayoutId != LAYOUT_BATTLE_FRONTIER_BATTLE_PYRAMID_FLOOR) return RHH_WILD_ACTOR_BLOCKED;
+    *slot = spawnSlot;
+    return RHH_WILD_ACTOR_OK;
+}
+u32 PreflightModOverworldWildSpecies(s32 x, s32 y, u32 species, u32 level, u32 *slot, bool32 *water)
+{
+    u32 status = PreflightModOverworldWildEncounter(x, y, slot, water);
+    if (status != RHH_WILD_ACTOR_OK) return status;
+    if (WE_OWE_SPECIAL_ONLY || gMapHeader.mapLayoutId == LAYOUT_BATTLE_FRONTIER_BATTLE_PIKE_ROOM_WILD_MONS
+        || gMapHeader.mapLayoutId == LAYOUT_BATTLE_FRONTIER_BATTLE_PYRAMID_FLOOR)
+        return RHH_WILD_ACTOR_UNAVAILABLE;
+    if (!CheckValidOWESpecies(species) || !level || level > MAX_LEVEL) return RHH_WILD_ACTOR_INVALID;
+    if (GetCurrentMapWildMonHeaderId() == HEADER_NONE) return RHH_WILD_ACTOR_UNAVAILABLE;
+    return RHH_WILD_ACTOR_OK;
+}
+/* A mod request follows the normal OWE selection and resource rules, but
+ * never replaces an existing actor to make room. Coordinates are map-local. */
+static u32 TrySpawnModOWE(s32 x, s32 y, u32 requestedSpecies, u32 requestedLevel, u32 *slot)
+{
+    u32 spawnSlot;
+    bool32 water;
+    if (!slot) return RHH_WILD_ACTOR_UNAVAILABLE;
+    u32 status = PreflightModOverworldWildEncounter(x, y, &spawnSlot, &water);
+    if (status != RHH_WILD_ACTOR_OK) return status;
+    x += MAP_OFFSET; y += MAP_OFFSET;
+    struct InfoOWE info = {.localId = GetLocalIdByOWESpawnSlot(spawnSlot), .category = OWE_CATEGORY_UNDEFINED};
+    if (requestedSpecies)
+    {
+        /* Facilities and special-only maps have their own authoritative
+         * encounter selection and cannot accept a regular requested mon. */
+        if (WE_OWE_SPECIAL_ONLY || gMapHeader.mapLayoutId == LAYOUT_BATTLE_FRONTIER_BATTLE_PIKE_ROOM_WILD_MONS
+            || gMapHeader.mapLayoutId == LAYOUT_BATTLE_FRONTIER_BATTLE_PYRAMID_FLOOR)
+            return RHH_WILD_ACTOR_UNAVAILABLE;
+        if (!CheckValidOWESpecies(requestedSpecies) || !requestedLevel || requestedLevel > MAX_LEVEL)
+            return RHH_WILD_ACTOR_INVALID;
+        u32 header = GetCurrentMapWildMonHeaderId();
+        if (header == HEADER_NONE) return RHH_WILD_ACTOR_UNAVAILABLE;
+        u32 area = water ? WILD_AREA_WATER : WILD_AREA_LAND;
+        u32 time = GetTimeOfDayForEncounters(header, area);
+        struct RhhWildCheckpoint checkpoint; ModsWildCheckpointSave(&checkpoint);
+        u32 species = ModsWildSpecies(requestedSpecies, area, RHH_WILD_NO_TABLE_SLOT, time);
+        struct RhhWildEncounterContext context; struct RhhWildEncounterCancellation cancel;
+        if (!ModsWildResolve(requestedSpecies, &species, area, RHH_WILD_OVERWORLD_ACTOR,
+                             RHH_WILD_NO_TABLE_SLOT, requestedLevel, time, x - MAP_OFFSET, y - MAP_OFFSET,
+                             &context, &cancel))
+        {
+            ModsWildCheckpointRestore(&checkpoint); ModsWildCancelled(&cancel);
+            return RHH_WILD_ACTOR_DENIED;
+        }
+        if (!CheckValidOWESpecies(species))
+        { ModsWildCheckpointRestore(&checkpoint); return RHH_WILD_ACTOR_FAILED; }
+        CreateWildMon(species, requestedLevel);
+        ModsWildCreated(species, area, RHH_WILD_NO_TABLE_SLOT, time);
+        ModsWildCandidateCreated(&context, &gParties[B_TRAINER_OPPONENT_A][0]);
+        SetSpeciesInfoFromPreparedOWE(&info);
+    }
+    else
+        SetSpeciesInfoForOWE(&info, x, y);
+    if (info.cancelled) return RHH_WILD_ACTOR_DENIED;
+    if (info.speciesId == SPECIES_NONE || (WE_OWE_SPECIAL_ONLY && info.category >= OWE_CATEGORY_WILD)
+        || !IsWildLevelAllowedByRepel(info.level) || !IsAbilityAllowingEncounter(info.level)
+        || !CheckCanLoadOWE(info.speciesId, info.isFemale, info.isShiny, x, y)) return RHH_WILD_ACTOR_FAILED;
+    u32 id = SpawnGeneratedOWE(&info, x, y, FALSE);
+    if (id >= OBJECT_EVENTS_COUNT) return RHH_WILD_ACTOR_FULL;
+    SetNewOWESpawnCountdown(); *slot = id;
+    return RHH_WILD_ACTOR_OK;
+}
+u32 TrySpawnModOverworldWildEncounter(s32 x, s32 y, u32 *slot)
+{ return TrySpawnModOWE(x, y, SPECIES_NONE, 0, slot); }
+u32 TrySpawnModOverworldWildSpecies(s32 x, s32 y, u32 species, u32 level, u32 *slot)
+{ return TrySpawnModOWE(x, y, species, level, slot); }
+bool32 IsOrdinaryGeneratedOverworldWildEncounter(struct ObjectEvent *object)
+{
+    return IsOverworldWildEncounter(object, OWE_GENERATED) && GetOWECategory(object) == OWE_CATEGORY_WILD;
+}
+/* Restoration is not a new encounter: it must accept a stationary actor's
+ * old tile even when it is near the player or no longer encounter terrain.
+ * Still require a free, unambiguous tile and the normal object resources. */
+static u32 PreflightPreservedOWE(s32 x, s32 y, u32 elevation, u32 *spawnSlot)
+{
+    if (!WE_OW_ENCOUNTERS || !spawnSlot || ArePlayerFieldControlsLocked())
+        return RHH_WILD_ACTOR_UNAVAILABLE;
+    if (x < 0 || y < 0 || x > INT16_MAX - MAP_OFFSET || y > INT16_MAX - MAP_OFFSET
+        || elevation >= 16) return RHH_WILD_ACTOR_INVALID;
+    if (GetNumberOfActiveOWEs(OWE_GENERATED) >= OWE_SPAWNS_MAX) return RHH_WILD_ACTOR_FULL;
+    u32 next = GetNextOWESpawnSlot();
+    if (next == OWE_INVALID_SPAWN_SLOT || next >= OWE_SPAWNS_MAX) return RHH_WILD_ACTOR_FULL;
+    x += MAP_OFFSET; y += MAP_OFFSET;
+    if (!AreCoordsInsidePlayerMap(x, y)) return RHH_WILD_ACTOR_BLOCKED;
+    u32 currentElevation = MapGridGetElevationAt(x, y);
+    if (currentElevation == ELEVATION_TRANSITION || currentElevation == ELEVATION_MULTI_LEVEL
+        || currentElevation != elevation || MapGridGetCollisionAt(x, y)
+        || GetObjectEventIdByPosition(x, y, 0) != OBJECT_EVENTS_COUNT) return RHH_WILD_ACTOR_BLOCKED;
+    *spawnSlot = next;
+    return RHH_WILD_ACTOR_OK;
+}
+/* Recreate an already-generated individual without drawing a new Pokémon or
+ * announcing an actor before the host restores its associated records. */
+u32 TrySpawnModOverworldWildPreserved(s32 x, s32 y, const struct Pokemon *source, u32 facing, u32 elevation, bool32 noDespawn, u32 *slot)
+{
+    if (!source || !slot || facing < DIR_SOUTH || facing > DIR_NORTHEAST || noDespawn > 1) return RHH_WILD_ACTOR_INVALID;
+    u32 spawnSlot;
+    u32 status = PreflightPreservedOWE(x, y, elevation, &spawnSlot);
+    if (status != RHH_WILD_ACTOR_OK) return status;
+    struct Pokemon mon = *source;
+    u32 species = GetMonData(&mon, MON_DATA_SPECIES), personality = GetMonData(&mon, MON_DATA_PERSONALITY);
+    if (GetMonData(&mon, MON_DATA_SANITY_IS_BAD_EGG) || GetMonData(&mon, MON_DATA_IS_EGG)
+        || !species || species >= NUM_SPECIES || !mon.level || mon.level > MAX_LEVEL || !mon.hp || mon.hp > mon.maxHP)
+        return RHH_WILD_ACTOR_INVALID;
+    u32 visual = species == SPECIES_UNOWN ? GetUnownSpeciesId(personality) : species;
+    struct InfoOWE info = {.localId = GetLocalIdByOWESpawnSlot(spawnSlot), .category = OWE_CATEGORY_WILD,
+        .speciesId = visual, .level = mon.level, .isShiny = GetMonData(&mon, MON_DATA_IS_SHINY),
+        .isFemale = GetGenderFromSpeciesAndPersonality(visual, personality) == MON_FEMALE,
+        .hasPreservedMon = TRUE, .deferActorNotification = TRUE, .restoreFacing = facing,
+        .noDespawn = noDespawn, .preservedMon = mon};
+    if (!CheckValidOWESpecies(visual) || !CheckCanLoadOWE(visual, info.isFemale, info.isShiny, x + MAP_OFFSET, y + MAP_OFFSET))
+        return RHH_WILD_ACTOR_FAILED;
+    u32 id = SpawnGeneratedOWE(&info, x + MAP_OFFSET, y + MAP_OFFSET, FALSE);
+    if (id >= OBJECT_EVENTS_COUNT) return RHH_WILD_ACTOR_FULL;
+    *slot = id; return RHH_WILD_ACTOR_OK;
+}
+#endif
 
 bool32 IsOverworldWildEncounter(struct ObjectEvent *owe, enum TypeOWE oweType)
 {
@@ -366,20 +584,28 @@ void StartWildBattleWithOWE(struct ScriptContext *ctx)
     u32 localId = VarGet(ScriptReadHalfword(ctx));
     u32 objEventId = GetObjectEventIdByLocalId(localId);
     u32 headerId = GetCurrentMapWildMonHeaderId();
-    struct ObjectEvent *owe = &gObjectEvents[objEventId];
-    enum CategoryOWE category = GetOWECategory(owe);
 
     Script_RequestEffects(SCREFF_V1 | SCREFF_HARDWARE);
+    Script_RequestWriteVar(VAR_RESULT);
+    gSpecialVar_Result = TRUE;
 
-    assertf(objEventId < OBJECT_EVENTS_COUNT && IsOverworldWildEncounter(owe, OWE_ANY), "cannot start overworld wild enocunter as the selected object is invalid.\nlocalId: %d", localId)
+    assertf(objEventId < OBJECT_EVENTS_COUNT && IsOverworldWildEncounter(&gObjectEvents[objEventId], OWE_ANY), "cannot start overworld wild enocunter as the selected object is invalid.\nlocalId: %d", localId)
     {
+        gSpecialVar_Result = FALSE;
         UnlockPlayerFieldControls();
         UnfreezeObjectEvents();
         return;
     }
+    struct ObjectEvent *owe = &gObjectEvents[objEventId];
+    enum CategoryOWE category = GetOWECategory(owe);
 
     if (category < ROAMER_COUNT && StartWildBattleWithOWE_CheckRoamer(category))
+    {
+#ifdef NATIVE
+        ModsWildActorEngaged(owe);
+#endif
         return;
+    }
 
     enum Species speciesId = OW_SPECIES(owe);
     bool32 shiny = OW_SHINY(owe) ? TRUE : FALSE;
@@ -392,22 +618,106 @@ void StartWildBattleWithOWE(struct ScriptContext *ctx)
         level = MIN_LEVEL;
     }
 
+#ifdef NATIVE
+    struct Pokemon preserved;
+    bool32 hasPreservedMon = ModsWildActorCopyMon(owe, &preserved);
+    bool32 manualFacility = RhhModsHasActiveRun() && !hasPreservedMon
+        && !IS_LOCALID_GENERATED_OWE(owe->localId) && headerId == HEADER_NONE
+        && (gMapHeader.mapLayoutId == LAYOUT_BATTLE_FRONTIER_BATTLE_PIKE_ROOM_WILD_MONS
+            || gMapHeader.mapLayoutId == LAYOUT_BATTLE_FRONTIER_BATTLE_PYRAMID_FLOOR)
+        && (RhhModsHasHook(RHH_CAN_GENERATE_MANUAL_FACILITY_WILD)
+            || RhhModsHasHook(RHH_WILD_MANUAL_FACILITY_GENERATED));
+    struct RhhWildCheckpoint checkpoint;
+    const struct BattleFrontierTrainer *trainers = gFacilityTrainers;
+    const struct TrainerMon *trainerMons = gFacilityTrainerMons;
+    if (manualFacility) ModsWildCheckpointSave(&checkpoint);
+    /* Older Pyramid actors stored the internal selector in MON_DATA_LEVEL,
+     * while their experience and stats still describe the real Pokémon. */
+    if (hasPreservedMon && gMapHeader.mapLayoutId == LAYOUT_BATTLE_FRONTIER_BATTLE_PYRAMID_FLOOR
+        && GetMonData(&preserved, MON_DATA_LEVEL) != GetLevelFromMonExp(&preserved))
+        CalculateMonStats(&preserved);
+#endif
     ZeroEnemyPartyMons();
-    personality = GetMonPersonality(speciesId, gender, NATURE_RANDOM, RANDOM_UNOWN_LETTER);
-    CreateMonWithIVs(&gParties[B_TRAINER_OPPONENT_A][0], speciesId, level, personality, OTID_STRUCT_PLAYER_ID, USE_RANDOM_IVS);
-    GiveMonInitialMoveset(&gParties[B_TRAINER_OPPONENT_A][0]);
-    SetMonData(&gParties[B_TRAINER_OPPONENT_A][0], MON_DATA_IS_SHINY, &shiny);
+#ifdef NATIVE
+    if (hasPreservedMon)
+        gParties[B_TRAINER_OPPONENT_A][0] = preserved;
+    else
+#endif
+    {
+        personality = GetMonPersonality(speciesId, gender, NATURE_RANDOM, RANDOM_UNOWN_LETTER);
+        CreateMonWithIVs(&gParties[B_TRAINER_OPPONENT_A][0], speciesId, level, personality, OTID_STRUCT_PLAYER_ID, USE_RANDOM_IVS);
+        GiveMonInitialMoveset(&gParties[B_TRAINER_OPPONENT_A][0]);
+        SetMonData(&gParties[B_TRAINER_OPPONENT_A][0], MON_DATA_IS_SHINY, &shiny);
+    }
     
-    if (StartWildBattleWithOWE_CheckBattleFrontier(headerId))
+#ifdef NATIVE
+    if (manualFacility)
+    {
+        bool32 pike = gMapHeader.mapLayoutId == LAYOUT_BATTLE_FRONTIER_BATTLE_PIKE_ROOM_WILD_MONS;
+        PrepareOWEFacilityOpponent(pike);
+        struct Pokemon *mon = &gParties[B_TRAINER_OPPONENT_A][0];
+        u32 species = GetMonData(mon, MON_DATA_SPECIES), actualLevel = GetMonData(mon, MON_DATA_LEVEL);
+        u64 identity = (u64)GetMonData(mon, MON_DATA_OT_ID) << 32 | GetMonData(mon, MON_DATA_PERSONALITY);
+        struct RhhWildEncounterContext context; struct RhhWildEncounterCancellation cancel;
+        if (!ModsWildSpecialPermission(species, WILD_AREA_LAND, pike ? RHH_WILD_MANUAL_PIKE : RHH_WILD_MANUAL_PYRAMID,
+                UINT32_MAX, actualLevel, UINT32_MAX, owe->currentCoords.x - MAP_OFFSET,
+                owe->currentCoords.y - MAP_OFFSET, identity, &context, &cancel))
+        {
+            ModsWildCheckpointRestore(&checkpoint);
+            gFacilityTrainers = trainers; gFacilityTrainerMons = trainerMons;
+            ModsWildCancelled(&cancel);
+            gSpecialVar_Result = FALSE;
+            return;
+        }
+        ModsWildSpecialCreated(&context, mon);
+        if (pike) BattleSetup_StartBattlePikeWildBattle(); else BattleSetup_StartWildBattle();
+        ModsWildActorEngaged(owe);
         return;
+    }
+    /* A generated facility actor retains the exact opponent approved at
+     * spawn. Do not replace it with a fresh random facility Pokémon. */
+    if ((hasPreservedMon || (RhhModsHasActiveRun() && IS_LOCALID_GENERATED_OWE(owe->localId)))
+        && headerId == HEADER_NONE
+        && (gMapHeader.mapLayoutId == LAYOUT_BATTLE_FRONTIER_BATTLE_PIKE_ROOM_WILD_MONS
+            || gMapHeader.mapLayoutId == LAYOUT_BATTLE_FRONTIER_BATTLE_PYRAMID_FLOOR))
+    {
+        if (gMapHeader.mapLayoutId == LAYOUT_BATTLE_FRONTIER_BATTLE_PIKE_ROOM_WILD_MONS)
+            BattleSetup_StartBattlePikeWildBattle();
+        else
+            BattleSetup_StartWildBattle();
+        ModsWildActorEngaged(owe);
+        return;
+    }
+#endif
+    if (StartWildBattleWithOWE_CheckBattleFrontier(headerId))
+    {
+#ifdef NATIVE
+        ModsWildActorEngaged(owe);
+#endif
+        return;
+    }
     
     if (StartWildBattleWithOWE_CheckMassOutbreak(category, speciesId, level))
+    {
+#ifdef NATIVE
+        ModsWildActorEngaged(owe);
+#endif
         return;
+    }
 
     if (StartWildBattleWithOWE_CheckDoubleBattle(owe, headerId))
+    {
+#ifdef NATIVE
+        ModsWildActorEngaged(owe);
+        ModsWildActorBattleOpponentSlot(1);
+#endif
         return;
+    }
 
     BattleSetup_StartWildBattle();
+#ifdef NATIVE
+    ModsWildActorEngaged(owe);
+#endif
 }
 
 void SetOverworldObjectSpecies(struct ScriptContext *ctx)
@@ -427,6 +737,11 @@ void SetOverworldObjectSpecies(struct ScriptContext *ctx)
     VarSet(varId, speciesId);
 }
 
+#ifdef NATIVE
+#define TRY_GENERATE_OWE(encounters, area, flags) TryGenerateWildMonAtStatus(encounters, area, flags, x - MAP_OFFSET, y - MAP_OFFSET, &info->cancelled)
+#else
+#define TRY_GENERATE_OWE(info, area, flags) TryGenerateWildMon(info, area, flags)
+#endif
 static bool32 CreateEnemyPartyOWE(struct InfoOWE *info, s32 x, s32 y)
 {
     const struct WildPokemonInfo *wildMonInfo;
@@ -441,7 +756,12 @@ static bool32 CreateEnemyPartyOWE(struct InfoOWE *info, s32 x, s32 y)
         {
             headerId = GetBattlePikeWildMonHeaderId();
             timeOfDay = GetTimeOfDayForEncounters(headerId, WILD_AREA_LAND);
-            if (TryGenerateWildMon(gBattlePikeWildMonHeaders[headerId].encounterTypes[timeOfDay].landMonsInfo, WILD_AREA_LAND, 0) != TRUE)
+#ifdef NATIVE
+            if (RhhModsHasActiveRun())
+                return TryGenerateFacilityWild(gBattlePikeWildMonHeaders[headerId].encounterTypes[timeOfDay].landMonsInfo,
+                    0, TRUE, TRUE, timeOfDay, x - MAP_OFFSET, y - MAP_OFFSET, TRUE, &info->cancelled);
+#endif
+            if (TRY_GENERATE_OWE(gBattlePikeWildMonHeaders[headerId].encounterTypes[timeOfDay].landMonsInfo, WILD_AREA_LAND, 0) != TRUE)
                 return FALSE;
             else if (!TryGenerateBattlePikeWildMon(TRUE))
                 return FALSE;
@@ -452,7 +772,12 @@ static bool32 CreateEnemyPartyOWE(struct InfoOWE *info, s32 x, s32 y)
         {
             headerId = gSaveBlock2Ptr->frontier.curChallengeBattleNum;
             timeOfDay = GetTimeOfDayForEncounters(headerId, WILD_AREA_LAND);
-            if (TryGenerateWildMon(gBattlePyramidWildMonHeaders[headerId].encounterTypes[timeOfDay].landMonsInfo, WILD_AREA_LAND, 0) != TRUE)
+#ifdef NATIVE
+            if (RhhModsHasActiveRun())
+                return TryGenerateFacilityWild(gBattlePyramidWildMonHeaders[headerId].encounterTypes[timeOfDay].landMonsInfo,
+                    0, FALSE, FALSE, timeOfDay, x - MAP_OFFSET, y - MAP_OFFSET, TRUE, &info->cancelled);
+#endif
+            if (TRY_GENERATE_OWE(gBattlePyramidWildMonHeaders[headerId].encounterTypes[timeOfDay].landMonsInfo, WILD_AREA_LAND, 0) != TRUE)
                 return FALSE;
 
             enum Species id = GetMonData(&gParties[B_TRAINER_OPPONENT_A][0], MON_DATA_SPECIES);
@@ -494,34 +819,79 @@ static bool32 CreateEnemyPartyOWE(struct InfoOWE *info, s32 x, s32 y)
 
     if (info->category == OWE_CATEGORY_UNDEFINED)
     {
-        if (TryStartRoamerEncounter() && !OWE_DoesOWERoamerExist())
+#ifdef NATIVE
+        struct RhhWildCheckpoint checkpoint; ModsWildCheckpointSave(&checkpoint);
+        bool32 selectedRoamer = TryStartRoamerEncounter();
+        bool32 duplicateRoamer = selectedRoamer && OWE_DoesOWERoamerExist();
+        if (duplicateRoamer)
         {
+            /* A duplicate is not an encounter; do not let its temporary mon
+             * become the baseline if the fallback candidate is vetoed. */
+            memcpy(gParties[B_TRAINER_OPPONENT_A], checkpoint.enemy, sizeof(checkpoint.enemy));
+            gPartiesCount[B_TRAINER_OPPONENT_A] = checkpoint.enemyCount;
+            gEncounteredRoamerIndex = checkpoint.roamerIndex;
+        }
+        if (selectedRoamer && !duplicateRoamer)
+#else
+        if (TryStartRoamerEncounter() && !OWE_DoesOWERoamerExist())
+#endif
+        {
+#ifdef NATIVE
+            struct Roamer *roamer = &gSaveBlock1Ptr->roamer[gEncounteredRoamerIndex];
+            struct Pokemon *mon = &gParties[B_TRAINER_OPPONENT_A][0];
+            u64 identity = (u64)GetMonData(mon, MON_DATA_OT_ID) << 32 | GetMonData(mon, MON_DATA_PERSONALITY);
+            struct RhhWildEncounterContext context; struct RhhWildEncounterCancellation cancel;
+            if (!ModsWildSpecialPermission(roamer->species, wildArea, RHH_WILD_OVERWORLD_ROAMER,
+                    gEncounteredRoamerIndex, roamer->level, timeOfDay, x - MAP_OFFSET, y - MAP_OFFSET,
+                    identity, &context, &cancel))
+            { ModsWildCheckpointRestore(&checkpoint); info->cancelled = TRUE; ModsWildCancelled(&cancel); return FALSE; }
+            ModsWildSpecialCreated(&context, mon);
+#endif
             info->category = gEncounteredRoamerIndex;
             return TRUE;
         }
         else if (WE_OWE_FEEBAS_SPOTS && MetatileBehavior_IsWaterWildEncounter(metatileBehavior) && CheckFeebasAtCoords(x, y))
         {
-            CreateWildMon(gWildFeebas.species, ChooseWildMonLevel(&gWildFeebas, 0, WILD_AREA_FISHING));
+            u8 level = ChooseWildMonLevel(&gWildFeebas, 0, WILD_AREA_FISHING);
+#ifdef NATIVE
+            struct RhhWildEncounterContext context; struct RhhWildEncounterCancellation cancel;
+            if (!ModsWildSpecialPermission(gWildFeebas.species, WILD_AREA_FISHING, RHH_WILD_OVERWORLD_FEEBAS,
+                    255, level, UINT32_MAX, x - MAP_OFFSET, y - MAP_OFFSET, 0, &context, &cancel))
+            { ModsWildCheckpointRestore(&checkpoint); info->cancelled = TRUE; ModsWildCancelled(&cancel); return FALSE; }
+#endif
+            CreateWildMon(gWildFeebas.species, level);
+#ifdef NATIVE
+            ModsWildSpecialCreated(&context, &gParties[B_TRAINER_OPPONENT_A][0]);
+#endif
             info->category = OWE_CATEGORY_FEEBAS;
-            if (WE_OWE_PREVENT_FEEBAS_DESPAWN)
-                info->noDespawn = TRUE;
-
+            if (WE_OWE_PREVENT_FEEBAS_DESPAWN) info->noDespawn = TRUE;
             return TRUE;
         }
         else if (DoMassOutbreakEncounterTest() && MetatileBehavior_IsLandWildEncounter(metatileBehavior))
         {
+#ifdef NATIVE
+            struct RhhWildEncounterContext context; struct RhhWildEncounterCancellation cancel;
+            if (!ModsWildSpecialPermission(gSaveBlock1Ptr->outbreakPokemonSpecies, WILD_AREA_LAND,
+                    RHH_WILD_OVERWORLD_OUTBREAK, UINT32_MAX, gSaveBlock1Ptr->outbreakPokemonLevel,
+                    timeOfDay, x - MAP_OFFSET, y - MAP_OFFSET, 0, &context, &cancel))
+            { ModsWildCheckpointRestore(&checkpoint); info->cancelled = TRUE; ModsWildCancelled(&cancel); return FALSE; }
+#endif
             SetUpMassOutbreakEncounter(0);
+#ifdef NATIVE
+            ModsWildSpecialCreated(&context, &gParties[B_TRAINER_OPPONENT_A][0]);
+#endif
             info->category = OWE_CATEGORY_MASS_OUTBREAK;
             return TRUE;
         }
         else
         {
-            return TryGenerateWildMon(wildMonInfo, wildArea, 0);
+            return TRY_GENERATE_OWE(wildMonInfo, wildArea, 0);
         }
     }
 
-    return TryGenerateWildMon(wildMonInfo, wildArea, 0);
+    return TRY_GENERATE_OWE(wildMonInfo, wildArea, 0);
 }
+#undef TRY_GENERATE_OWE
 
 static bool32 OWE_DoesOWERoamerExist(void)
 {
@@ -555,24 +925,32 @@ static bool32 StartWildBattleWithOWE_CheckBattleFrontier(u32 headerId)
     {
         if (gMapHeader.mapLayoutId == LAYOUT_BATTLE_FRONTIER_BATTLE_PIKE_ROOM_WILD_MONS)
         {
-            TryGenerateBattlePikeWildMon(FALSE);
+            PrepareOWEFacilityOpponent(TRUE);
             BattleSetup_StartBattlePikeWildBattle();
             return TRUE;
         }
         if (gMapHeader.mapLayoutId == LAYOUT_BATTLE_FRONTIER_BATTLE_PYRAMID_FLOOR)
         {
-            u32 id = GetMonData(&gParties[B_TRAINER_OPPONENT_A][0], MON_DATA_LEVEL);
-            enum Species species = GetMonData(&gParties[B_TRAINER_OPPONENT_A][0], MON_DATA_SPECIES);
-            SetMonData(&gParties[B_TRAINER_OPPONENT_A][0], MON_DATA_SPECIES, &id);
-            if (!BATTLE_PYRAMID_RANDOM_ENCOUNTERS)
-                species = SPECIES_NONE;
-            GenerateBattlePyramidWildMon(species);
+            PrepareOWEFacilityOpponent(FALSE);
             BattleSetup_StartWildBattle();
             return TRUE;
         }
     }
 
     return FALSE;
+}
+
+static void PrepareOWEFacilityOpponent(bool32 pike)
+{
+    if (pike) TryGenerateBattlePikeWildMon(FALSE);
+    else
+    {
+        u32 id = GetMonData(&gParties[B_TRAINER_OPPONENT_A][0], MON_DATA_LEVEL);
+        enum Species species = GetMonData(&gParties[B_TRAINER_OPPONENT_A][0], MON_DATA_SPECIES);
+        SetMonData(&gParties[B_TRAINER_OPPONENT_A][0], MON_DATA_SPECIES, &id);
+        if (!BATTLE_PYRAMID_RANDOM_ENCOUNTERS) species = SPECIES_NONE;
+        GenerateBattlePyramidWildMon(species);
+    }
 }
 
 static bool32 StartWildBattleWithOWE_CheckMassOutbreak(enum CategoryOWE category, enum Species speciesId, u32 level)
@@ -625,14 +1003,30 @@ static bool32 StartWildBattleWithOWE_CheckDoubleBattle(struct ObjectEvent *owe, 
     return FALSE;
 }
 
+#ifdef NATIVE
+static void ApplyModSpawnInterval(u32 cause, u32 numActive, u32 flags)
+{
+    if (sOWESpawnCountdown == OWE_NO_ENCOUNTER_SET || !RhhModsHasHook(RHH_WILD_SPAWN_INTERVAL)) return;
+    s32 x = -1, y = -1;
+    if (gPlayerAvatar.objectEventId < OBJECT_EVENTS_COUNT && gObjectEvents[gPlayerAvatar.objectEventId].active)
+    { s16 px, py; PlayerGetDestCoords(&px, &py); x = px - MAP_OFFSET; y = py - MAP_OFFSET; }
+    sOWESpawnCountdown = ModsWildSpawnInterval(sOWESpawnCountdown, cause,
+        ShouldSpawnWaterOWE() ? WILD_AREA_WATER : WILD_AREA_LAND, numActive, OWE_SPAWNS_MAX, flags, x, y);
+}
+#endif
 void SetMinimumOWESpawnTimer(void)
 {
     if (!WE_OW_ENCOUNTERS)
         return;
 
+    u32 numActive = GetNumberOfActiveOWEs(OWE_GENERATED);
+    bool32 lure = LURE_STEP_COUNT && numActive < OWE_SPAWNS_MAX;
     sOWESpawnCountdown = OWE_SPAWN_TIME_MINIMUM;
-    if (LURE_STEP_COUNT && GetNumberOfActiveOWEs(OWE_GENERATED) < OWE_SPAWNS_MAX)
+    if (lure)
         sOWESpawnCountdown = OWE_SPAWN_TIME_LURE;
+#ifdef NATIVE
+    ApplyModSpawnInterval(RHH_WILD_SPAWN_MINIMUM, numActive, lure ? RHH_WILD_SPAWN_LURE : 0);
+#endif
 }
 
 void TryTriggerOverworldWildEncounter(struct ObjectEvent *obstacle, struct ObjectEvent *collider)
@@ -649,6 +1043,9 @@ void TryTriggerOverworldWildEncounter(struct ObjectEvent *obstacle, struct Objec
         return;
 
     struct ObjectEvent *wildMon = playerFollowerIsColliderOWE ? obstacle : collider;
+#ifdef NATIVE
+    if (!ModsWildActorCueVisible(wildMon)) return;
+#endif
     enum CategoryOWE category = GetOWECategory(wildMon);
     if (category < ROAMER_COUNT
      && !IsRoamerAt(category, gSaveBlock1Ptr->location.mapGroup, gSaveBlock1Ptr->location.mapNum))
@@ -763,6 +1160,15 @@ static u32 GetNextOWESpawnSlot(void)
     return spawnSlot;
 }
 
+#ifdef NATIVE
+u32 ModsWildGeneratedFreeSlot(void)
+{
+    if (GetNumberOfActiveOWEs(OWE_GENERATED) >= OWE_SPAWNS_MAX) return UINT32_MAX;
+    u32 slot = GetNextOWESpawnSlot();
+    return slot < OWE_SPAWNS_MAX ? slot : UINT32_MAX;
+}
+#endif
+
 static enum Species GetSpeciesByOWESpawnSlot(u32 spawnSlot)
 {
     u32 objEventId = GetObjectEventIdByLocalId(GetLocalIdByOWESpawnSlot(spawnSlot));
@@ -841,15 +1247,21 @@ static bool32 TrySelectTileForOWE(s32* outX, s32* outY)
 
 static void SetSpeciesInfoForOWE(struct InfoOWE *info, u32 x, u32 y)
 {
-    u32 personality;
-
     if (!CreateEnemyPartyOWE(info, x, y))
     {
-        ZeroEnemyPartyMons();
+#ifdef NATIVE
+        if (!info->cancelled)
+#endif
+            ZeroEnemyPartyMons();
         info->speciesId = SPECIES_NONE;
         return;
     }
- 
+    SetSpeciesInfoFromPreparedOWE(info);
+}
+
+static void SetSpeciesInfoFromPreparedOWE(struct InfoOWE *info)
+{
+    u32 personality;
     info->speciesId = GetMonData(&gParties[B_TRAINER_OPPONENT_A][0], MON_DATA_SPECIES);
     info->level = GetMonData(&gParties[B_TRAINER_OPPONENT_A][0], MON_DATA_LEVEL);
     personality = GetMonData(&gParties[B_TRAINER_OPPONENT_A][0], MON_DATA_PERSONALITY);
@@ -857,7 +1269,16 @@ static void SetSpeciesInfoForOWE(struct InfoOWE *info, u32 x, u32 y)
     if (info->speciesId == SPECIES_UNOWN)
         info->speciesId = GetUnownSpeciesId(personality);
 
-    info->isShiny = ComputePlayerShinyOdds(personality, READ_OTID_FROM_SAVE);
+#ifdef NATIVE
+    if (IS_LOCALID_GENERATED_OWE(info->localId)
+        && (info->category == OWE_CATEGORY_UNDEFINED || info->category == OWE_CATEGORY_WILD))
+    {
+        info->preservedMon = gParties[B_TRAINER_OPPONENT_A][0]; info->hasPreservedMon = TRUE;
+        info->isShiny = GetMonData(&info->preservedMon, MON_DATA_IS_SHINY);
+    }
+    else
+#endif
+        info->isShiny = ComputePlayerShinyOdds(personality, READ_OTID_FROM_SAVE);
     if (GetGenderFromSpeciesAndPersonality(info->speciesId, personality) == MON_FEMALE)
         info->isFemale = TRUE;
     else
@@ -974,7 +1395,9 @@ static void SortOWEAges(void)
 
     for (i = 0; i < OWE_SPAWNS_MAX; i++)
     {
-        slotMon = &gObjectEvents[GetObjectEventIdByLocalId(GetLocalIdByOWESpawnSlot(i))];
+        u32 id = GetObjectEventIdByLocalId(GetLocalIdByOWESpawnSlot(i));
+        if (id >= OBJECT_EVENTS_COUNT) continue;
+        slotMon = &gObjectEvents[id];
         // OWE_ANY can be used here as localId is guarenteed to be in the OWE_GENERATED range by GetLocalIdByOWESpawnSlot.
         if (IsOverworldWildEncounter(slotMon, OWE_ANY) && OW_SPECIES(slotMon) != SPECIES_NONE)
         {
@@ -1020,6 +1443,9 @@ void OnOverworldWildEncounterSpawn(struct ObjectEvent *owe)
         SortOWEAges();
 
     DoOWESpawnAnim(owe);
+#ifdef NATIVE
+    if (type == OWE_MANUAL) ModsWildActorSpawned(owe, NULL);
+#endif
 }
 
 void OnOverworldWildEncounterDespawn(struct ObjectEvent *owe)
@@ -1102,7 +1528,9 @@ u32 TryAndDespawnOldestGeneratedOWE_ToFreeObject(void)
 
 void DespawnOWEOnBattleStart(void)
 {
-    struct ObjectEvent *owe = &gObjectEvents[GetObjectEventIdByLocalId(gSpecialVar_LastTalked)];
+    u32 objectEventId = GetObjectEventIdByLocalId(gSpecialVar_LastTalked);
+    if (objectEventId >= OBJECT_EVENTS_COUNT) return;
+    struct ObjectEvent *owe = &gObjectEvents[objectEventId];
     if (!IsOverworldWildEncounter(owe, OWE_ANY))
         return;
 
@@ -1148,14 +1576,24 @@ static bool32 ShouldDespawnGeneratedForNewOWE(struct ObjectEvent *owe)
 static void SetNewOWESpawnCountdown(void)
 {
     u32 numActive = GetNumberOfActiveOWEs(OWE_GENERATED);
+    bool32 replacement = WE_OWE_SPAWN_REPLACEMENT && numActive >= OWE_SPAWNS_MAX;
+    bool32 lure = !replacement && LURE_STEP_COUNT && numActive < OWE_SPAWNS_MAX;
 
-    if (WE_OWE_SPAWN_REPLACEMENT && numActive >= OWE_SPAWNS_MAX)
+    if (replacement)
         sOWESpawnCountdown = OWE_SPAWN_TIME_REPLACEMENT;
-    else if (LURE_STEP_COUNT && numActive < OWE_SPAWNS_MAX)
+    else if (lure)
         sOWESpawnCountdown = OWE_SPAWN_TIME_LURE;
     else
         sOWESpawnCountdown = OWE_SPAWN_TIME_MINIMUM + (OWE_SPAWN_TIME_PER_ACTIVE * numActive);
+#ifdef NATIVE
+    ApplyModSpawnInterval(RHH_WILD_SPAWN_RECALCULATED, numActive,
+        (lure ? RHH_WILD_SPAWN_LURE : 0) | (replacement ? RHH_WILD_SPAWN_REPLACEMENT : 0));
+#endif
 }
+#if defined(NATIVE) && defined(RHH_WILD_SPAWN_TEST)
+u32 RhhTestWildSpawnCountdown(void) { return sOWESpawnCountdown; }
+void RhhTestWildSpawnRecalculate(void) { SetNewOWESpawnCountdown(); }
+#endif
 
 static void DoOWESpawnAnim(struct ObjectEvent *owe)
 {
@@ -1286,11 +1724,8 @@ void RestoreSavedOWEBehaviorState(struct ObjectEvent *owe, struct Sprite *sprite
 #undef sJumpTimer
 
 // Returns TRUE if movement is restricted.
-bool32 CheckRestrictedOWEMovement(struct ObjectEvent *owe, enum Direction direction)
+static bool32 CheckRestrictedOWEMovementAfterCollision(struct ObjectEvent *owe, enum Direction direction)
 {
-    if (GetCollisionInDirection(owe, direction))
-        return TRUE;
-
     if (WE_OWE_UNRESTRICT_SIGHT
      && owe->movementType != MOVEMENT_TYPE_WANDER_AROUND_OWE
      && CanAwareOWESeePlayer(owe))
@@ -1309,6 +1744,32 @@ bool32 CheckRestrictedOWEMovement(struct ObjectEvent *owe, enum Direction direct
 
     return FALSE;
 }
+
+bool32 CheckRestrictedOWEMovement(struct ObjectEvent *owe, enum Direction direction)
+{
+    return GetCollisionInDirection(owe, direction) || CheckRestrictedOWEMovementAfterCollision(owe, direction);
+}
+
+#ifdef NATIVE
+bool32 CheckRestrictedOWEMovementNoEffects(struct ObjectEvent *owe, enum Direction direction, u8 *overwrite)
+{
+    return GetCollisionInDirectionNoEffects(owe, direction, overwrite)
+        || CheckRestrictedOWEMovementAfterCollision(owe, direction);
+}
+bool32 CheckRestrictedOWEMovementFromNoEffects(const struct ObjectEvent *owe, s16 x, s16 y,
+                                                u8 elevation, u8 behavior, u8 facing,
+                                                enum Direction direction, u8 *overwrite)
+{
+    struct ObjectEvent simulated = *owe;
+    simulated.currentCoords.x = simulated.previousCoords.x = x;
+    simulated.currentCoords.y = simulated.previousCoords.y = y;
+    simulated.currentElevation = elevation;
+    simulated.currentMetatileBehavior = behavior;
+    simulated.facingDirection = facing;
+    return GetCollisionInDirectionNoEffectsIgnoring(&simulated, owe, direction, overwrite)
+        || CheckRestrictedOWEMovementAfterCollision(&simulated, direction);
+}
+#endif
 
 static bool32 CheckRestrictedOWEMovementAtCoords(struct ObjectEvent *owe, s32 xNew, s32 yNew, enum Direction newDirection, enum Direction collisionDirection)
 {
@@ -1566,9 +2027,10 @@ void OWEApproachForBattle(struct ScriptContext *ctx)
 {
     u32 localId = VarGet(ScriptReadHalfword(ctx));
     u32 objectEventId = GetObjectEventIdByLocalId(localId);
-    struct ObjectEvent *owe = &gObjectEvents[objectEventId];
 
     Script_RequestEffects(SCREFF_V1 | SCREFF_HARDWARE);
+    if (objectEventId >= OBJECT_EVENTS_COUNT) return;
+    struct ObjectEvent *owe = &gObjectEvents[objectEventId];
     
     if (!WE_OWE_APPROACH_FOR_BATTLE || !IsOverworldWildEncounter(owe, OWE_ANY))
     {
@@ -1577,7 +2039,7 @@ void OWEApproachForBattle(struct ScriptContext *ctx)
     }
     
     u32 taskId = CreateTask(Task_OWEApproachForBattle, 2);
-    if (FindTaskIdByFunc(Task_OWEApproachForBattle) == TASK_NONE)
+    if (taskId == TASK_NONE)
     {
         FreezeObjectEvent(owe);
         return;
@@ -1597,7 +2059,7 @@ static void Task_OWEApproachForBattle(u8 taskId)
         struct ObjectEvent *player = &gObjectEvents[gPlayerAvatar.objectEventId];
         struct ObjectEvent *followerMon = GetFollowerObject();
         bool32 oweNextToPlayer = IsOWENextToPlayer(OWE);
-        bool32 oweNextToFollowerMon = IsOWENextToObject(OWE, followerMon);
+        bool32 oweNextToFollowerMon = followerMon != NULL && IsOWENextToObject(OWE, followerMon);
 
         if (oweNextToPlayer || oweNextToFollowerMon)
         {
@@ -1625,7 +2087,7 @@ static void Task_OWEApproachForBattle(u8 taskId)
         if (CheckRestrictedOWEMovement(OWE, OWE->movementDirection))
         {
             u32 idFollowerNPC = GetFollowerNPCObjectId();
-            struct ObjectEvent *followerNPC = &gObjectEvents[idFollowerNPC];
+            struct ObjectEvent *followerNPC = idFollowerNPC < OBJECT_EVENTS_COUNT ? &gObjectEvents[idFollowerNPC] : NULL;
             s16 x = OWE->currentCoords.x;
             s16 y = OWE->currentCoords.y;
             u32 collidingObject;
@@ -1633,13 +2095,14 @@ static void Task_OWEApproachForBattle(u8 taskId)
             MoveCoords(OWE->movementDirection, &x, &y);
             collidingObject = GetObjectObjectCollidesWith(OWE, x, y, FALSE);
 
-            if (collidingObject == GetObjectEventIdByLocalId(followerMon->localId) && followerMon != NULL && !followerMon->invisible)
+            if (followerMon != NULL && collidingObject == GetObjectEventIdByLocalId(followerMon->localId) && !followerMon->invisible)
             {
                 ClearObjectEventMovement(followerMon, &gSprites[followerMon->spriteId]);
                 gSprites[followerMon->spriteId].animCmdIndex = 0;
                 ObjectEventSetHeldMovement(followerMon, MOVEMENT_ACTION_ENTER_POKEBALL);
             }
-            else if (collidingObject == idFollowerNPC && FNPC_ENABLE_NPC_FOLLOWERS && PlayerHasFollowerNPC() && !followerNPC->invisible)
+            else if (idFollowerNPC < OBJECT_EVENTS_COUNT && collidingObject == idFollowerNPC
+                     && FNPC_ENABLE_NPC_FOLLOWERS && PlayerHasFollowerNPC() && !followerNPC->invisible)
             {
                 enum Direction direction = DetermineFollowerNPCDirection(&gObjectEvents[gPlayerAvatar.objectEventId], followerNPC);
                 ClearObjectEventMovement(followerNPC, &gSprites[followerNPC->spriteId]);
@@ -1708,10 +2171,11 @@ const struct ObjectEventTemplate TryGetObjectEventTemplateForOWE(const struct Ob
     if (levelTemplate)
         info.level = levelTemplate;
 
+    u32 existingObject = GetObjectEventIdByLocalId(template->localId);
     assertf((CheckValidOWESpecies(info.speciesId)
         && info.level >= MIN_LEVEL
         && info.level <= MAX_LEVEL)
-        || gObjectEvents[GetObjectEventIdByLocalId(template->localId)].active,
+        || (existingObject < OBJECT_EVENTS_COUNT && gObjectEvents[existingObject].active),
         "invalid manual overworld encounter template\nspecies: %d\nlevel: %d\ntemplate x: %d\ntemplate y: %d\ncheck if valid wild mon header exists", info.speciesId, info.level, x, y)
     {
         if (!CheckValidOWESpecies(info.speciesId))

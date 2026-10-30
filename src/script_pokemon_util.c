@@ -13,6 +13,7 @@
 #include "link_rfu.h"
 #include "main.h"
 #include "menu.h"
+#include "mods.h"
 #include "overworld.h"
 #include "ow_abilities.h"
 #include "palette.h"
@@ -234,6 +235,9 @@ void ReducePlayerPartyToSelectedMons(void)
     struct Pokemon party[MAX_FRONTIER_PARTY_SIZE];
     int i;
 
+#ifdef NATIVE
+    ModsOwnedBeforePartyReduction();
+#endif
     CpuFill32(0, party, sizeof party);
 
     // copy the selected Pokémon according to the order.
@@ -241,7 +245,13 @@ void ReducePlayerPartyToSelectedMons(void)
         if (gSelectedOrderFromParty[i]) // as long as the order keeps going (did the player select 1 mon? 2? 3?), do not stop
             party[i] = gParties[B_TRAINER_PLAYER][gSelectedOrderFromParty[i] - 1]; // index is 0 based, not literal
 
+#ifdef NATIVE
+    /* This reduction is checked by ModsOwnedBeforePartyReduction and its
+     * projection receipt, including the source copies and final mapping. */
+    memset(gParties[B_TRAINER_PLAYER], 0, sizeof gParties[B_TRAINER_PLAYER]);
+#else
     CpuFill32(0, gParties[B_TRAINER_PLAYER], sizeof gParties[B_TRAINER_PLAYER]);
+#endif
 
     // overwrite the first 4 with the order copied to.
     for (i = 0; i < MAX_FRONTIER_PARTY_SIZE; i++)

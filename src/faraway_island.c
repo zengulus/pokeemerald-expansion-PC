@@ -19,6 +19,17 @@ static bool8 CanMewMoveToCoords(s16, s16);
 
 static EWRAM_DATA u8 sGrassSpriteId = 0;
 
+/* The encounter animation temporarily changes the hide-and-seek actor.
+ * Keep only the fields it changes; do not replace the live object or sprite. */
+static EWRAM_DATA struct {
+    bool8 valid;
+    u8 objectId, spriteId, mapNum, mapGroup, invisible, fixedPriority;
+    u8 facing, movementDirection, previousMovementDirection, facingLocked;
+    u8 subspriteMode, subspriteTableNum, subpriority;
+    s16 x, y, previousX, previousY;
+    u16 stepCounter;
+} sMewEncounterCheckpoint;
+
 static s16 sPlayerToMewDeltaX;
 static s16 sPlayerToMewDeltaY;
 static enum Direction sMewDirectionCandidates[4];
@@ -39,6 +50,59 @@ static u8 GetMewObjectEventId(void)
     u8 objectEventId;
     TryGetObjectEventIdByLocalIdAndMap(LOCALID_FARAWAY_ISLAND_MEW, gSaveBlock1Ptr->location.mapNum, gSaveBlock1Ptr->location.mapGroup, &objectEventId);
     return objectEventId;
+}
+
+u16 ScriptSnapshotMewEncounter(void)
+{
+    sMewEncounterCheckpoint.valid = FALSE;
+    u8 id = GetMewObjectEventId();
+    if (id >= OBJECT_EVENTS_COUNT || !gObjectEvents[id].active || gObjectEvents[id].spriteId >= MAX_SPRITES)
+        return 0;
+    struct ObjectEvent *mew = &gObjectEvents[id];
+    struct Sprite *sprite = &gSprites[mew->spriteId];
+    if (!sprite->inUse) return 0;
+    sMewEncounterCheckpoint = (typeof(sMewEncounterCheckpoint)){
+        .valid = TRUE, .objectId = id, .spriteId = mew->spriteId,
+        .mapNum = gSaveBlock1Ptr->location.mapNum, .mapGroup = gSaveBlock1Ptr->location.mapGroup,
+        .invisible = mew->invisible, .fixedPriority = mew->fixedPriority, .facing = mew->facingDirection,
+        .movementDirection = mew->movementDirection, .previousMovementDirection = mew->previousMovementDirection,
+        .facingLocked = mew->facingDirectionLocked, .subspriteMode = sprite->subspriteMode,
+        .subspriteTableNum = sprite->subspriteTableNum, .subpriority = sprite->subpriority,
+        .x = mew->currentCoords.x, .y = mew->currentCoords.y,
+        .previousX = mew->previousCoords.x, .previousY = mew->previousCoords.y,
+        .stepCounter = VarGet(VAR_FARAWAY_ISLAND_STEP_COUNTER)
+    };
+    return 0;
+}
+
+u16 ScriptRestoreMewEncounter(void)
+{
+    if (!sMewEncounterCheckpoint.valid) return 0;
+    sMewEncounterCheckpoint.valid = FALSE;
+    u8 id = sMewEncounterCheckpoint.objectId;
+    if (gSaveBlock1Ptr->location.mapNum != sMewEncounterCheckpoint.mapNum
+        || gSaveBlock1Ptr->location.mapGroup != sMewEncounterCheckpoint.mapGroup
+        || id >= OBJECT_EVENTS_COUNT || !gObjectEvents[id].active
+        || gObjectEvents[id].localId != LOCALID_FARAWAY_ISLAND_MEW
+        || gObjectEvents[id].spriteId != sMewEncounterCheckpoint.spriteId) return 0;
+    struct ObjectEvent *mew = &gObjectEvents[id];
+    struct Sprite *sprite = &gSprites[mew->spriteId];
+    if (!sprite->inUse) return 0;
+    MoveObjectEventToMapCoords(mew, sMewEncounterCheckpoint.x, sMewEncounterCheckpoint.y);
+    mew->previousCoords.x = sMewEncounterCheckpoint.previousX;
+    mew->previousCoords.y = sMewEncounterCheckpoint.previousY;
+    mew->facingDirectionLocked = FALSE;
+    ObjectEventTurn(mew, sMewEncounterCheckpoint.facing);
+    mew->movementDirection = sMewEncounterCheckpoint.movementDirection;
+    mew->previousMovementDirection = sMewEncounterCheckpoint.previousMovementDirection;
+    mew->facingDirectionLocked = sMewEncounterCheckpoint.facingLocked;
+    mew->invisible = sMewEncounterCheckpoint.invisible;
+    mew->fixedPriority = sMewEncounterCheckpoint.fixedPriority;
+    sprite->subspriteMode = sMewEncounterCheckpoint.subspriteMode;
+    sprite->subspriteTableNum = sMewEncounterCheckpoint.subspriteTableNum;
+    sprite->subpriority = sMewEncounterCheckpoint.subpriority;
+    VarSet(VAR_FARAWAY_ISLAND_STEP_COUNTER, sMewEncounterCheckpoint.stepCounter);
+    return 0;
 }
 
 // When the player enters Faraway Island interior it begins a "hide and seek" minigame where Mew disappears into the grass

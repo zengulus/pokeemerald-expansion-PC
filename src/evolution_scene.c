@@ -1,4 +1,7 @@
 #include "global.h"
+#ifdef NATIVE
+#include "mods.h"
+#endif
 #include "malloc.h"
 #include "battle.h"
 #include "battle_message.h"
@@ -548,9 +551,35 @@ static void CB2_TradeEvolutionSceneUpdate(void)
     RunTasks();
 }
 
-static void CreateShedinja(enum Species preEvoSpecies, enum Species postEvoSpecies, struct Pokemon *mon)
+static void CommitEvolution(struct Pokemon *mon, enum Species before, enum Species after, u32 partySlot, bool32 trade)
+{
+    u32 zero = 0;
+    u16 species = after;
+#ifdef NATIVE
+    struct RhhOwnedEvolution evolution;
+    bool32 notify = ModsOwnedEvolutionCapture(mon, partySlot, trade, &evolution);
+#endif
+    (void)partySlot; (void)trade;
+#ifdef NATIVE
+    if (notify) SetMonSpeciesWithOwnedReceipt(mon, &species);
+    else
+#endif
+    SetMonData(mon, MON_DATA_SPECIES, &species);
+    SetMonData(mon, MON_DATA_EVOLUTION_TRACKER, &zero);
+    CalculateMonStats(mon);
+    EvolutionRenameMon(mon, before, after);
+    GetSetPokedexFlag(SpeciesToNationalPokedexNum(after), FLAG_SET_SEEN);
+    GetSetPokedexFlag(SpeciesToNationalPokedexNum(after), FLAG_SET_CAUGHT);
+    IncrementGameStat(GAME_STAT_EVOLVED_POKEMON);
+#ifdef NATIVE
+    if (notify) ModsOwnedEvolutionCommitted(mon, &evolution);
+    else NativeOwnedTrackerUnsupported();
+#endif
+}
+static void CreateShedinja(enum Species preEvoSpecies, enum Species postEvoSpecies, struct Pokemon *mon, u32 partySlot)
 {
     u32 data = 0;
+    (void)partySlot;
     enum Item ball = ITEM_POKE_BALL;
     const struct Evolution *evolutions = GetSpeciesEvolutions(preEvoSpecies);
 
@@ -566,8 +595,20 @@ static void CreateShedinja(enum Species preEvoSpecies, enum Species postEvoSpeci
         {
             s32 j;
             struct Pokemon *shedinja = &gParties[B_TRAINER_PLAYER][gPartiesCount[B_TRAINER_PLAYER]];
+#ifdef NATIVE
+            struct RhhOwnedEvolution evolution;
+            bool32 notify = ModsOwnedEvolutionSplitCapture(mon, partySlot, gPartiesCount[B_TRAINER_PLAYER], &evolution);
+#endif
 
-            CopyMon(&gParties[B_TRAINER_PLAYER][gPartiesCount[B_TRAINER_PLAYER]], mon, sizeof(struct Pokemon));
+#ifdef NATIVE
+            if (notify) CopyMonWithOwnedReceipt(&gParties[B_TRAINER_PLAYER][gPartiesCount[B_TRAINER_PLAYER]], mon, sizeof(struct Pokemon));
+            else
+#endif
+                CopyMon(&gParties[B_TRAINER_PLAYER][gPartiesCount[B_TRAINER_PLAYER]], mon, sizeof(struct Pokemon));
+#ifdef NATIVE
+            if (notify) SetMonSpeciesWithOwnedReceipt(shedinja, &evolutions[i].targetSpecies);
+            else
+#endif
             SetMonData(&gParties[B_TRAINER_PLAYER][gPartiesCount[B_TRAINER_PLAYER]], MON_DATA_SPECIES, &evolutions[i].targetSpecies);
             SetMonData(&gParties[B_TRAINER_PLAYER][gPartiesCount[B_TRAINER_PLAYER]], MON_DATA_NICKNAME, GetSpeciesName(evolutions[i].targetSpecies));
             SetMonData(&gParties[B_TRAINER_PLAYER][gPartiesCount[B_TRAINER_PLAYER]], MON_DATA_HELD_ITEM, &data);
@@ -598,10 +639,23 @@ static void CreateShedinja(enum Species preEvoSpecies, enum Species postEvoSpeci
                 && GetMonData(shedinja, MON_DATA_LANGUAGE) == LANGUAGE_JAPANESE
                 && GetMonData(mon, MON_DATA_SPECIES) == SPECIES_NINJASK)
                     SetMonData(shedinja, MON_DATA_NICKNAME, sText_ShedinjaJapaneseName);
-
+#ifdef NATIVE
+            if (notify) ModsOwnedEvolutionCommitted(shedinja, &evolution);
+            else NativeOwnedTrackerUnsupported();
+#endif
         }
     }
 }
+#if defined(NATIVE) && defined(RHH_OWNED_IDENTITY_TEST)
+void ModsOwnedEvolutionTestCommit(u32 partySlot, enum Species species, bool32 trade)
+{
+    struct Pokemon *mon = partySlot == PC_MON_CHOSEN ? &gParties[B_TRAINER_OPPONENT_A][TRADEMON_FROM_PC]
+                                                    : &gParties[B_TRAINER_PLAYER][partySlot];
+    CommitEvolution(mon, GetMonData(mon, MON_DATA_SPECIES), species, partySlot, trade);
+}
+void ModsOwnedEvolutionTestSplit(u32 partySlot, enum Species before, enum Species after)
+{ CreateShedinja(before, after, &gParties[B_TRAINER_PLAYER][partySlot], partySlot); }
+#endif
 
 // States for the main switch in Task_EvolutionScene
 enum {
@@ -779,18 +833,11 @@ static void Task_EvolutionScene(u8 taskId)
     case EVOSTATE_SET_MON_EVOLVED:
         if (IsCryFinished())
         {
-            u32 zero = 0;
             StringExpandPlaceholders(gStringVar4, gText_CongratsPkmnEvolved);
             BattlePutTextOnWindow(gStringVar4, B_WIN_MSG);
             PlayBGM(MUS_EVOLVED);
             gTasks[taskId].tState++;
-            SetMonData(mon, MON_DATA_SPECIES, (void *)(&gTasks[taskId].tPostEvoSpecies));
-            SetMonData(mon, MON_DATA_EVOLUTION_TRACKER, &zero);
-            CalculateMonStats(mon);
-            EvolutionRenameMon(mon, gTasks[taskId].tPreEvoSpecies, gTasks[taskId].tPostEvoSpecies);
-            GetSetPokedexFlag(SpeciesToNationalPokedexNum(gTasks[taskId].tPostEvoSpecies), FLAG_SET_SEEN);
-            GetSetPokedexFlag(SpeciesToNationalPokedexNum(gTasks[taskId].tPostEvoSpecies), FLAG_SET_CAUGHT);
-            IncrementGameStat(GAME_STAT_EVOLVED_POKEMON);
+            CommitEvolution(mon, gTasks[taskId].tPreEvoSpecies, gTasks[taskId].tPostEvoSpecies, gTasks[taskId].tPartyId, FALSE);
         }
         break;
     case EVOSTATE_TRY_LEARN_MOVE:
@@ -837,7 +884,7 @@ static void Task_EvolutionScene(u8 taskId)
             }
 
             if (!gTasks[taskId].tEvoWasStopped)
-                CreateShedinja(gTasks[taskId].tPreEvoSpecies, gTasks[taskId].tPostEvoSpecies, mon);
+                CreateShedinja(gTasks[taskId].tPreEvoSpecies, gTasks[taskId].tPostEvoSpecies, mon, gTasks[taskId].tPartyId);
 
             DestroyTask(taskId);
             FreeMonSpritesGfx();
@@ -1206,18 +1253,11 @@ static void Task_TradeEvolutionScene(u8 taskId)
     case T_EVOSTATE_SET_MON_EVOLVED:
         if (IsCryFinished())
         {
-            u32 zero = 0;
             StringExpandPlaceholders(gStringVar4, gText_CongratsPkmnEvolved);
             DrawTextOnTradeWindow(0, gStringVar4, 1);
             PlayFanfare(MUS_EVOLVED);
             gTasks[taskId].tState++;
-            SetMonData(mon, MON_DATA_SPECIES, (&gTasks[taskId].tPostEvoSpecies));
-            SetMonData(mon, MON_DATA_EVOLUTION_TRACKER, &zero);
-            CalculateMonStats(mon);
-            EvolutionRenameMon(mon, gTasks[taskId].tPreEvoSpecies, gTasks[taskId].tPostEvoSpecies);
-            GetSetPokedexFlag(SpeciesToNationalPokedexNum(gTasks[taskId].tPostEvoSpecies), FLAG_SET_SEEN);
-            GetSetPokedexFlag(SpeciesToNationalPokedexNum(gTasks[taskId].tPostEvoSpecies), FLAG_SET_CAUGHT);
-            IncrementGameStat(GAME_STAT_EVOLVED_POKEMON);
+            CommitEvolution(mon, gTasks[taskId].tPreEvoSpecies, gTasks[taskId].tPostEvoSpecies, gTasks[taskId].tPartyId, TRUE);
         }
         break;
     case T_EVOSTATE_TRY_LEARN_MOVE:

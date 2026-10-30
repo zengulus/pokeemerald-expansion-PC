@@ -34,7 +34,7 @@ VermilionCity_House3_Text_DearPippiLetter::
 	.string "Dear PIPPI,\n"
 	.string "I hope to see you soon.\p"
 	.string "I heard SAFFRON has problems with\n"
-	.string "TEAM ROCKET.\p"
+	.string "Team Rocket.\p"
 	.string "VERMILION appears to be safe.$"
 
 VermilionCity_House3_Text_SendMyPidgeyToUnionRoom::

@@ -1,3 +1,7 @@
+#ifdef NATIVE
+#include <stdlib.h>
+#include <stdint.h>
+#endif
 #include "global.h"
 #include "hall_of_fame.h"
 #include "task.h"
@@ -34,11 +38,16 @@
 #include "data.h"
 #include "confetti_util.h"
 #include "constants/rgb.h"
+#ifdef NATIVE
+#include "native.h"
+#include "constants/characters.h"
+#endif
 
-#define HALL_OF_FAME_MAX_TEAMS 30
 #define TAG_CONFETTI 1001
 
+#ifndef NATIVE
 STATIC_ASSERT(sizeof(struct HallofFameTeam) * HALL_OF_FAME_MAX_TEAMS <= SECTOR_DATA_SIZE * NUM_HOF_SECTORS, HallOfFameFreeSpace);
+#endif
 
 struct HofGfx
 {
@@ -52,6 +61,11 @@ static EWRAM_DATA u32 sHofFadePalettes = 0;
 static EWRAM_DATA struct HallofFameTeam *sHofMonPtr = NULL;
 static EWRAM_DATA struct HofGfx *sHofGfxPtr = NULL;
 EWRAM_DATA struct HallofFameTeam *gHoFSaveBuffer = NULL;
+#ifdef NATIVE
+size_t gHoFSaveCount;
+static size_t sHofCurrentTeam;
+static bool8 sHofInvalidSave;
+#endif
 
 static void ClearVramOamPltt_LoadHofPal(void);
 static void LoadHofGfx(void);
@@ -403,7 +417,15 @@ static bool8 InitHallOfFameScreen(void)
 static void AllocateHoFTeams(void)
 {
     sHofMonPtr = AllocZeroed(sizeof(*sHofMonPtr));
-    gHoFSaveBuffer = Alloc(SECTOR_SIZE * NUM_HOF_SECTORS);
+#ifdef NATIVE
+    size_t bytes = 0;
+    int status = NativeSaveSpecialSize(SECTOR_ID_HOF_1, &bytes);
+    sHofInvalidSave = status < 0 || bytes % sizeof(*gHoFSaveBuffer) != 0;
+    gHoFSaveCount = sHofInvalidSave ? 0 : bytes / sizeof(*gHoFSaveBuffer);
+    gHoFSaveBuffer = malloc(bytes && !sHofInvalidSave ? bytes : sizeof(*gHoFSaveBuffer));
+#else
+    gHoFSaveBuffer = Alloc(HALL_OF_FAME_STORAGE_SIZE);
+#endif
 }
 
 void CB2_DoHallOfFameScreen(void)
@@ -473,19 +495,42 @@ static void Task_Hof_InitMonData(u8 taskId)
         gTasks[taskId].func = Task_Hof_InitTeamSaveData;
 }
 
+#ifdef NATIVE
+bool32 NativeHallOfFameAppend(const struct HallofFameTeam *team)
+{
+    if (!team || gHoFSaveCount >= SIZE_MAX / sizeof(*gHoFSaveBuffer)) return FALSE;
+    struct HallofFameTeam *expanded = realloc(gHoFSaveBuffer, (gHoFSaveCount + 1) * sizeof(*expanded));
+    if (!expanded) return FALSE;
+    gHoFSaveBuffer = expanded;
+    gHoFSaveBuffer[gHoFSaveCount++] = *team;
+    return TRUE;
+}
+#endif
+
 static void Task_Hof_InitTeamSaveData(u8 taskId)
 {
+#ifdef NATIVE
+    if (!gHasHallOfFameRecords) { gHoFSaveCount = 0; sHofInvalidSave = FALSE; }
+    if (!gHoFSaveBuffer || sHofInvalidSave
+        || (gHoFSaveCount && LoadGameSave(SAVE_HALL_OF_FAME) != SAVE_STATUS_OK)
+        || !NativeHallOfFameAppend(sHofMonPtr))
+    {
+        free(gHoFSaveBuffer);
+        gHoFSaveBuffer = NULL;
+        gHoFSaveCount = 0;
+    }
+#else
     u16 i;
     struct HallofFameTeam *lastSavedTeam = gHoFSaveBuffer;
 
     if (!gHasHallOfFameRecords)
     {
-        memset(gHoFSaveBuffer, 0, SECTOR_SIZE * NUM_HOF_SECTORS);
+        memset(gHoFSaveBuffer, 0, HALL_OF_FAME_STORAGE_SIZE);
     }
     else
     {
         if (LoadGameSave(SAVE_HALL_OF_FAME) != SAVE_STATUS_OK)
-            memset(gHoFSaveBuffer, 0, SECTOR_SIZE * NUM_HOF_SECTORS);
+            memset(gHoFSaveBuffer, 0, HALL_OF_FAME_STORAGE_SIZE);
     }
 
     for (i = 0; i < HALL_OF_FAME_MAX_TEAMS; i++, lastSavedTeam++)
@@ -505,6 +550,7 @@ static void Task_Hof_InitTeamSaveData(u8 taskId)
         lastSavedTeam--;
     }
     *lastSavedTeam = *sHofMonPtr;
+#endif
 
     DrawDialogueFrame(0, FALSE);
     AddTextPrinterParameterized2(0, FONT_NORMAL, gText_SavingDontTurnOffPower, 0, NULL, TEXT_COLOR_DARK_GRAY, TEXT_COLOR_WHITE, TEXT_COLOR_LIGHT_GRAY);
@@ -516,7 +562,13 @@ static void FreeAllHoFMem(void)
 {
     TRY_FREE_AND_SET_NULL(sHofGfxPtr);
     TRY_FREE_AND_SET_NULL(sHofMonPtr);
+#ifdef NATIVE
+    free(gHoFSaveBuffer);
+    gHoFSaveBuffer = NULL;
+    gHoFSaveCount = 0;
+#else
     TRY_FREE_AND_SET_NULL(gHoFSaveBuffer);
+#endif
 }
 
 static void Task_Hof_TrySaveData(u8 taskId)
@@ -787,6 +839,11 @@ static void StartCredits(void)
 
 #define tCurrTeamNo     data[0]
 #define tCurrPageNo     data[1]
+#ifdef NATIVE
+#define HOF_CURRENT_TEAM(taskId) sHofCurrentTeam
+#else
+#define HOF_CURRENT_TEAM(taskId) gTasks[taskId].tCurrTeamNo
+#endif
 #define tCurrMonId      data[2]
 #define tMonNo          data[4]
 #define tMonSpriteId(i) data[i + 5]
@@ -855,6 +912,15 @@ void CB2_DoHallOfFamePC(void)
 static void Task_HofPC_CopySaveData(u8 taskId)
 {
     HofPCTopBar_AddWindow(0, 30, 0, 12, 0x226);
+#ifdef NATIVE
+    if (sHofInvalidSave || !gHoFSaveCount || !gHoFSaveBuffer || LoadGameSave(SAVE_HALL_OF_FAME) != SAVE_STATUS_OK)
+        gTasks[taskId].func = Task_HofPC_PrintDataIsCorrupted;
+    else
+    {
+        sHofCurrentTeam = gHoFSaveCount - 1;
+        gTasks[taskId].func = Task_HofPC_DrawSpritesPrintText;
+    }
+#else
     if (LoadGameSave(SAVE_HALL_OF_FAME) != SAVE_STATUS_OK)
     {
         gTasks[taskId].func = Task_HofPC_PrintDataIsCorrupted;
@@ -880,16 +946,14 @@ static void Task_HofPC_CopySaveData(u8 taskId)
 
         gTasks[taskId].func = Task_HofPC_DrawSpritesPrintText;
     }
+#endif
 }
 
 static void Task_HofPC_DrawSpritesPrintText(u8 taskId)
 {
-    struct HallofFameTeam *savedTeams = gHoFSaveBuffer;
+    struct HallofFameTeam *savedTeams = gHoFSaveBuffer + HOF_CURRENT_TEAM(taskId);
     struct HallofFameMon *currMon;
     u16 i;
-
-    for (i = 0; i < gTasks[taskId].tCurrTeamNo; i++)
-        savedTeams++;
 
     currMon = &savedTeams->mon[0];
     sHofFadePalettes = 0;
@@ -937,10 +1001,20 @@ static void Task_HofPC_DrawSpritesPrintText(u8 taskId)
 
     BlendPalettes(PALETTES_OBJECTS, 0xC, RGB(16, 29, 24));
 
+#ifdef NATIVE
+    {
+        size_t number = sHofCurrentTeam + 1, digits = 0;
+        u8 reversed[3 * sizeof(size_t)];
+        do { reversed[digits++] = CHAR_0 + number % 10; number /= 10; } while (number);
+        for (size_t n = 0; n < digits; n++) gStringVar1[n] = reversed[digits - n - 1];
+        gStringVar1[digits] = EOS;
+    }
+#else
     ConvertIntToDecimalStringN(gStringVar1, gTasks[taskId].tCurrPageNo, STR_CONV_MODE_RIGHT_ALIGN, 3);
+#endif
     StringExpandPlaceholders(gStringVar4, gText_HOFNumber);
 
-    if (gTasks[taskId].tCurrTeamNo <= 0)
+    if (HOF_CURRENT_TEAM(taskId) == 0)
         HofPCTopBar_PrintPair(gStringVar4, gText_PickCancel, FALSE, 0, TRUE);
     else
         HofPCTopBar_PrintPair(gStringVar4, gText_PickNextCancel, FALSE, 0, TRUE);
@@ -950,13 +1024,10 @@ static void Task_HofPC_DrawSpritesPrintText(u8 taskId)
 
 static void Task_HofPC_PrintMonInfo(u8 taskId)
 {
-    struct HallofFameTeam *savedTeams = gHoFSaveBuffer;
+    struct HallofFameTeam *savedTeams = gHoFSaveBuffer + HOF_CURRENT_TEAM(taskId);
     struct HallofFameMon *currMon;
     u16 i;
     u16 currMonID;
-
-    for (i = 0; i < gTasks[taskId].tCurrTeamNo; i++)
-        savedTeams++;
 
     for (i = 0; i < PARTY_SIZE; i++)
     {
@@ -987,9 +1058,9 @@ static void Task_HofPC_HandleInput(u8 taskId)
 
     if (JOY_NEW(A_BUTTON))
     {
-        if (gTasks[taskId].tCurrTeamNo != 0) // prepare another team to view
+        if (HOF_CURRENT_TEAM(taskId) != 0) // prepare another team to view
         {
-            gTasks[taskId].tCurrTeamNo--;
+            HOF_CURRENT_TEAM(taskId)--;
             for (i = 0; i < PARTY_SIZE; i++)
             {
                 u8 spriteId = gTasks[taskId].tMonSpriteId(i);
@@ -999,8 +1070,10 @@ static void Task_HofPC_HandleInput(u8 taskId)
                     gTasks[taskId].tMonSpriteId(i) = SPRITE_NONE;
                 }
             }
+#ifndef NATIVE
             if (gTasks[taskId].tCurrPageNo != 0)
                 gTasks[taskId].tCurrPageNo--;
+#endif
             gTasks[taskId].func = Task_HofPC_DrawSpritesPrintText;
         }
         else // no more teams to view, turn off hall of fame PC
@@ -1093,6 +1166,7 @@ static void Task_HofPC_ExitOnButtonPress(u8 taskId)
 }
 
 #undef tCurrTeamNo
+#undef HOF_CURRENT_TEAM
 #undef tCurrPageNo
 #undef tCurrMonId
 #undef tMonNo

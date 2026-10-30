@@ -323,6 +323,9 @@ void InitRFU(void)
 
 void InitRFUAPI(void)
 {
+#ifdef NATIVE
+    if (NativeNatureRejectLink()) return;
+#endif
     if (!rfu_initializeAPI((void *)gRfuAPIBuffer, sizeof(gRfuAPIBuffer), &gIntrTable[1], TRUE))
     {
         gLinkType = 0;
@@ -1282,6 +1285,9 @@ void Rfu_SendPacket(void *data)
 
 bool32 Rfu_InitBlockSend(const u8 *src, size_t size)
 {
+#ifdef NATIVE
+    if (NativeNatureRejectLink()) return FALSE;
+#endif
     bool8 r4;
     if (gRfu.callback != NULL)
         return FALSE;

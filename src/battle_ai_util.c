@@ -1,7 +1,11 @@
 #include "global.h"
+#ifdef NATIVE
+#include "mods.h"
+#endif
 #include "battle_z_move.h"
 #include "malloc.h"
 #include "battle.h"
+#include "battle_main.h"
 #include "battle_anim.h"
 #include "battle_ai_field_statuses.h"
 #include "battle_ai_util.h"
@@ -81,14 +85,19 @@ static bool32 AI_CanBattlerHitBothFoesInTerrain(enum BattlerId battler, enum Mov
 enum MoveTarget AI_GetBattlerMoveTargetType(enum BattlerId battler, enum Move move)
 {
     enum BattleMoveEffects effect = GetMoveEffect(move);
+    enum MoveTarget target;
     if (effect == EFFECT_CURSE && !IS_BATTLER_OF_TYPE(battler, TYPE_GHOST))
-        return TARGET_USER;
-    if (AI_CanBattlerHitBothFoesInTerrain(battler, move, effect))
-        return TARGET_BOTH;
-    if (effect == EFFECT_TERA_STARSTORM && gBattleMons[battler].species == SPECIES_TERAPAGOS_STELLAR)
-        return TARGET_BOTH;
+        target = TARGET_USER;
+    else if (AI_CanBattlerHitBothFoesInTerrain(battler, move, effect))
+        target = TARGET_BOTH;
+    else if (effect == EFFECT_TERA_STARSTORM && gBattleMons[battler].species == SPECIES_TERAPAGOS_STELLAR)
+        target = TARGET_BOTH;
+    else target = GetMoveTarget(move);
 
-    return GetMoveTarget(move);
+#ifdef NATIVE
+    target = ModsMoveContextualTarget(battler, move, target, RHH_MOVE_TARGET_AI);
+#endif
+    return target;
 }
 
 u32 AI_GetDefaultDamageRollForContext(enum BattlerId battlerAtk, enum BattlerId battlerDef, u32 moveIndex, struct AiLogicData *aiData, u32 aiRoll)
@@ -266,6 +275,14 @@ void SaveBattlerData(enum BattlerId battlerId)
     // Save and restore types even for AI controlled battlers in case it gets changed during move evaluation process.
     gAiThinkingStruct->saved[battlerId].types[0] = gBattleMons[battlerId].types[0];
     gAiThinkingStruct->saved[battlerId].types[1] = gBattleMons[battlerId].types[1];
+    gAiThinkingStruct->saved[battlerId].types[2] = gBattleMons[battlerId].types[2];
+#ifdef NATIVE
+    gAiThinkingStruct->saved[battlerId].extraTypeCount = gBattleMons[battlerId].extraTypeCount;
+    gAiThinkingStruct->saved[battlerId].addedType = gBattleMons[battlerId].addedType;
+    gAiThinkingStruct->saved[battlerId].addedTypeValid = gBattleMons[battlerId].addedTypeValid;
+    memcpy(gAiThinkingStruct->saved[battlerId].extraTypes, gBattleMons[battlerId].extraTypes,
+           gBattleMons[battlerId].extraTypeCount);
+#endif
 }
 
 bool32 ShouldRecordStatusMove(enum Move move)
@@ -364,6 +381,67 @@ static bool32 ShouldFailForIllusion(enum Species illusionSpecies, enum BattlerId
     return TRUE;
 }
 
+#ifdef NATIVE
+/* Apply the same disguise projection to either a copy or the simulation's
+ * battler. Ordinary three-slot battles preserve a separately added type;
+ * extended lists are replaced only while the whole original list matches. */
+static void ApplyAiIllusionTypes(struct BattlePokemon *mon, enum Species illusionSpecies)
+{
+    struct BattleTypeList expected, actual = {0}, illusion;
+    GetSpeciesTypeList(mon->species, &expected);
+    for (u32 i = 0; i < 3; ++i) BattleTypeListAdd(&actual, mon->types[i]);
+    for (u32 i = 0; i < mon->extraTypeCount; ++i) BattleTypeListAdd(&actual, mon->extraTypes[i]);
+    GetSpeciesTypeList(illusionSpecies, &illusion);
+    bool32 extended = expected.count > 3 || actual.count > 3 || illusion.count > 3;
+    enum Type expectedTypes[3] = {GetSpeciesType(mon->species, 0), GetSpeciesType(mon->species, 1), TYPE_MYSTERY};
+    if (!extended) ModsSpeciesTypes(mon->species, (u8 *)expectedTypes);
+    if (extended ? !BattleTypeListsEqual(&expected, &actual)
+                 : mon->types[0] != expectedTypes[0] || mon->types[1] != expectedTypes[1])
+        return;
+    enum Type extra = mon->types[2];
+    struct BattlePokemon disguised = *mon;
+    disguised.species = illusionSpecies;
+    ModsBattleMonSpeciesTypes(&disguised);
+    memcpy(mon->types, disguised.types, sizeof(mon->types));
+    mon->extraTypeCount = disguised.extraTypeCount;
+    memcpy(mon->extraTypes, disguised.extraTypes, disguised.extraTypeCount);
+    if (!extended && extra != expectedTypes[2]) mon->types[2] = extra;
+}
+
+static enum Species AI_GetAssumedIllusionSpecies(enum BattlerId viewer, enum BattlerId battler)
+{
+    if (GetBattlerSide(viewer) == GetBattlerSide(battler) || BattlerHasAi(battler) || !gBattleHistory)
+        return SPECIES_NONE;
+    /* The engine lazily initializes this cache. Restore it after sampling so
+     * an AI preview does not cause a committed battle-state change. */
+    struct Illusion saved = gBattleStruct->illusion[battler];
+    enum Species illusion = GetIllusionMonSpecies(battler);
+    gBattleStruct->illusion[battler] = saved;
+    return illusion != SPECIES_NONE && ShouldFailForIllusion(illusion, battler) ? illusion : SPECIES_NONE;
+}
+
+enum Species AI_GetKnownBattlerSpecies(enum BattlerId viewer, enum BattlerId battler)
+{
+    enum Species illusion = AI_GetAssumedIllusionSpecies(viewer, battler);
+    return illusion != SPECIES_NONE ? illusion : gBattleMons[battler].species;
+}
+
+void AI_GetKnownBattlerTypeList(enum BattlerId viewer, enum BattlerId battler, struct BattleTypeList *out)
+{
+    GetBattlerTypeList(battler, FALSE, out);
+    bool32 tera = GetActiveGimmick(battler) == GIMMICK_TERA;
+    if (tera && GetBattlerTeraType(battler) != TYPE_STELLAR) return;
+    enum Species illusion = AI_GetAssumedIllusionSpecies(viewer, battler);
+    if (illusion == SPECIES_NONE) return;
+    struct BattlePokemon projected = gBattleMons[battler];
+    ApplyAiIllusionTypes(&projected, illusion);
+    out->count = 0;
+    for (u32 i = 0; i < 3; ++i) BattleTypeListAdd(out, projected.types[i]);
+    for (u32 i = 0; i < projected.extraTypeCount; ++i) BattleTypeListAdd(out, projected.extraTypes[i]);
+    if (!tera && gBattleMons[battler].volatiles.roostActive) ApplyRoostToTypeList(out);
+}
+#endif
+
 void SetBattlerData(enum BattlerId battlerId)
 {
     if (!BattlerHasAi(battlerId) && gAiThinkingStruct->saved[battlerId].saved)
@@ -377,12 +455,19 @@ void SetBattlerData(enum BattlerId battlerId)
         if (illusionSpecies != SPECIES_NONE && ShouldFailForIllusion(illusionSpecies, battlerId))
         {
             // If the battler's type has not been changed, AI assumes the types of the illusion mon.
-            if (gBattleMons[battlerId].types[0] == GetSpeciesType(species, 0)
-                && gBattleMons[battlerId].types[1] == GetSpeciesType(species, 1))
+#ifdef NATIVE
+            ApplyAiIllusionTypes(&gBattleMons[battlerId], illusionSpecies);
+#else
             {
-                gBattleMons[battlerId].types[0] = GetSpeciesType(illusionSpecies, 0);
-                gBattleMons[battlerId].types[1] = GetSpeciesType(illusionSpecies, 1);
+                enum Type expectedTypes[3] = {GetSpeciesType(species, 0), GetSpeciesType(species, 1), TYPE_MYSTERY};
+                if (gBattleMons[battlerId].types[0] == expectedTypes[0]
+                    && gBattleMons[battlerId].types[1] == expectedTypes[1])
+                {
+                    gBattleMons[battlerId].types[0] = GetSpeciesType(illusionSpecies, 0);
+                    gBattleMons[battlerId].types[1] = GetSpeciesType(illusionSpecies, 1);
+                }
             }
+#endif
             species = illusionSpecies;
         }
 
@@ -421,6 +506,14 @@ void RestoreBattlerData(enum BattlerId battlerId)
     }
     gBattleMons[battlerId].types[0] = gAiThinkingStruct->saved[battlerId].types[0];
     gBattleMons[battlerId].types[1] = gAiThinkingStruct->saved[battlerId].types[1];
+    gBattleMons[battlerId].types[2] = gAiThinkingStruct->saved[battlerId].types[2];
+#ifdef NATIVE
+    gBattleMons[battlerId].extraTypeCount = gAiThinkingStruct->saved[battlerId].extraTypeCount;
+    gBattleMons[battlerId].addedType = gAiThinkingStruct->saved[battlerId].addedType;
+    gBattleMons[battlerId].addedTypeValid = gAiThinkingStruct->saved[battlerId].addedTypeValid;
+    memcpy(gBattleMons[battlerId].extraTypes, gAiThinkingStruct->saved[battlerId].extraTypes,
+           gBattleMons[battlerId].extraTypeCount);
+#endif
 }
 
 u32 GetHealthPercentage(enum BattlerId battlerId)
@@ -507,7 +600,7 @@ bool32 IsTruantMonVulnerable(enum BattlerId battlerAI, enum BattlerId opposingBa
 
 bool32 Ai_IsPriorityBlocked(enum BattlerId battlerAtk, enum BattlerId battlerDef, enum Move move, struct AiLogicData *aiData)
 {
-    s32 atkPriority = GetBattleMovePriority(battlerAtk, aiData->abilities[battlerAtk], move);
+    s32 atkPriority = GetAiBattleMovePriority(battlerAtk, aiData->abilities[battlerAtk], move);
 
     if (atkPriority <= 0 || IsBattlerAlly(battlerAtk, battlerDef))
         return FALSE;
@@ -526,7 +619,7 @@ bool32 Ai_IsPriorityBlocked(enum BattlerId battlerAtk, enum BattlerId battlerDef
 
 bool32 AI_CanMoveBeBlockedByTarget(struct DamageContext *ctx)
 {
-    return CanMoveBeBlockedByTarget(ctx, GetBattleMovePriority(ctx->battlerAtk, ctx->abilities[ctx->battlerAtk], ctx->move));
+    return CanMoveBeBlockedByTarget(ctx, GetAiBattleMovePriority(ctx->battlerAtk, ctx->abilities[ctx->battlerAtk], ctx->move));
 }
 
 // To save computation time this function has 2 variants. One saves, sets and restores battlers, while the other doesn't.
@@ -682,18 +775,32 @@ static inline s32 GetDamageByRollType(s32 dmg, enum DamageRollType rollType)
         return DmgRoll(dmg);
 }
 
-static inline void AI_StoreBattlerTypes(enum BattlerId battlerAtk, enum Type *types)
+struct AiTypeBackup {
+    enum Type types[3];
+#ifdef NATIVE
+    u8 count, extra[251], addedType, addedTypeValid;
+#endif
+};
+static inline void AI_StoreBattlerTypes(enum BattlerId battlerAtk, struct AiTypeBackup *backup)
 {
-    types[0] = gBattleMons[battlerAtk].types[0];
-    types[1] = gBattleMons[battlerAtk].types[1];
-    types[2] = gBattleMons[battlerAtk].types[2];
+    memcpy(backup->types, gBattleMons[battlerAtk].types, sizeof(backup->types));
+#ifdef NATIVE
+    backup->count = gBattleMons[battlerAtk].extraTypeCount;
+    backup->addedType = gBattleMons[battlerAtk].addedType;
+    backup->addedTypeValid = gBattleMons[battlerAtk].addedTypeValid;
+    memcpy(backup->extra, gBattleMons[battlerAtk].extraTypes, backup->count);
+#endif
 }
 
-static inline void AI_RestoreBattlerTypes(enum BattlerId battlerAtk, enum Type *types)
+static inline void AI_RestoreBattlerTypes(enum BattlerId battlerAtk, const struct AiTypeBackup *backup)
 {
-    gBattleMons[battlerAtk].types[0] = types[0];
-    gBattleMons[battlerAtk].types[1] = types[1];
-    gBattleMons[battlerAtk].types[2] = types[2];
+    memcpy(gBattleMons[battlerAtk].types, backup->types, sizeof(backup->types));
+#ifdef NATIVE
+    gBattleMons[battlerAtk].extraTypeCount = backup->count;
+    gBattleMons[battlerAtk].addedType = backup->addedType;
+    gBattleMons[battlerAtk].addedTypeValid = backup->addedTypeValid;
+    memcpy(gBattleMons[battlerAtk].extraTypes, backup->extra, backup->count);
+#endif
 }
 
 static inline void CalcDynamicMoveDamage(struct DamageContext *ctx, struct SimulatedDamage *simDamage)
@@ -806,6 +913,17 @@ static inline void CalcDynamicMoveDamage(struct DamageContext *ctx, struct Simul
     simDamage->random = random;
 }
 
+bool32 AI_ShouldAssumeCritical(s32 value, u32 generation, bool32 risky)
+{
+    if (value == CRITICAL_HIT_ALWAYS)
+        return TRUE;
+    if (value < 0 || generation > GEN_CHAMPIONS || value > (generation == GEN_1 ? 255 : 4))
+        return FALSE;
+    if (generation >= GEN_3 && GetCriticalHitOddsForGeneration(value, generation) == 1)
+        return TRUE;
+    return risky && value >= (generation == GEN_1 ? RISKY_AI_CRIT_THRESHOLD_GEN_1 : RISKY_AI_CRIT_STAGE_THRESHOLD);
+}
+
 static inline bool32 ShouldCalcCritDamage(struct DamageContext *ctx)
 {
     s32 critChanceIndex = 0;
@@ -816,20 +934,8 @@ static inline bool32 ShouldCalcCritDamage(struct DamageContext *ctx)
     else
         critChanceIndex = CalcCritChanceStage(ctx);
 
-    if (critChanceIndex == CRITICAL_HIT_ALWAYS)
-        return TRUE;
-    if (GetCriticalHitOdds(critChanceIndex) == 1)
-        return TRUE;
-    if (critChanceIndex >= RISKY_AI_CRIT_STAGE_THRESHOLD // Not guaranteed but above Risky threshold
-        && (gAiThinkingStruct->aiFlags[ctx->battlerAtk] & AI_FLAG_RISKY)
-        && GetConfig(B_CRIT_CHANCE) != GEN_1)
-        return TRUE;
-    if (critChanceIndex >= RISKY_AI_CRIT_THRESHOLD_GEN_1 // Not guaranteed but above Risky threshold
-        && (gAiThinkingStruct->aiFlags[ctx->battlerAtk] & AI_FLAG_RISKY)
-        && GetConfig(B_CRIT_CHANCE) == GEN_1)
-        return TRUE;
-
-    return FALSE;
+    return AI_ShouldAssumeCritical(critChanceIndex, GetConfig(B_CRIT_CHANCE),
+                                  !!(gAiThinkingStruct->aiFlags[ctx->battlerAtk] & AI_FLAG_RISKY));
 }
 
 static s32 HandleKOThroughBerryReduction(struct DamageContext *ctx, s32 dmg)
@@ -864,6 +970,85 @@ static s32 AI_ApplyModifiersAfterDmgRoll(struct DamageContext *ctx, s32 dmg)
     dmg = HandleKOThroughBerryReduction(ctx, dmg);
     return dmg;
 }
+
+#ifdef NATIVE
+/* Beat Up's contributors are party members. When the attacker is AI-controlled
+ * and the target is not, it can inspect its own team. Otherwise use
+ * recorded knowledge and estimate unseen slots with the apparent species. */
+static struct SimulatedDamage AI_CalcBeatUpDamage(struct DamageContext *ctx)
+{
+    struct SimulatedDamage result = {0};
+    u32 minimum = 0, median = 0, maximum = 0, random = 0, hitIndex = 0;
+    enum BattleTrainer trainer = GetBattlerTrainer(ctx->battlerAtk);
+    bool32 ownParty = BattlerHasAi(ctx->battlerAtk) && !BattlerHasAi(ctx->battlerDef);
+    u32 count = ownParty ? PARTY_SIZE : gAiPartyData ? min(gAiPartyData->count[trainer], PARTY_SIZE) : 0;
+    bool32 fallbackOnly = !ownParty && !count;
+    enum Species fallback = AI_GetKnownBattlerSpecies(ctx->battlerDef, ctx->battlerAtk);
+    enum Species savedSpecies[PARTY_SIZE];
+    u32 savedSlot = gBattleStruct->beatUpSlot;
+    memcpy(savedSpecies, gBattleStruct->beatUpSpecies, sizeof(savedSpecies));
+    if (!count) count = 1;
+    ctx->isCrit = FALSE;
+    for (u32 i = 0; i < count; ++i)
+    {
+        const struct AiPartyMon *known = gAiPartyData ? &gAiPartyData->mons[trainer][i] : NULL;
+        bool32 active = fallbackOnly || i == gBattlerPartyIndexes[ctx->battlerAtk];
+        enum Species species;
+        if (ownParty)
+        {
+            struct Pokemon *mon = &gParties[trainer][i];
+            species = GetMonData(mon, MON_DATA_SPECIES);
+            if (species == SPECIES_NONE || !GetMonData(mon, MON_DATA_HP)
+                || GetMonData(mon, MON_DATA_IS_EGG) || GetMonData(mon, MON_DATA_STATUS))
+                continue;
+        }
+        else
+        {
+            species = active ? fallback : known && known->species ? known->species : fallback;
+            if ((!active && known && known->isFainted) || (active && gBattleMons[ctx->battlerAtk].status1)
+                || (!active && known && known->wasSentInBattle && known->status))
+                continue;
+        }
+        if (species == SPECIES_NONE || species == SPECIES_EGG || species >= NUM_SPECIES)
+            continue;
+        ctx->beatUpContributorSpecies = species;
+        ctx->beatUpContributorIndex = hitIndex++;
+        ctx->beatUpContributorSlot = i;
+        ctx->beatUpContributorFlags = BEAT_UP_CONTRIBUTOR_VALID | BEAT_UP_CONTRIBUTOR_AI;
+        if (ownParty)
+            ctx->beatUpContributorFlags |= BEAT_UP_CONTRIBUTOR_OWN_PARTY | BEAT_UP_CONTRIBUTOR_SLOT_KNOWN;
+        else if (active)
+        {
+            ctx->beatUpContributorFlags |= BEAT_UP_CONTRIBUTOR_APPARENT;
+            if (!fallbackOnly) ctx->beatUpContributorFlags |= BEAT_UP_CONTRIBUTOR_SLOT_KNOWN;
+        }
+        else if (known && known->species)
+            ctx->beatUpContributorFlags |= BEAT_UP_CONTRIBUTOR_SLOT_KNOWN;
+        else
+            ctx->beatUpContributorFlags |= BEAT_UP_CONTRIBUTOR_ESTIMATED | BEAT_UP_CONTRIBUTOR_APPARENT;
+        gBattleStruct->beatUpSlot = 0;
+        gBattleStruct->beatUpSpecies[0] = species;
+        s32 base = CalculateMoveDamageVars(ctx);
+        if (base <= 0) continue;
+        s32 rolled = AI_ApplyModifiersAfterDmgRoll(ctx, GetDamageByRollType(base, DMG_ROLL_LOWEST));
+        minimum += rolled > 0 ? rolled : 1;
+        rolled = AI_ApplyModifiersAfterDmgRoll(ctx, GetDamageByRollType(base, DMG_ROLL_MEDIAN));
+        median += rolled > 0 ? rolled : 1;
+        rolled = AI_ApplyModifiersAfterDmgRoll(ctx, GetDamageByRollType(base, DMG_ROLL_HIGHEST));
+        maximum += rolled > 0 ? rolled : 1;
+        rolled = AI_ApplyModifiersAfterDmgRoll(ctx, GetDamageByRollType(base, DMG_ROLL_RANDOM));
+        random += rolled > 0 ? rolled : 1;
+    }
+    memcpy(gBattleStruct->beatUpSpecies, savedSpecies, sizeof(savedSpecies));
+    gBattleStruct->beatUpSlot = savedSlot;
+    ctx->beatUpContributorFlags = 0;
+    result.minimum = min(minimum, 65535u);
+    result.median = min(median, 65535u);
+    result.maximum = min(maximum, 65535u);
+    result.random = min(random, 65535u);
+    return result;
+}
+#endif
 
 struct SimulatedDamage AI_CalcDamage(struct AiCalcValues *aiCalc, enum BattlerId battlerAtk, enum BattlerId battlerDef)
 {
@@ -940,8 +1125,8 @@ struct SimulatedDamage AI_CalcDamage(struct AiCalcValues *aiCalc, enum BattlerId
 
     if (movePower && !IsDamageMoveUnusable(&ctx))
     {
-        enum Type types[3];
-        AI_StoreBattlerTypes(battlerAtk, types);
+        struct AiTypeBackup types;
+        AI_StoreBattlerTypes(battlerAtk, &types);
         ProteanTryChangeType(battlerAtk, aiData->abilities[battlerAtk], move, ctx.moveType);
 
         s32 fixedDamage = DoFixedDamageMoveCalc(&ctx);
@@ -949,6 +1134,13 @@ struct SimulatedDamage AI_CalcDamage(struct AiCalcValues *aiCalc, enum BattlerId
         {
             simDamage.minimum = simDamage.median = simDamage.maximum = simDamage.random = fixedDamage;
         }
+#ifdef NATIVE
+        else if (moveEffect == EFFECT_BEAT_UP && GetConfig(B_BEAT_UP) >= GEN_5
+                 && GetActiveGimmick(battlerAtk) != GIMMICK_Z_MOVE)
+        {
+            simDamage = AI_CalcBeatUpDamage(&ctx);
+        }
+#endif
         else if (moveEffect == EFFECT_TRIPLE_KICK)
         {
             for (gMultiHitCounter = GetMoveStrikeCount(move); gMultiHitCounter > 0; gMultiHitCounter--) // The global is used to simulate actual damage done
@@ -987,10 +1179,14 @@ struct SimulatedDamage AI_CalcDamage(struct AiCalcValues *aiCalc, enum BattlerId
             simDamage.random = AI_ApplyModifiersAfterDmgRoll(&ctx, simDamage.random);
         }
 
-        if (GetActiveGimmick(battlerAtk) != GIMMICK_Z_MOVE)
+        if (GetActiveGimmick(battlerAtk) != GIMMICK_Z_MOVE
+#ifdef NATIVE
+            && !(moveEffect == EFFECT_BEAT_UP && GetConfig(B_BEAT_UP) >= GEN_5)
+#endif
+           )
             CalcDynamicMoveDamage(&ctx, &simDamage);
 
-        AI_RestoreBattlerTypes(battlerAtk, types);
+        AI_RestoreBattlerTypes(battlerAtk, &types);
     }
     else
     {
@@ -1394,8 +1590,8 @@ s32 AI_WhoStrikesFirst(enum BattlerId battlerAI, enum BattlerId battler, enum Mo
 
     if (considerPriority == CONSIDER_PRIORITY)
     {
-        s8 aiPriority = GetBattleMovePriority(battlerAI, abilityAI, aiMoveConsidered);
-        s8 playerPriority = GetBattleMovePriority(battler, abilityPlayer, playerMoveConsidered);
+        s8 aiPriority = GetAiBattleMovePriority(battlerAI, abilityAI, aiMoveConsidered);
+        s8 playerPriority = GetAiBattleMovePriority(battler, abilityPlayer, playerMoveConsidered);
 
         if (aiPriority > playerPriority)
             return AI_IS_FASTER;
@@ -1864,8 +2060,16 @@ static inline bool32 AI_WeatherHasEffect(void)
     return TRUE;
 }
 
+#ifdef NATIVE
+u32 AI_ApplyWeatherSuppression(u32 weather)
+{ return AI_WeatherHasEffect() ? weather : B_WEATHER_NONE; }
+#endif
 u32 AI_GetWeather(void)
 {
+#ifdef NATIVE
+    u32 forecast;
+    if (ModsAiSwitchFieldView(&forecast, NULL, NULL)) return AI_ApplyWeatherSuppression(forecast);
+#endif
     if (gBattleWeather == B_WEATHER_NONE)
         return B_WEATHER_NONE;
     if (!AI_WeatherHasEffect())
@@ -1875,15 +2079,22 @@ u32 AI_GetWeather(void)
 
 u32 AI_GetSwitchinWeather(enum BattlerId battler)
 {
+#ifdef NATIVE
+    if (ModsAiSwitchFieldIsCandidate(battler)) return AI_GetWeather();
+#endif
     enum Ability ability = gAiLogicData->abilities[battler];
+    u32 currentWeather = gBattleWeather;
+#ifdef NATIVE
+    ModsAiSwitchFieldView(&currentWeather, NULL, NULL);
+#endif
 
     // Forced weather behaviour
     if (!AI_WeatherHasEffect())
         return B_WEATHER_NONE;
     if (ability == ABILITY_CLOUD_NINE || ability == ABILITY_AIR_LOCK)
         return B_WEATHER_NONE;
-    if (gBattleWeather & B_WEATHER_PRIMAL_ANY)
-        return gBattleWeather;
+    if (currentWeather & B_WEATHER_PRIMAL_ANY)
+        return currentWeather;
 
     // Switchin will introduce new weather
     switch (ability)
@@ -1898,16 +2109,24 @@ u32 AI_GetSwitchinWeather(enum BattlerId battler)
     case ABILITY_SNOW_WARNING:
         return GetConfig(B_SNOW_WARNING) >= GEN_9 ? B_WEATHER_SNOW : B_WEATHER_HAIL;
     default:
-        return gBattleWeather;
+        return currentWeather;
     }
 }
 
 u32 AI_GetSwitchinTerrain(enum BattlerId battler)
 {
+#ifdef NATIVE
+    u32 forecast;
+    if (ModsAiSwitchFieldIsCandidate(battler) && ModsAiSwitchFieldView(NULL, &forecast, NULL)) return forecast;
+#endif
     enum BattleTerrain newTerrain;
+    u32 currentTerrain = gFieldTimers.terrain;
+#ifdef NATIVE
+    ModsAiSwitchFieldView(NULL, &currentTerrain, NULL);
+#endif
 
     if (gBattleStruct->isSkyBattle)
-        return gFieldTimers.terrain;
+        return currentTerrain;
 
     // Switchin will introduce new terrain
     switch (gAiLogicData->abilities[battler])
@@ -1926,19 +2145,23 @@ u32 AI_GetSwitchinTerrain(enum BattlerId battler)
         newTerrain = B_TERRAIN_PSYCHIC;
         break;
     default:
-        return gFieldTimers.terrain;
+        return currentTerrain;
     }
 
-    if (gFieldTimers.terrain != newTerrain)
+    if (currentTerrain != newTerrain)
         return newTerrain;
-    return gFieldTimers.terrain;
+    return currentTerrain;
 }
 
 enum WeatherState IsWeatherActive(u32 flags)
 {
     enum WeatherState state = WEATHER_INACTIVE;
 
-    if (gBattleWeather & flags)
+    u32 weather = gBattleWeather;
+#ifdef NATIVE
+    ModsAiSwitchFieldView(&weather, NULL, NULL);
+#endif
+    if (weather & flags)
         state = WEATHER_ACTIVE;
     else
         state = WEATHER_INACTIVE;
@@ -2095,7 +2318,7 @@ bool32 IsAllyProtectingFromMove(enum BattlerId battlerAtk, enum Move attackerMov
     case PROTECT_KINGS_SHIELD:
         return !IsBattleMoveStatus(attackerMove);
     case PROTECT_QUICK_GUARD:
-        return (GetChosenMovePriority(battlerAtk, gAiLogicData->abilities[battlerAtk]) > 0);
+        return (GetAiChosenMovePriority(battlerAtk, gAiLogicData->abilities[battlerAtk]) > 0);
     case PROTECT_MAT_BLOCK:
         return !IsBattleMoveStatus(attackerMove);
     default:
@@ -4205,7 +4428,8 @@ bool32 AreMovesEquivalent(enum BattlerId battlerAtk, enum BattlerId battlerAtkPa
     // shared bits indicate they're meaningfully the same in some way
     if (atkEffect & partnerEffect)
     {
-        if (GetMoveTarget(move) == TARGET_SELECTED && GetMoveTarget(partnerMove) == TARGET_SELECTED)
+        if (AI_GetBattlerMoveTargetType(battlerAtk, move) == TARGET_SELECTED
+            && AI_GetBattlerMoveTargetType(battlerAtkPartner, partnerMove) == TARGET_SELECTED)
         {
             if (battlerDef == gBattleStruct->moveTarget[battlerAtkPartner])
                 return TRUE;
@@ -4342,7 +4566,8 @@ bool32 DoesPartnerHaveSameMoveEffect(enum BattlerId battlerAtkPartner, enum Batt
     if (GetMoveEffect(move) == GetMoveEffect(partnerMove)
       && partnerMove != MOVE_NONE)
     {
-        if (GetMoveTarget(move) == TARGET_SELECTED && GetMoveTarget(partnerMove) == TARGET_SELECTED)
+        if (AI_GetBattlerMoveTargetType(GetPartnerBattler(battlerAtkPartner), move) == TARGET_SELECTED
+            && AI_GetBattlerMoveTargetType(battlerAtkPartner, partnerMove) == TARGET_SELECTED)
         {
             return gBattleStruct->moveTarget[battlerAtkPartner] == battlerDef;
         }
@@ -5406,7 +5631,7 @@ enum AIConsiderGimmick ShouldTeraFromCalcs(enum BattlerId battler, enum BattlerI
         if (dealtWithTera[moveIndex].median >= oppHp)
         {
             enum Move move = aiMoves[moveIndex];
-            if (killingMove == MOVE_NONE || GetBattleMovePriority(battler, gAiLogicData->abilities[battler], move) > GetBattleMovePriority(battler, gAiLogicData->abilities[battler], killingMove))
+            if (killingMove == MOVE_NONE || GetAiBattleMovePriority(battler, gAiLogicData->abilities[battler], move) > GetAiBattleMovePriority(battler, gAiLogicData->abilities[battler], killingMove))
                 killingMove = move;
         }
         if (dealtWithoutTera[moveIndex].median >= oppHp)
@@ -5438,7 +5663,7 @@ enum AIConsiderGimmick ShouldTeraFromCalcs(enum BattlerId battler, enum BattlerI
         if (takenWithTera[moveIndex].maximum >= aiHp)
         {
             enum Move move = oppMoves[moveIndex];
-            if (hardPunishingMove == MOVE_NONE || GetBattleMovePriority(opposingBattler, gAiLogicData->abilities[opposingBattler], move) > GetBattleMovePriority(opposingBattler, gAiLogicData->abilities[opposingBattler], hardPunishingMove))
+            if (hardPunishingMove == MOVE_NONE || GetAiBattleMovePriority(opposingBattler, gAiLogicData->abilities[opposingBattler], move) > GetAiBattleMovePriority(opposingBattler, gAiLogicData->abilities[opposingBattler], hardPunishingMove))
                 hardPunishingMove = move;
         }
     }
@@ -5490,7 +5715,7 @@ enum AIConsiderGimmick ShouldTeraFromCalcs(enum BattlerId battler, enum BattlerI
         {
             enum Move predictedMove = GetPredictedMove(battler, opposingBattler, gAiLogicData);
             // will we go first?
-            if (AI_IsFaster(battler, opposingBattler, killingMove, predictedMove, CONSIDER_PRIORITY) && GetBattleMovePriority(battler, gAiLogicData->abilities[battler], killingMove) >= GetBattleMovePriority(opposingBattler, gAiLogicData->abilities[opposingBattler], hardPunishingMove))
+            if (AI_IsFaster(battler, opposingBattler, killingMove, predictedMove, CONSIDER_PRIORITY) && GetAiBattleMovePriority(battler, gAiLogicData->abilities[battler], killingMove) >= GetAiBattleMovePriority(opposingBattler, gAiLogicData->abilities[opposingBattler], hardPunishingMove))
                 return USE_GIMMICK;
         }
     }

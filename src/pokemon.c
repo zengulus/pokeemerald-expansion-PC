@@ -1,6 +1,10 @@
 #include "global.h"
+#include "battle_type_set.h"
 #ifdef NATIVE
 #include "mods.h"
+#include "mod_host.h"
+#include "owned_identity_ledger.h"
+#include "nature_storage.h"
 #endif
 #include "malloc.h"
 #include "apprentice.h"
@@ -461,6 +465,15 @@ const struct NatureInfo gNaturesInfo[NUM_NATURES] =
 
 #include "data/graphics/pokemon.h"
 
+#ifdef NATIVE
+u32 RhhModsPokemonIconBytes(const u8 *pixels)
+{
+    if (!pixels) return 0;
+#include "pokemon_icon_bounds.inc"
+    return 0;
+}
+#endif
+
 #include "data/pokemon/trainer_class_lookups.h"
 #include "data/pokemon/experience_tables.h"
 
@@ -791,17 +804,33 @@ static u32 UncompressStatus(u32 compressedStatus)
         return STATUS1_NONE;
 }
 
-void ZeroBoxMonData(struct BoxPokemon *boxMon)
+static void ZeroBoxMonDataInternal(struct BoxPokemon *boxMon)
 {
     u8 *raw = (u8 *)boxMon;
     u32 i;
     for (i = 0; i < sizeof(struct BoxPokemon); i++)
         raw[i] = 0;
 }
-
-void ZeroMonData(struct Pokemon *mon)
+void ZeroBoxMonData(struct BoxPokemon *boxMon)
+{
+#ifdef NATIVE
+    ModsOwnedBattlePartySummaryBeforeBytes(boxMon, sizeof(*boxMon));
+    NativeOwnedTrackUnreportedMonClear(boxMon);
+#endif
+    ZeroBoxMonDataInternal(boxMon);
+}
+#ifdef NATIVE
+void ZeroBoxMonDataWithOwnedReceipt(struct BoxPokemon *boxMon) { ZeroBoxMonDataInternal(boxMon); }
+#endif
+static void ZeroMonDataInternal(struct Pokemon *mon, bool32 tracked)
 {
     u32 arg;
+#ifdef NATIVE
+    if (tracked) ZeroBoxMonDataWithOwnedReceipt(&mon->box);
+    else
+#else
+    (void)tracked;
+#endif
     ZeroBoxMonData(&mon->box);
     arg = 0;
     SetMonData(mon, MON_DATA_STATUS, &arg);
@@ -816,6 +845,10 @@ void ZeroMonData(struct Pokemon *mon)
     arg = MAIL_NONE;
     SetMonData(mon, MON_DATA_MAIL, &arg);
 }
+void ZeroMonData(struct Pokemon *mon) { ZeroMonDataInternal(mon, FALSE); }
+#ifdef NATIVE
+void ZeroMonDataWithOwnedReceipt(struct Pokemon *mon) { ZeroMonDataInternal(mon, TRUE); }
+#endif
 
 void ZeroPartyMons(struct Pokemon *party)
 {
@@ -825,6 +858,9 @@ void ZeroPartyMons(struct Pokemon *party)
 
 void ZeroPlayerPartyMons(void)
 {
+#ifdef NATIVE
+    NativeOwnedTrackUnreportedPartyClear();
+#endif
     for (s32 i = 0; i < PARTY_SIZE; i++)
         ZeroMonData(&gParties[B_TRAINER_PLAYER][i]);
     gPartiesCount[B_TRAINER_PLAYER] = 0;
@@ -855,6 +891,9 @@ void CreateRandomMonWithIVs(struct Pokemon *mon, enum Species species, u8 level,
 void CreateMon(struct Pokemon *mon, enum Species species, u8 level, u32 personality, struct OriginalTrainerId trainerId)
 {
     u32 mail;
+#ifdef NATIVE
+    NativeOwnedTrackUnreportedCreation(&mon->box);
+#endif
     ZeroMonData(mon);
     CreateBoxMon(&mon->box, species, level, personality, trainerId);
     SetMonData(mon, MON_DATA_LEVEL, &level);
@@ -976,6 +1015,9 @@ void CreateBoxMon(struct BoxPokemon *boxMon, enum Species species, u8 level, u32
     u16 checksum;
     bool32 isShiny;
 
+#ifdef NATIVE
+    NativeOwnedTrackUnreportedCreation(boxMon);
+#endif
     ZeroBoxMonData(boxMon);
     // Determine original trainer ID
     if (trainerId.method == OT_ID_RANDOM_NO_SHINY)
@@ -1249,6 +1291,10 @@ void ConvertPokemonToBattleTowerPokemon(struct Pokemon *mon, struct BattleTowerP
     s32 i;
     enum Item heldItem;
 
+#ifdef NATIVE
+    ModsOwnedBattlePartySummaryBeforeBytes(dest, sizeof(*dest));
+    NativeOwnedTrackUnreportedCopy(dest, NULL, sizeof(*dest));
+#endif
     dest->species = GetMonData(mon, MON_DATA_SPECIES);
     heldItem = GetMonData(mon, MON_DATA_HELD_ITEM);
 
@@ -1327,6 +1373,10 @@ void CreateEnemyEventMon(void)
     s32 level = gSpecialVar_0x8005;
     s32 itemId = gSpecialVar_0x8006;
 
+#ifdef NATIVE
+    ModsWildScriptedCheckpointBegin(1, TRUE);
+    species = ModsWildEventCandidate(species, level);
+#endif
     ZeroEnemyPartyMons();
 
     CreateEventMon(&gParties[B_TRAINER_OPPONENT_A][0], species, level, Random32(), OTID_STRUCT_PLAYER_ID);
@@ -1375,6 +1425,8 @@ static u16 CalculateBoxMonChecksumReencrypt(struct BoxPokemon *boxMon)
     return checksum;
 }
 
+static void CalculateMonStatsInternal(struct Pokemon *mon, bool32 updateSpeedStat, bool32 preview);
+
 void CalculateMonStats(struct Pokemon *mon)
 {
     CalculateMonStatsCont(mon, TRUE);
@@ -1382,8 +1434,20 @@ void CalculateMonStats(struct Pokemon *mon)
 
 void CalculateMonStatsCont(struct Pokemon *mon, bool32 updateSpeedStat)
 {
+    CalculateMonStatsInternal(mon, updateSpeedStat, FALSE);
+}
+
 #ifdef NATIVE
-    ModsNormalizePartyMon(mon);
+void CalculateMonStatsPreview(struct Pokemon *mon)
+{
+    CalculateMonStatsInternal(mon, TRUE, TRUE);
+}
+#endif
+
+static void CalculateMonStatsInternal(struct Pokemon *mon, bool32 updateSpeedStat, bool32 preview)
+{
+#ifdef NATIVE
+    if (!preview) ModsNormalizePartyMon(mon);
 #endif
     s32 oldMaxHP = GetMonData(mon, MON_DATA_MAX_HP);
     s32 currentHP = GetMonData(mon, MON_DATA_HP);
@@ -1440,16 +1504,26 @@ void CalculateMonStatsCont(struct Pokemon *mon, bool32 updateSpeedStat)
         newMaxHP = (((n + ev[STAT_HP] / 4) * level) / 100) + level + 10;
     }
 
-    gBattleScripting.levelUpHP = newMaxHP - oldMaxHP;
-    if (gBattleScripting.levelUpHP == 0)
-        gBattleScripting.levelUpHP = 1;
+    if (!preview)
+    {
+        gBattleScripting.levelUpHP = newMaxHP - oldMaxHP;
+        if (gBattleScripting.levelUpHP == 0)
+            gBattleScripting.levelUpHP = 1;
+    }
     SetMonData(mon, MON_DATA_MAX_HP, &newMaxHP);
 
     // Since a Pokémon's maxHP data could either not have
     // been initialized at this point or this Pokémon is
     // just fainted, the check for oldMaxHP is important.
     if (currentHP == 0 && oldMaxHP != 0)
+    {
+        if (preview)
+        {
+            u32 hpLost = newMaxHP;
+            SetBoxMonData(&mon->box, MON_DATA_HP_LOST, &hpLost);
+        }
         return;
+    }
 
     // Only add to currentHP if newMaxHP went up.
     if (newMaxHP > oldMaxHP)
@@ -1459,12 +1533,23 @@ void CalculateMonStatsCont(struct Pokemon *mon, bool32 updateSpeedStat)
     if (currentHP > newMaxHP)
         currentHP = newMaxHP;
 
-    SetMonData(mon, MON_DATA_HP, &currentHP);
+    if (preview)
+    {
+        u32 hpLost = newMaxHP - currentHP;
+        mon->hp = currentHP;
+        SetBoxMonData(&mon->box, MON_DATA_HP_LOST, &hpLost);
+    }
+    else
+        SetMonData(mon, MON_DATA_HP, &currentHP);
 }
 
 void BoxMonToMon(const struct BoxPokemon *src, struct Pokemon *dest)
 {
     u32 value = 0;
+#ifdef NATIVE
+    ModsOwnedBattlePartySummaryBeforeBytes(dest, sizeof(*dest));
+    NativeOwnedTrackUnreportedCopy(&dest->box, src, sizeof(*src));
+#endif
     dest->box = *src;
     dest->status = GetBoxMonData(&dest->box, MON_DATA_STATUS);
     dest->hp = 0;
@@ -1679,6 +1764,9 @@ enum Move MonTryLearningNewMoveAtLevel(struct Pokemon *mon, bool32 firstMove, u3
     {
         sLearningMoveTableID = 0;
 
+        if (learnset[0].move == LEVEL_UP_MOVE_END)
+            return MOVE_NONE;
+
         while (learnset[sLearningMoveTableID].level != level)
         {
             sLearningMoveTableID++;
@@ -1686,6 +1774,8 @@ enum Move MonTryLearningNewMoveAtLevel(struct Pokemon *mon, bool32 firstMove, u3
                 return MOVE_NONE;
         }
     }
+    if (learnset[sLearningMoveTableID].move == LEVEL_UP_MOVE_END)
+        return MOVE_NONE;
 
     //  Handler for Pokémon whose moves change upon form change.
     //  For example, if Zacian or Zamazenta should learn Iron Head,
@@ -2009,6 +2099,32 @@ static ALWAYS_INLINE struct PokemonSubstruct3 *GetSubstruct3(struct BoxPokemon *
     return &(GetSubstruct(boxMon, boxMon->personality, SUBSTRUCT_TYPE_3)->type3);
 }
 
+#ifdef NATIVE
+bool32 GetBoxMonStoredTeraType(const struct BoxPokemon *boxMon, u32 *out)
+{
+    if (!boxMon || !out) return FALSE;
+    struct BoxPokemon copy = *boxMon;
+    DecryptBoxMon(&copy);
+    if (CalculateBoxMonChecksum(&copy) != copy.checksum) return FALSE;
+    ModsOwnedBattlePartySummaryBeforeBytes(out, sizeof(*out));
+    NativeOwnedTrackUnreportedCopy(out, NULL, sizeof(*out));
+    *out = GetSubstruct0(&copy)->teraType;
+    return TRUE;
+}
+#endif
+
+/* The engine marks corrupt data in place, including during a getter. */
+static void MarkBadEgg(struct BoxPokemon *boxMon)
+{
+#ifdef NATIVE
+    ModsOwnedBattlePartySummaryBeforeBytes(boxMon, sizeof(*boxMon));
+    NativeOwnedTrackUnreportedCopy(boxMon, NULL, sizeof(*boxMon));
+#endif
+    boxMon->isBadEgg = TRUE;
+    boxMon->isEgg = TRUE;
+    GetSubstruct3(boxMon)->isEgg = TRUE;
+}
+
 static bool32 IsBadEgg(struct BoxPokemon *boxMon)
 {
     if (boxMon->isBadEgg)
@@ -2016,10 +2132,7 @@ static bool32 IsBadEgg(struct BoxPokemon *boxMon)
 
     if (CalculateBoxMonChecksum(boxMon) != boxMon->checksum)
     {
-        boxMon->isBadEgg = TRUE;
-        boxMon->isEgg = TRUE;
-        GetSubstruct3(boxMon)->isEgg = TRUE;
-
+        MarkBadEgg(boxMon);
         return TRUE;
     }
 
@@ -2039,6 +2152,17 @@ u32 GetBoxMonData3(struct BoxPokemon *boxMon, s32 field, u8 *data)
 {
     s32 i;
     u32 retVal = 0;
+#ifdef NATIVE
+    /* These getters write a string to the caller's buffer. An aliased output
+     * can overwrite owned storage even when the source itself is temporary. */
+    size_t outputSize = field == MON_DATA_OT_NAME ? PLAYER_NAME_LENGTH + 1
+        : field == MON_DATA_NICKNAME || field == MON_DATA_NICKNAME10 ? max(POKEMON_NAME_LENGTH + 1, 10) : 0;
+    if (data && outputSize)
+    {
+        ModsOwnedBattlePartySummaryBeforeBytes(data, outputSize);
+        NativeOwnedTrackUnreportedCopy(data, NULL, outputSize);
+    }
+#endif
 
     // Any field greater than MON_DATA_ENCRYPT_SEPARATOR is encrypted and must be treated as such
     if (field > MON_DATA_ENCRYPT_SEPARATOR)
@@ -2125,6 +2249,11 @@ u32 GetBoxMonData3(struct BoxPokemon *boxMon, s32 field, u8 *data)
         case MON_DATA_HELD_ITEM:
             retVal = GetSubstruct0(boxMon)->heldItem;
             break;
+#ifdef NATIVE
+        case MON_DATA_NATIVE_NATURE_CODE:
+            retVal = IsBadEgg(boxMon) ? UINT32_MAX : GetSubstruct0(boxMon)->nativeNatureCode;
+            break;
+#endif
         case MON_DATA_EXP:
             retVal = GetSubstruct0(boxMon)->experience;
             break;
@@ -2536,6 +2665,7 @@ void SetMonData(struct Pokemon *mon, s32 field, const void *dataArg)
     const u8 *data = dataArg;
 #ifdef NATIVE
     u32 modValue;
+    ModsOwnedBattlePartySummaryBeforeWrite(&mon->box);
     if (field == MON_DATA_EXP)
     {
         memcpy(&modValue, dataArg, sizeof(modValue));
@@ -2611,17 +2741,36 @@ void SetMonData(struct Pokemon *mon, s32 field, const void *dataArg)
     }
 }
 
+#ifdef NATIVE
+static const struct BoxPokemon *sOwnedSpeciesReceipt;
+void SetBoxMonSpeciesWithOwnedReceipt(struct BoxPokemon *mon, const void *species)
+{
+    const struct BoxPokemon *previous = sOwnedSpeciesReceipt;
+    sOwnedSpeciesReceipt = mon; SetBoxMonData(mon, MON_DATA_SPECIES, species); sOwnedSpeciesReceipt = previous;
+}
+void SetMonSpeciesWithOwnedReceipt(struct Pokemon *mon, const void *species)
+{ SetBoxMonSpeciesWithOwnedReceipt(&mon->box, species); }
+#endif
 void SetBoxMonData(struct BoxPokemon *boxMon, s32 field, const void *dataArg)
 {
     const u8 *data = dataArg;
+#ifdef NATIVE
+    ModsOwnedBattlePartySummaryBeforeWrite(boxMon);
+    if (field == MON_DATA_OT_NAME && memcmp(boxMon->otName, data, PLAYER_NAME_LENGTH))
+        NativeOwnedTrackUnreportedTrainerNameChange(boxMon, data);
+    if (field == MON_DATA_PERSONALITY || field == MON_DATA_OT_ID)
+    {
+        u32 value = (u32)data[0] | (u32)data[1] << 8 | (u32)data[2] << 16 | (u32)data[3] << 24;
+        if (value != (field == MON_DATA_PERSONALITY ? boxMon->personality : boxMon->otId))
+            NativeOwnedTrackUnreportedIdentityChange(boxMon, FALSE, 0);
+    }
+#endif
 
     if (field > MON_DATA_ENCRYPT_SEPARATOR)
     {
         if (CalculateBoxMonChecksumDecrypt(boxMon) != boxMon->checksum)
         {
-            boxMon->isBadEgg = TRUE;
-            boxMon->isEgg = TRUE;
-            GetSubstruct3(boxMon)->isEgg = TRUE;
+            MarkBadEgg(boxMon);
             EncryptBoxMon(boxMon);
             return;
         }
@@ -2652,6 +2801,12 @@ void SetBoxMonData(struct BoxPokemon *boxMon, s32 field, const void *dataArg)
         case MON_DATA_SPECIES:
         {
             struct PokemonSubstruct0 *substruct0 = GetSubstruct0(boxMon);
+#ifdef NATIVE
+            u32 newSpecies = (u32)data[0] | (u32)data[1] << 8;
+            if (!!newSpecies != !!boxMon->hasSpecies
+                || (newSpecies != substruct0->species && sOwnedSpeciesReceipt != boxMon))
+                NativeOwnedTrackUnreportedIdentityChange(boxMon, FALSE, 0);
+#endif
             SET16(substruct0->species);
             if (substruct0->species)
                 boxMon->hasSpecies = TRUE;
@@ -2662,6 +2817,11 @@ void SetBoxMonData(struct BoxPokemon *boxMon, s32 field, const void *dataArg)
         case MON_DATA_HELD_ITEM:
             SET16(GetSubstruct0(boxMon)->heldItem);
             break;
+#ifdef NATIVE
+        case MON_DATA_NATIVE_NATURE_CODE:
+            SET8(GetSubstruct0(boxMon)->nativeNatureCode);
+            break;
+#endif
         case MON_DATA_EXP:
             SET32(GetSubstruct0(boxMon)->experience);
             break;
@@ -2917,6 +3077,10 @@ void SetBoxMonData(struct BoxPokemon *boxMon, s32 field, const void *dataArg)
             SET8(boxMon->isBadEgg);
             break;
         case MON_DATA_SANITY_HAS_SPECIES:
+#ifdef NATIVE
+            if ((data[0] & 1) != boxMon->hasSpecies)
+                NativeOwnedTrackUnreportedIdentityChange(boxMon, FALSE, 0);
+#endif
             SET8(boxMon->hasSpecies);
             break;
         case MON_DATA_SANITY_IS_EGG:
@@ -2961,7 +3125,7 @@ void SetBoxMonData(struct BoxPokemon *boxMon, s32 field, const void *dataArg)
         boxMon->checksum = CalculateBoxMonChecksumReencrypt(boxMon);
 }
 
-void CopyMon(void *dest, void *src, size_t size)
+static void CopyMonInternal(void *dest, void *src, size_t size)
 {
     memcpy(dest, src, size);
 #ifdef NATIVE
@@ -2977,14 +3141,45 @@ void CopyMon(void *dest, void *src, size_t size)
     }
 #endif
 }
+void CopyMon(void *dest, void *src, size_t size)
+{
+#ifdef NATIVE
+    if (dest != src) ModsOwnedBattlePartySummaryBeforeBytes(dest, size);
+    NativeOwnedTrackUnreportedCopy(dest, src, size);
+#endif
+    CopyMonInternal(dest, src, size);
+}
+#ifdef NATIVE
+void CopyMonWithOwnedReceipt(void *dest, void *src, size_t size)
+{ CopyMonInternal(dest, src, size); }
+#endif
 
-u8 GiveCapturedMonToPlayer(struct Pokemon *mon)
+static u8 CopyMonToPCInternal(struct Pokemon *mon
+#ifdef NATIVE
+                              , struct RhhOwnedGift *gift, bool32 tracked
+#endif
+                              );
+static u8 GiveCapturedMonToPlayerInternal(struct Pokemon *mon
+#ifdef NATIVE
+                                          , bool32 trackedCatch
+#endif
+                                          )
 {
     s32 i;
+#ifdef NATIVE
+    struct RhhOwnedGift gift;
+    bool32 notifyGift = ModsOwnedGiftCapture(&mon->box, RHH_GIFT_OWNER_ASSIGNED, &gift);
+#endif
 
+    /* OT ID is part of the secure-data key. Rekey the existing Pokémon
+     * before changing the owner, and retain the shininess it had in battle. */
+    bool32 isShiny = GetMonData(mon, MON_DATA_IS_SHINY);
+    u32 otId = READ_OTID_FROM_SAVE;
+    if (!UpdateBoxMonOtId(&mon->box, otId))
+        return MON_CANT_GIVE;
+    SetMonData(mon, MON_DATA_IS_SHINY, &isShiny);
     SetMonData(mon, MON_DATA_OT_NAME, gSaveBlock2Ptr->playerName);
     SetMonData(mon, MON_DATA_OT_GENDER, &gSaveBlock2Ptr->playerGender);
-    SetMonData(mon, MON_DATA_OT_ID, gSaveBlock2Ptr->playerTrainerId);
 
     for (i = 0; i < PARTY_SIZE; i++)
     {
@@ -2993,14 +3188,64 @@ u8 GiveCapturedMonToPlayer(struct Pokemon *mon)
     }
 
     if (i >= PARTY_SIZE)
-        return CopyMonToPC(mon);
+    {
+#ifdef NATIVE
+        u8 result = CopyMonToPCInternal(mon, notifyGift ? &gift : NULL, notifyGift || trackedCatch);
+        if (notifyGift && result == MON_GIVEN_TO_PC)
+            ModsOwnedGiftCommitted(GetBoxedMonPtr(gSpecialVar_MonBoxId, gSpecialVar_MonBoxPos), &gift);
+        else if (result == MON_GIVEN_TO_PC && !gMain.inBattle)
+            NativeOwnedTrackerUnsupported();
+        return result;
+#else
+        return CopyMonToPCInternal(mon);
+#endif
+    }
 
-    CopyMon(&gParties[B_TRAINER_PLAYER][i], mon, sizeof(*mon));
+#ifdef NATIVE
+    if (notifyGift) ModsOwnedGiftDestination(&gParties[B_TRAINER_PLAYER][i].box, RHH_MON_PARTY, 0, i, &gift);
+#endif
+#ifdef NATIVE
+    if (notifyGift || trackedCatch) CopyMonWithOwnedReceipt(&gParties[B_TRAINER_PLAYER][i], mon, sizeof(*mon));
+    else
+#endif
+        CopyMon(&gParties[B_TRAINER_PLAYER][i], mon, sizeof(*mon));
     gPartiesCount[B_TRAINER_PLAYER] = i + 1;
+#ifdef NATIVE
+    if (notifyGift) ModsOwnedGiftCommitted(&gParties[B_TRAINER_PLAYER][i].box, &gift);
+    else if (!gMain.inBattle) NativeOwnedTrackerUnsupported();
+#endif
     return MON_GIVEN_TO_PARTY;
 }
+u8 GiveCapturedMonToPlayer(struct Pokemon *mon)
+{
+#ifdef NATIVE
+    return GiveCapturedMonToPlayerInternal(mon, FALSE);
+#else
+    return GiveCapturedMonToPlayerInternal(mon);
+#endif
+}
+#ifdef NATIVE
+u8 GiveCapturedMonToPlayerWithOwnedReceipt(struct Pokemon *mon)
+{ return GiveCapturedMonToPlayerInternal(mon, TRUE); }
+#endif
 
 u8 CopyMonToPC(struct Pokemon *mon)
+{
+#ifdef NATIVE
+    return CopyMonToPCInternal(mon, NULL, FALSE);
+#else
+    return CopyMonToPCInternal(mon);
+#endif
+}
+#ifdef NATIVE
+u8 CopyMonToPCWithOwnedReceipt(struct Pokemon *mon)
+{ return CopyMonToPCInternal(mon, NULL, TRUE); }
+#endif
+static u8 CopyMonToPCInternal(struct Pokemon *mon
+#ifdef NATIVE
+                              , struct RhhOwnedGift *gift, bool32 tracked
+#endif
+                              )
 {
     s32 boxNo, boxPos;
 
@@ -3015,8 +3260,15 @@ u8 CopyMonToPC(struct Pokemon *mon)
             struct BoxPokemon *checkingMon = GetBoxedMonPtr(boxNo, boxPos);
             if (GetBoxMonData(checkingMon, MON_DATA_SPECIES) == SPECIES_NONE)
             {
+#ifdef NATIVE
+                if (gift) ModsOwnedGiftDestination(checkingMon, RHH_MON_BOX, boxNo, boxPos, gift);
+#endif
                 MonRestorePP(mon);
-                CopyMon(checkingMon, &mon->box, sizeof(mon->box));
+#ifdef NATIVE
+                if (tracked) CopyMonWithOwnedReceipt(checkingMon, &mon->box, sizeof(mon->box));
+                else
+#endif
+                    CopyMon(checkingMon, &mon->box, sizeof(mon->box));
                 gSpecialVar_MonBoxId = boxNo;
                 gSpecialVar_MonBoxPos = boxPos;
                 if (GetPCBoxToSendMon() != boxNo)
@@ -3117,29 +3369,35 @@ u8 GetMonsStateToDoubles_2(void)
     return (aliveCount > 1) ? PLAYER_HAS_TWO_USABLE_MONS : PLAYER_HAS_ONE_USABLE_MON;
 }
 
-enum Ability GetAbilityBySpecies(enum Species species, u8 abilityNum)
+enum Ability GetAbilityBySpeciesReadOnly(enum Species species, u8 abilityNum)
 {
     int i;
+    enum Ability ability;
 
     if (abilityNum < NUM_ABILITY_SLOTS)
-        gLastUsedAbility = GetSpeciesAbility(species, abilityNum);
+        ability = GetSpeciesAbility(species, abilityNum);
     else
-        gLastUsedAbility = ABILITY_NONE;
+        ability = ABILITY_NONE;
 
     if (abilityNum >= NUM_NORMAL_ABILITY_SLOTS) // if abilityNum is empty hidden ability, look for other hidden abilities
     {
-        for (i = NUM_NORMAL_ABILITY_SLOTS; i < NUM_ABILITY_SLOTS && gLastUsedAbility == ABILITY_NONE; i++)
+        for (i = NUM_NORMAL_ABILITY_SLOTS; i < NUM_ABILITY_SLOTS && ability == ABILITY_NONE; i++)
         {
-            gLastUsedAbility = GetSpeciesAbility(species, i);
+            ability = GetSpeciesAbility(species, i);
         }
     }
 
-    for (i = 0; i < NUM_ABILITY_SLOTS && gLastUsedAbility == ABILITY_NONE; i++) // look for any non-empty ability
+    for (i = 0; i < NUM_ABILITY_SLOTS && ability == ABILITY_NONE; i++) // look for any non-empty ability
     {
-        gLastUsedAbility = GetSpeciesAbility(species, i);
+        ability = GetSpeciesAbility(species, i);
     }
 
-    return gLastUsedAbility;
+    return ability;
+}
+
+enum Ability GetAbilityBySpecies(enum Species species, u8 abilityNum)
+{
+    return gLastUsedAbility = GetAbilityBySpeciesReadOnly(species, abilityNum);
 }
 
 enum Ability GetMonAbility(struct Pokemon *mon)
@@ -3255,6 +3513,26 @@ enum Type GetSpeciesType(enum Species species, u8 slot)
     return gSpeciesInfo[SanitizeSpeciesId(species)].types[slot];
 }
 
+void GetSpeciesTypes(enum Species species, enum Type types[static 3])
+{
+    types[0] = GetSpeciesType(species, 0);
+    types[1] = GetSpeciesType(species, 1);
+    types[2] = TYPE_MYSTERY;
+#ifdef NATIVE
+    ModsSpeciesTypes(species, (u8 *)types);
+#endif
+}
+
+void GetSpeciesTypeList(enum Species species, struct BattleTypeList *list)
+{
+    list->count = 0;
+    BattleTypeListAdd(list, GetSpeciesType(species, 0));
+    BattleTypeListAdd(list, GetSpeciesType(species, 1));
+#ifdef NATIVE
+    ModsSpeciesTypeList(species, list);
+#endif
+}
+
 enum Ability GetSpeciesAbility(enum Species species, u8 slot)
 {
     return gSpeciesInfo[SanitizeSpeciesId(species)].abilities[slot];
@@ -3348,24 +3626,36 @@ const struct LevelUpMove *GetSpeciesLevelUpLearnset(enum Species species)
 {
     const struct LevelUpMove *learnset = gSpeciesInfo[SanitizeSpeciesId(species)].levelUpLearnset;
     if (learnset == NULL)
-        return gSpeciesInfo[SPECIES_NONE].levelUpLearnset;
+        learnset = gSpeciesInfo[SPECIES_NONE].levelUpLearnset;
+#ifdef NATIVE
+    return ModsLevelUpLearnset(species, learnset);
+#else
     return learnset;
+#endif
 }
 
 const u16 *GetSpeciesTeachableLearnset(enum Species species)
 {
     const u16 *learnset = gSpeciesInfo[SanitizeSpeciesId(species)].teachableLearnset;
     if (learnset == NULL)
-        return gSpeciesInfo[SPECIES_NONE].teachableLearnset;
+        learnset = gSpeciesInfo[SPECIES_NONE].teachableLearnset;
+#ifdef NATIVE
+    return ModsOtherLearnset(species, RHH_LEARNSET_TEACHABLE, learnset);
+#else
     return learnset;
+#endif
 }
 
 const u16 *GetSpeciesEggMoves(enum Species species)
 {
     const u16 *learnset = gSpeciesInfo[SanitizeSpeciesId(species)].eggMoveLearnset;
     if (learnset == NULL)
-        return gSpeciesInfo[SPECIES_NONE].eggMoveLearnset;
+        learnset = gSpeciesInfo[SPECIES_NONE].eggMoveLearnset;
+#ifdef NATIVE
+    return ModsOtherLearnset(species, RHH_LEARNSET_EGG, learnset);
+#else
     return learnset;
+#endif
 }
 
 //only used in test assumptions at the moment
@@ -3427,6 +3717,22 @@ void RemoveBattleMonPPBonus(struct BattlePokemon *mon, u8 moveIndex)
     mon->ppBonuses &= gPPUpClearMask[moveIndex];
 }
 
+#ifdef NATIVE
+void CaptureBattleMonNature(struct BattlePokemon *dst, struct Pokemon *src)
+{
+    dst->nativeNatureFlags = 0;
+    if (!src->box.hasSpecies || src->box.isBadEgg || src->box.personality != dst->personality
+        || src->box.otId != dst->otId) return;
+    struct Pokemon copy = *src;
+    if (!GetMonData(&copy, MON_DATA_SPECIES) || copy.box.isBadEgg) return;
+    u32 nature = GetNature(&copy), statNature = GetMonData(&copy, MON_DATA_HIDDEN_NATURE);
+    if (nature >= NUM_NATURES) return;
+    dst->nativeNature = nature; dst->nativeNaturePersonality = dst->personality; dst->nativeNatureOtId = dst->otId;
+    dst->nativeNatureFlags = NATIVE_BATTLE_NATURE_SNAPSHOT;
+    if (statNature < NUM_NATURES)
+    { dst->nativeStatNature = statNature; dst->nativeNatureFlags |= NATIVE_BATTLE_NATURE_STAT_VALID; }
+}
+#endif
 void PokemonToBattleMon(struct Pokemon *src, struct BattlePokemon *dst)
 {
     s32 i;
@@ -3461,9 +3767,15 @@ void PokemonToBattleMon(struct Pokemon *src, struct BattlePokemon *dst)
     dst->spDefense = GetMonData(src, MON_DATA_SPDEF);
     dst->abilityNum = GetMonData(src, MON_DATA_ABILITY_NUM);
     dst->otId = GetMonData(src, MON_DATA_OT_ID);
+#ifdef NATIVE
+    CaptureBattleMonNature(dst, src);
+#endif
     dst->types[0] = GetSpeciesType(dst->species, 0);
     dst->types[1] = GetSpeciesType(dst->species, 1);
     dst->types[2] = TYPE_MYSTERY;
+#ifdef NATIVE
+    ModsBattleMonSpeciesTypes(dst);
+#endif
     dst->isShiny = IsMonShiny(src);
     dst->affectionHearts = GetMonAffectionHearts(src);
     dst->ability = GetAbilityBySpecies(dst->species, dst->abilityNum);
@@ -3543,6 +3855,13 @@ bool8 PokemonUseItemEffects(struct Pokemon *mon, enum Item item, u8 partyIndex, 
 
     // Get item effect
     itemEffect = GetItemEffect(item);
+#ifdef NATIVE
+    u16 modEvCaps[NUM_STATS];
+    for (u32 stat = 0; stat < NUM_STATS; ++stat) modEvCaps[stat] = MAX_PER_STAT_EVS;
+    if (!usedByAI && ((itemEffect[4] & (ITEM4_EV_HP | ITEM4_EV_ATK))
+        || (itemEffect[5] & (ITEM5_EV_DEF | ITEM5_EV_SPEED | ITEM5_EV_SPDEF | ITEM5_EV_SPATK))))
+        ModsEvLimits(mon, RHH_EV_LIMIT_ITEM, item, maxAllowedEVs, modEvCaps, &maxAllowedEVs);
+#endif
     isLevelUpItem = (itemEffect[3] & ITEM3_LEVEL_UP) != 0;
     levelBefore = GetMonData(mon, MON_DATA_LEVEL, NULL);
 
@@ -3668,6 +3987,10 @@ bool8 PokemonUseItemEffects(struct Pokemon *mon, enum Item item, u8 partyIndex, 
 
                             // Ensure the increase does not exceed the max EV per stat (252)
                             evCap = (itemEffect[10] & ITEM10_IS_VITAMIN) ? EV_ITEM_RAISE_LIMIT : MAX_PER_STAT_EVS;
+#ifdef NATIVE
+                            evCap = modEvCaps[sGetMonDataEVConstants[temp1] - MON_DATA_HP_EV];
+                            if ((itemEffect[10] & ITEM10_IS_VITAMIN) && I_VITAMIN_EV_CAP < GEN_8 && evCap > 100) evCap = 100;
+#endif
 
                             // Check if the per-stat limit is reached
                             if (dataSigned >= evCap)
@@ -3865,6 +4188,10 @@ bool8 PokemonUseItemEffects(struct Pokemon *mon, enum Item item, u8 partyIndex, 
 
                             // Ensure the increase does not exceed the max EV per stat (252)
                             evCap = (itemEffect[10] & ITEM10_IS_VITAMIN) ? EV_ITEM_RAISE_LIMIT : MAX_PER_STAT_EVS;
+#ifdef NATIVE
+                            evCap = modEvCaps[sGetMonDataEVConstants[temp1 + 2] - MON_DATA_HP_EV];
+                            if ((itemEffect[10] & ITEM10_IS_VITAMIN) && I_VITAMIN_EV_CAP < GEN_8 && evCap > 100) evCap = 100;
+#endif
 
                             // Check if the per-stat limit is reached
                             if (dataSigned >= evCap)
@@ -3973,7 +4300,8 @@ bool8 HealStatusConditions(struct Pokemon *mon, u32 healMask, enum BattlerId bat
 {
     u32 status = GetMonData(mon, MON_DATA_STATUS, 0);
 
-    PREPARE_MON_NICK_BUFFER(gBattleTextBuff1, battler, gBattlerPartyIndexes[battler]);
+    if (battler < MAX_BATTLERS_COUNT)
+        PREPARE_MON_NICK_BUFFER(gBattleTextBuff1, battler, gBattlerPartyIndexes[battler]);
 
     if (status & healMask)
     {
@@ -4132,7 +4460,137 @@ u8 GetItemEffectParamOffset(enum BattlerId battler, enum Item itemId, u8 effectB
 
 u8 GetNature(struct Pokemon *mon)
 {
-    return GetMonData(mon, MON_DATA_PERSONALITY, 0) % NUM_NATURES;
+    return GetBoxMonNature(&mon->box);
+}
+
+#ifdef NATIVE
+/* This representation is intentionally not wired into live nature getters
+ * or commands yet. Older peers interpret these bits as part of a held item. */
+int NativeNatureStorageRead(const struct BoxPokemon *box, unsigned *nature, unsigned *overridden)
+{
+    if (!box || !nature || !overridden || !box->hasSpecies || box->isBadEgg) return -1;
+    struct BoxPokemon copy = *box;
+    u32 species = GetBoxMonData(&copy, MON_DATA_SPECIES);
+    u32 code = GetBoxMonData(&copy, MON_DATA_NATIVE_NATURE_CODE);
+    if (copy.isBadEgg || !species || species >= NUM_SPECIES || code > NUM_NATURES) return -1;
+    ModsOwnedBattlePartySummaryBeforeBytes(nature, sizeof(*nature));
+    NativeOwnedTrackUnreportedCopy(nature, NULL, sizeof(*nature));
+    ModsOwnedBattlePartySummaryBeforeBytes(overridden, sizeof(*overridden));
+    NativeOwnedTrackUnreportedCopy(overridden, NULL, sizeof(*overridden));
+    *overridden = code != 0;
+    *nature = code ? code - 1 : GetNatureFromPersonality(copy.personality);
+    return 0;
+}
+int NativeNatureStorageWrite(struct BoxPokemon *box, unsigned nature)
+{
+    if (!box || nature >= NUM_NATURES) return -1;
+    unsigned oldNature, oldOverride;
+    if (NativeNatureStorageRead(box, &oldNature, &oldOverride)) return -1;
+    struct BoxPokemon copy = *box;
+    u8 code = nature == GetNatureFromPersonality(copy.personality) ? 0 : nature + 1;
+    SetBoxMonData(&copy, MON_DATA_NATIVE_NATURE_CODE, &code);
+    unsigned actual, overridden;
+    if (NativeNatureStorageRead(&copy, &actual, &overridden) || actual != nature || overridden != !!code) return -1;
+    /* This edits only the checked source Pokémon's nature, retaining its
+     * identity. The read-only summary view still cannot accept writes. */
+    ModsOwnedBattlePartySummaryBeforeBytes(box, sizeof(*box));
+    *box = copy; return 0;
+}
+int NativeNatureLinkExport(const struct BoxPokemon *source, int peerSupportsFormat, struct BoxPokemon *out)
+{
+    unsigned nature, overridden;
+    if (!out || (peerSupportsFormat != 0 && peerSupportsFormat != 1)
+        || NativeNatureStorageRead(source, &nature, &overridden)
+        || (overridden && !peerSupportsFormat)) return -1;
+    if (out != source) {
+        ModsOwnedBattlePartySummaryBeforeBytes(out, sizeof(*out));
+        NativeOwnedTrackUnreportedCopy(out, NULL, sizeof(*out));
+    }
+    *out = *source; return 0;
+}
+int NativeNatureLinkImport(const struct BoxPokemon *source, int peerSupportsFormat,
+                           struct BoxPokemon *out, unsigned *requiresFormat)
+{
+    if (!source || !out || !requiresFormat || (peerSupportsFormat != 0 && peerSupportsFormat != 1)
+        || !source->hasSpecies || source->isBadEgg) return -1;
+    struct BoxPokemon copy = *source;
+    unsigned nature, overridden;
+    if (!peerSupportsFormat)
+    {
+        /* Older peers treat these bits as part of the held item. Reject them
+         * rather than silently changing an item that cannot fit our layout. */
+        GetBoxMonData(&copy, MON_DATA_SPECIES);
+        if (copy.isBadEgg) return -1;
+        if (GetBoxMonData(&copy, MON_DATA_NATIVE_NATURE_CODE)) return -1;
+    }
+    if (NativeNatureStorageRead(&copy, &nature, &overridden)) return -1;
+    if (out != source) {
+        ModsOwnedBattlePartySummaryBeforeBytes(out, sizeof(*out));
+        NativeOwnedTrackUnreportedCopy(out, NULL, sizeof(*out));
+    }
+    ModsOwnedBattlePartySummaryBeforeBytes(requiresFormat, sizeof(*requiresFormat));
+    NativeOwnedTrackUnreportedCopy(requiresFormat, NULL, sizeof(*requiresFormat));
+    *out = copy; *requiresFormat = overridden; return 0;
+}
+int NativeNaturePartyLinkExport(const struct Pokemon *source, unsigned count, int peerSupportsFormat,
+                                struct Pokemon *out)
+{
+    if (!source || !out || !count || count > PARTY_SIZE || (peerSupportsFormat != 0 && peerSupportsFormat != 1)) return -1;
+    struct Pokemon staged[PARTY_SIZE];
+    for (u32 i = 0; i < count; ++i)
+    {
+        staged[i] = source[i];
+        if (source[i].box.isBadEgg) return -1;
+        if (source[i].box.hasSpecies && NativeNatureLinkExport(&source[i].box, peerSupportsFormat, &staged[i].box)) return -1;
+    }
+    if (out != source) {
+        ModsOwnedBattlePartySummaryBeforeBytes(out, count * sizeof(*out));
+        NativeOwnedTrackUnreportedCopy(out, NULL, count * sizeof(*out));
+    }
+    memmove(out, staged, count * sizeof(*out)); return 0;
+}
+int NativeNaturePartyLinkImport(const struct Pokemon *source, unsigned count, int peerSupportsFormat,
+                                struct Pokemon *out, unsigned *requiresFormat)
+{
+    if (!source || !out || !requiresFormat || !count || count > PARTY_SIZE
+        || (peerSupportsFormat != 0 && peerSupportsFormat != 1)) return -1;
+    struct Pokemon staged[PARTY_SIZE]; unsigned required = 0;
+    for (u32 i = 0; i < count; ++i)
+    {
+        staged[i] = source[i];
+        if (source[i].box.isBadEgg) return -1;
+        if (source[i].box.hasSpecies)
+        {
+            unsigned slotRequired;
+            if (NativeNatureLinkImport(&source[i].box, peerSupportsFormat, &staged[i].box, &slotRequired)) return -1;
+            required |= slotRequired;
+        }
+    }
+    if (out != source) {
+        ModsOwnedBattlePartySummaryBeforeBytes(out, count * sizeof(*out));
+        NativeOwnedTrackUnreportedCopy(out, NULL, count * sizeof(*out));
+    }
+    ModsOwnedBattlePartySummaryBeforeBytes(requiresFormat, sizeof(*requiresFormat));
+    NativeOwnedTrackUnreportedCopy(requiresFormat, NULL, sizeof(*requiresFormat));
+    memmove(out, staged, count * sizeof(*out)); *requiresFormat = required; return 0;
+}
+#endif
+
+u8 GetBoxMonNature(struct BoxPokemon *mon)
+{
+#ifdef NATIVE
+    int recorded = NativeRecordedBattleNatureMode();
+    bool32 supported = recorded >= 0 ? recorded == 1
+        : RhhModsHasActiveRun() && ModsNatureFormatEnabled() && !NativeLinkSessionOpen() && !gReceivedRemoteLinkPlayers
+            && !IsLinkConnectionEstablished()
+            && !(gBattleTypeFlags & (BATTLE_TYPE_LINK | BATTLE_TYPE_RECORDED | BATTLE_TYPE_RECORDED_LINK));
+    if (supported)
+    {
+        unsigned nature, overridden;
+        if (!NativeNatureStorageRead(mon, &nature, &overridden)) return nature;
+    }
+#endif
+    return GetNatureFromPersonality(mon->personality);
 }
 
 u8 GetNatureFromPersonality(u32 personality)
@@ -4313,8 +4771,7 @@ bool32 DoesMonMeetAdditionalConditions(struct Pokemon *mon, const struct Evoluti
             for (j = 0; j < PARTY_SIZE; j++)
             {
                 enum Species currSpecies = GetMonData(&gParties[B_TRAINER_PLAYER][j], MON_DATA_SPECIES);
-                if (GetSpeciesType(currSpecies, 0) == params[i].arg1
-                 || GetSpeciesType(currSpecies, 1) == params[i].arg1)
+                if (IsSpeciesOfType(currSpecies, params[i].arg1))
                 {
                     currentCondition = TRUE;
                     break;
@@ -4981,6 +5438,12 @@ s32 CalculateFriendshipBonuses(struct Pokemon *mon, s32 modifier, enum HoldEffec
 void MonGainEVs(struct Pokemon *mon, enum Species defeatedSpecies)
 {
     u8 evs[NUM_STATS];
+#ifdef NATIVE
+    bool32 modYield = ModsBattleEvYieldEnabled(mon);
+    u8 beforeEvs[NUM_STATS];
+    u16 earnedEvs[NUM_STATS] = {0};
+    u16 modEvCaps[NUM_STATS];
+#endif
     u16 evIncrease = 0;
     u16 totalEVs = 0;
     enum Item heldItem;
@@ -4990,6 +5453,9 @@ void MonGainEVs(struct Pokemon *mon, enum Species defeatedSpecies)
     u8 stat;
     u8 bonus;
     u32 currentEVCap = GetCurrentEVCap();
+#ifdef NATIVE
+    ModsEvLimits(mon, RHH_EV_LIMIT_BATTLE, 0, currentEVCap, modEvCaps, &currentEVCap);
+#endif
 
     heldItem = GetMonData(mon, MON_DATA_HELD_ITEM, 0);
     holdEffect = GetItemHoldEffect(heldItem);
@@ -5000,12 +5466,19 @@ void MonGainEVs(struct Pokemon *mon, enum Species defeatedSpecies)
     for (i = 0; i < NUM_STATS; i++)
     {
         evs[i] = GetMonData(mon, MON_DATA_HP_EV + i, 0);
+#ifdef NATIVE
+        beforeEvs[i] = evs[i];
+#endif
         totalEVs += evs[i];
     }
 
     for (i = 0; i < NUM_STATS; i++)
     {
-        if (totalEVs >= currentEVCap)
+        if (totalEVs >= currentEVCap
+#ifdef NATIVE
+            && !modYield
+#endif
+            )
             break;
 
         if (CheckMonHasHadPokerus(mon))
@@ -5058,20 +5531,42 @@ void MonGainEVs(struct Pokemon *mon, enum Species defeatedSpecies)
         if (holdEffect == HOLD_EFFECT_MACHO_BRACE)
             evIncrease *= 2;
 
+#ifdef NATIVE
+        if (modYield) earnedEvs[i] = evIncrease;
+        if (totalEVs >= currentEVCap) continue;
+#endif
+
         if (totalEVs + (s16)evIncrease > currentEVCap)
             evIncrease = ((s16)evIncrease + currentEVCap) - (totalEVs + evIncrease);
 
-        if (evs[i] + (s16)evIncrease > MAX_PER_STAT_EVS)
+        if (evs[i] + (s16)evIncrease >
+#ifdef NATIVE
+            modEvCaps[i]
+#else
+            MAX_PER_STAT_EVS
+#endif
+            )
         {
-            int val1 = (s16)evIncrease + MAX_PER_STAT_EVS;
+            int val1 = (s16)evIncrease +
+#ifdef NATIVE
+                modEvCaps[i];
+#else
+                MAX_PER_STAT_EVS;
+#endif
             int val2 = evs[i] + evIncrease;
             evIncrease = val1 - val2;
         }
 
         evs[i] += evIncrease;
         totalEVs += evIncrease;
-        SetMonData(mon, MON_DATA_HP_EV + i, &evs[i]);
+#ifdef NATIVE
+        if (!modYield)
+#endif
+            SetMonData(mon, MON_DATA_HP_EV + i, &evs[i]);
     }
+#ifdef NATIVE
+    if (modYield) ModsBattleEvYield(mon, defeatedSpecies, beforeEvs, evs, earnedEvs);
+#endif
 }
 
 u16 GetMonEVCount(struct Pokemon *mon)
@@ -5372,14 +5867,19 @@ bool8 IsMonSpriteNotFlipped(enum Species species)
 
 s8 GetMonFlavorRelation(struct Pokemon *mon, enum Flavor flavor)
 {
-    u8 nature = GetNature(mon);
+    return GetFlavorRelationByNature(GetNature(mon), flavor);
+}
+
+s8 GetFlavorRelationByNature(u8 nature, enum Flavor flavor)
+{
+    if (nature >= NUM_NATURES || flavor >= FLAVOR_COUNT)
+        return 0;
     return gPokeblockFlavorCompatibilityTable[nature * FLAVOR_COUNT + flavor];
 }
 
 s8 GetFlavorRelationByPersonality(u32 personality, enum Flavor flavor)
 {
-    u8 nature = GetNatureFromPersonality(personality);
-    return gPokeblockFlavorCompatibilityTable[nature * FLAVOR_COUNT + flavor];
+    return GetFlavorRelationByNature(GetNatureFromPersonality(personality), flavor);
 }
 
 bool8 IsTradedMon(struct Pokemon *mon)
@@ -6410,7 +6910,11 @@ bool32 TryFormChange(struct Pokemon *mon, enum FormChanges method, enum BattleTr
     if (targetSpecies != currentSpecies)
     {
         TryToSetBattleFormChangeMoves(mon, method);
+#ifdef NATIVE
+        SetMonSpeciesWithOwnedReceipt(mon, &targetSpecies);
+#else
         SetMonData(mon, MON_DATA_SPECIES, &targetSpecies);
+#endif
         TrySetDayLimitToFormChange(mon);
         CalculateMonStats(mon);
         return TRUE;
@@ -6435,7 +6939,11 @@ bool32 TryBoxMonFormChange(struct BoxPokemon *boxMon, enum FormChanges method)
 
     if (targetSpecies != currentSpecies)
     {
+#ifdef NATIVE
+        SetBoxMonSpeciesWithOwnedReceipt(boxMon, &targetSpecies);
+#else
         SetBoxMonData(boxMon, MON_DATA_SPECIES, &targetSpecies);
+#endif
         return TRUE;
     }
     return FALSE;
@@ -6531,6 +7039,24 @@ u32 GetMonAffectionHearts(struct Pokemon *pokemon)
     return AFFECTION_NO_HEARTS;
 }
 
+bool32 UpdateBoxMonOtId(struct BoxPokemon *boxMon, u32 otId)
+{
+    if (!boxMon) return FALSE;
+    /* Secure data is keyed by both personality and OT ID. Verify and decrypt
+     * with the old key, then encrypt it with the new key. */
+    if (CalculateBoxMonChecksumDecrypt(boxMon) != boxMon->checksum)
+    {
+        EncryptBoxMon(boxMon);
+        return FALSE;
+    }
+#ifdef NATIVE
+    if (boxMon->otId != otId) NativeOwnedTrackUnreportedIdentityChange(boxMon, TRUE, otId);
+#endif
+    boxMon->otId = otId;
+    boxMon->checksum = CalculateBoxMonChecksumReencrypt(boxMon);
+    return TRUE;
+}
+
 void UpdateMonPersonality(struct BoxPokemon *boxMon, u32 personality)
 {
     struct PokemonSubstruct0 *old0, *new0;
@@ -6538,6 +7064,10 @@ void UpdateMonPersonality(struct BoxPokemon *boxMon, u32 personality)
     struct PokemonSubstruct2 *old2, *new2;
     struct PokemonSubstruct3 *old3, *new3;
     struct BoxPokemon old;
+
+#ifdef NATIVE
+    if (boxMon->personality != personality) NativeOwnedTrackUnreportedIdentityChange(boxMon, FALSE, 0);
+#endif
 
     bool32 isShiny = GetBoxMonData(boxMon, MON_DATA_IS_SHINY);
     u32 hiddenNature = GetBoxMonData(boxMon, MON_DATA_HIDDEN_NATURE);
@@ -6751,15 +7281,18 @@ u8 *GetSavedPlayerPartyCount(void)
 
 void SavePlayerPartyMon(u32 index, struct Pokemon *mon)
 {
+#ifdef NATIVE
+    ModsOwnedFrontierBeforeSavePartyMon(index, mon);
+    NativeOwnedTrackBeforePartySaveMon(index, mon);
+#endif
     gSaveBlock1Ptr->playerParty[index] = *mon;
 }
 
 bool32 IsSpeciesOfType(enum Species species, enum Type type)
 {
-    if (gSpeciesInfo[species].types[0] == type
-     || gSpeciesInfo[species].types[1] == type)
-        return TRUE;
-    return FALSE;
+    struct BattleTypeList types;
+    GetSpeciesTypeList(species, &types);
+    return BattleTypeListContains(&types, type);
 }
 
 struct BoxPokemon *GetSelectedBoxMonFromPcOrParty(void)
@@ -6776,9 +7309,21 @@ u32 GiveScriptedMonToPlayer(struct Pokemon *mon, u8 slot)
 {
     u32 sentToPc;
     u32 i = 0;
+#ifdef NATIVE
+    struct RhhOwnedGift gift;
+    bool32 notifyGift = ModsOwnedGiftCapture(&mon->box, RHH_GIFT_SCRIPTED, &gift);
+#endif
     if (slot < PARTY_SIZE)
     {
-        CopyMon(&gParties[B_TRAINER_PLAYER][slot], mon, sizeof(struct Pokemon));
+        i = slot;
+#ifdef NATIVE
+        if (notifyGift) ModsOwnedGiftDestination(&gParties[B_TRAINER_PLAYER][slot].box, RHH_MON_PARTY, 0, slot, &gift);
+#endif
+#ifdef NATIVE
+        if (notifyGift) CopyMonWithOwnedReceipt(&gParties[B_TRAINER_PLAYER][slot], mon, sizeof(struct Pokemon));
+        else
+#endif
+            CopyMon(&gParties[B_TRAINER_PLAYER][slot], mon, sizeof(struct Pokemon));
         sentToPc = MON_GIVEN_TO_PARTY;
     }
     else
@@ -6790,12 +7335,23 @@ u32 GiveScriptedMonToPlayer(struct Pokemon *mon, u8 slot)
         }
         if (i >= PARTY_SIZE)
         {
-            sentToPc = CopyMonToPC(mon);
+#ifdef NATIVE
+            sentToPc = CopyMonToPCInternal(mon, notifyGift ? &gift : NULL, notifyGift);
+#else
+            sentToPc = CopyMonToPCInternal(mon);
+#endif
         }
         else
         {
             sentToPc = MON_GIVEN_TO_PARTY;
-            CopyMon(&gParties[B_TRAINER_PLAYER][i], mon, sizeof(struct Pokemon));
+#ifdef NATIVE
+            if (notifyGift) ModsOwnedGiftDestination(&gParties[B_TRAINER_PLAYER][i].box, RHH_MON_PARTY, 0, i, &gift);
+#endif
+#ifdef NATIVE
+            if (notifyGift) CopyMonWithOwnedReceipt(&gParties[B_TRAINER_PLAYER][i], mon, sizeof(struct Pokemon));
+            else
+#endif
+                CopyMon(&gParties[B_TRAINER_PLAYER][i], mon, sizeof(struct Pokemon));
             gPartiesCount[B_TRAINER_PLAYER] = i + 1;
         }
     }
@@ -6805,6 +7361,12 @@ u32 GiveScriptedMonToPlayer(struct Pokemon *mon, u8 slot)
         HandleSetPokedexFlagFromMon(mon, FLAG_SET_CAUGHT);
     }
     CalculatePlayerPartyCount();
+#ifdef NATIVE
+    if (notifyGift && sentToPc != MON_CANT_GIVE)
+        ModsOwnedGiftCommitted(sentToPc == MON_GIVEN_TO_PC ? GetBoxedMonPtr(gSpecialVar_MonBoxId, gSpecialVar_MonBoxPos)
+                                                         : &gParties[B_TRAINER_PLAYER][i].box, &gift);
+    else if (sentToPc != MON_CANT_GIVE) NativeOwnedTrackerUnsupported();
+#endif
     return sentToPc;
 }
 

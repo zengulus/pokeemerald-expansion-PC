@@ -44,6 +44,9 @@
 #include "constants/metatile_behaviors.h"
 #include "constants/songs.h"
 #include "constants/trainer_hill.h"
+#ifdef NATIVE
+#include "mods.h"
+#endif
 
 static EWRAM_DATA u8 sWildEncounterImmunitySteps = 0;
 static EWRAM_DATA u16 sPrevMetatileBehavior = 0;
@@ -171,6 +174,10 @@ int ProcessPlayerFieldInput(struct FieldInput *input)
     playerDirection = GetPlayerFacingDirection();
     GetPlayerPosition(&position);
     metatileBehavior = MapGridGetMetatileBehaviorAt(position.x, position.y);
+#ifdef NATIVE
+    if (input->tookStep)
+        ModsWorldStep(position.x - MAP_OFFSET, position.y - MAP_OFFSET, position.elevation, metatileBehavior);
+#endif
 
     if (CheckForTrainersWantingBattle() == TRUE)
         return TRUE;
@@ -237,6 +244,10 @@ int ProcessPlayerFieldInput(struct FieldInput *input)
     if (input->pressedSelectButton && UseRegisteredKeyItemOnField() == TRUE)
         return TRUE;
 
+#ifdef NATIVE
+    if (input->pressedRButton && ModsWildScoutFacing())
+        return TRUE;
+#endif
     if (input->pressedRButton && TryStartDexNavSearch())
         return TRUE;
 
@@ -343,6 +354,12 @@ const u8 *GetInteractedLinkPlayerScript(struct MapPosition *position, u8 metatil
         if (gLinkPlayerObjectEvents[i].active == TRUE && gLinkPlayerObjectEvents[i].objEventId == objectEventId)
             return NULL;
     }
+
+#ifdef NATIVE
+    if (IsOverworldWildEncounter(&gObjectEvents[objectEventId], OWE_ANY)
+     && !ModsWildActorCueVisible(&gObjectEvents[objectEventId]))
+        return NULL;
+#endif
 
     gSelectedObjectEvent = objectEventId;
     gSpecialVar_LastTalked = gObjectEvents[objectEventId].localId;
@@ -892,10 +909,15 @@ void RestartWildEncounterImmunitySteps(void)
     sWildEncounterImmunitySteps = 0;
 }
 
-static bool32 ShouldDisableRandomEncounters(void)
+static bool32 ShouldDisableRandomEncounters(u16 metatileBehavior)
 {
     if (FlagGet(WE_FLAG_NO_ENCOUNTER))
         return TRUE;
+#ifdef NATIVE
+    if (NativeOWEReplacesRandom(metatileBehavior)) return TRUE;
+#else
+    (void)metatileBehavior;
+#endif
 
     if (!WE_VANILLA_RANDOM && WE_OW_ENCOUNTERS)
     {
@@ -911,7 +933,7 @@ static bool32 ShouldDisableRandomEncounters(void)
 
 static bool8 CheckStandardWildEncounter(u16 metatileBehavior)
 {
-    if (ShouldDisableRandomEncounters())
+    if (ShouldDisableRandomEncounters(metatileBehavior))
         return FALSE;
 
     if (sWildEncounterImmunitySteps < 4)

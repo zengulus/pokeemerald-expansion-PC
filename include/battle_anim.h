@@ -65,6 +65,13 @@ struct LinkBattleAnim
 
 extern void (*gAnimScriptCallback)(void);
 extern bool8 gAnimScriptActive;
+#ifdef NATIVE
+extern u32 gNativeAnimStepCount;
+void NativeBattleAnimStep(void);
+#define BATTLE_ANIM_STEP() NativeBattleAnimStep()
+#else
+#define BATTLE_ANIM_STEP() gAnimScriptCallback()
+#endif
 extern u8 gAnimVisualTaskCount;
 extern u8 gAnimSoundTaskCount;
 extern struct LinkBattleAnim *gAnimDisableStructPtr;

@@ -11,6 +11,9 @@
 #include "battle_factory_screen.h"
 #include "frontier_util.h"
 #include "string_util.h"
+#ifdef NATIVE
+#include "mods.h"
+#endif
 #include "constants/battle_tent.h"
 #include "constants/battle_tent_trainers.h"
 #include "constants/battle_tent_mons.h"
@@ -274,6 +277,9 @@ static void GiveSlateportTentPrize(void)
 
 static void SelectInitialRentalMons(void)
 {
+#ifdef NATIVE
+    ModsOwnedRentalPartyBegin();
+#endif
     ZeroPlayerPartyMons();
     DoBattleFactorySelectScreen();
 }

@@ -15,7 +15,7 @@
 //  === not modify code unless magician ===
 //  === WARNING === WARNING === WARNING ===
 
-static void SmolDecompressData(const struct SmolHeader *header, const u32 *data, void *dest);
+static bool32 SmolDecompressData(const struct SmolHeader *header, const u32 *data, void *dest, bool32 allowFailure);
 static void SmolDecompressTilemap(const struct SmolTilemapHeader *header, const u32 *data, u16 *dest);
 
 static bool32 isModeLoEncoded(enum CompressionMode mode);
@@ -276,7 +276,7 @@ void DecompressDataWithHeaderVram(const u32 *src, void *dest)
     case ENCODE_LO:
     case ENCODE_BOTH:
     case ENCODE_BOTH_DELTA_SYMS:
-        SmolDecompressData(&header.smol, &src[2], dest);
+        SmolDecompressData(&header.smol, &src[2], dest, FALSE);
         break;
     default:
         DecompressionError(src, HEADER_ERROR);
@@ -304,12 +304,29 @@ void DecompressDataWithHeaderWram(const u32 *src, void *dest)
     case ENCODE_LO:
     case ENCODE_BOTH:
     case ENCODE_BOTH_DELTA_SYMS:
-        SmolDecompressData(&header.smol, &src[2], dest);
+        SmolDecompressData(&header.smol, &src[2], dest, FALSE);
         break;
     default:
         DecompressionError(src, HEADER_ERROR);
     }
 }
+
+#ifdef NATIVE
+bool32 TryDecompressDataWithHeaderWram(const u32 *src, void *dest)
+{
+    if (!src || !dest) return FALSE;
+    union CompressionHeader header;
+    CpuCopy32(src, &header, 8);
+    if (header.smol.mode == MODE_LZ77)
+    {
+        if (*(const u8 *)src != 0x10) return FALSE;
+        FastLZ77UnCompWram(src, dest); return TRUE;
+    }
+    if (header.smol.mode >= BASE_ONLY && header.smol.mode <= ENCODE_BOTH_DELTA_SYMS)
+        return SmolDecompressData(&header.smol, &src[2], dest, TRUE);
+    return FALSE;
+}
+#endif
 
 #define REP0(X)
 #define REP1(X) X
@@ -1004,11 +1021,11 @@ static void DecodeInstructionsIwram(u32 headerLoSize, const u8 *loVec, const u16
 }
 
 //  Entrance point for smol compressed data
-static void SmolDecompressData(const struct SmolHeader *header, const u32 *data, void *dest)
+static bool32 SmolDecompressData(const struct SmolHeader *header, const u32 *data, void *dest, bool32 allowFailure)
 {
     //  This is apparently needed due to Game Freak sending bullshit down the decompression pipeline
     if (header->loSize == 0 || header->symSize == 0)
-        return;
+        return FALSE;
     const u8 *leftoverPos = (u8 *)data;
 
     sCurrState = header->initialState;
@@ -1024,7 +1041,7 @@ static void SmolDecompressData(const struct SmolHeader *header, const u32 *data,
     {
     case BASE_ONLY: // Used by .fastSmol, there is no encoding there, so we can quickly decode all the instructions and quit.
         DecodeInstructionsIwram(headerLoSize, leftoverPos + headerSymSize*2, (void *) leftoverPos, dest);
-        return;
+        return TRUE;
     case ENCODE_LO:
         pLoFreqs = &data[0];
         sDataPtr = &data[3];
@@ -1052,7 +1069,9 @@ static void SmolDecompressData(const struct SmolHeader *header, const u32 *data,
     // Everything needs to be aligned.
     u32 alignedLoSize = header->loSize % 2 == 1 ? headerLoSize + 1 : headerLoSize;
     u32 alignedSymSize = header->symSize % 2 == 1 ? headerSymSize + 1 : headerSymSize;
-    void *memoryAlloced = Alloc((alignedSymSize*2) + alignedLoSize);
+    void *memoryAlloced = allowFailure ? AllocUnchecked((alignedSymSize*2) + alignedLoSize)
+                                       : Alloc((alignedSymSize*2) + alignedLoSize);
+    if (!memoryAlloced) return FALSE;
     u16 *symVec = memoryAlloced;
     u8 *loVec = memoryAlloced + alignedSymSize*2;
 
@@ -1099,6 +1118,7 @@ static void SmolDecompressData(const struct SmolHeader *header, const u32 *data,
     DecodeInstructionsIwram(headerLoSize, loVec, symVec, dest);
 
     Free(memoryAlloced);
+    return TRUE;
 }
 
 ARM_FUNC __attribute__((flatten, noinline, no_reorder)) __attribute__((optimize("-O3"))) static void DeltaDecodeTileNumbers(u16 *tileNumbers, u32 arraySize)

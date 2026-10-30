@@ -1,10 +1,15 @@
 #include "global.h"
+#ifdef NATIVE
+#include "mods.h"
+#include "mod_host.h"
+#endif
 #include "battle.h"
 #include "battle_anim.h"
 #include "battle_anim_scripts.h"
 #include "battle_arena.h"
 #include "battle_environment.h"
 #include "battle_pyramid.h"
+#include "battle_type_set.h"
 #include "battle_util.h"
 #include "battle_controllers.h"
 #include "battle_interface.h"
@@ -356,6 +361,11 @@ bool32 EndOrContinueWeather(void)
     if (currBattleWeather == BATTLE_WEATHER_NONE)
         return FALSE;
 
+#ifdef NATIVE
+    struct RhhBattleEnvironmentState before;
+    bool32 captured = gBattleStruct->weatherDuration == 1 && ModsBattleEnvironmentCapture(&before);
+    bool32 tickCaptured = gBattleStruct->weatherDuration > 1 && ModsBattleEnvironmentTimerCapture(&before);
+#endif
     if (gBattleStruct->weatherDuration > 0 && --gBattleStruct->weatherDuration == 0)
     {
         gBattleWeather = B_WEATHER_NONE;
@@ -366,13 +376,21 @@ bool32 EndOrContinueWeather(void)
         }
         gBattleCommunication[MULTISTRING_CHOOSER] = gBattleWeatherInfo[currBattleWeather].endMessage;
         BattleScriptCall(BattleScript_WeatherFaded);
+#ifdef NATIVE
+        if (captured) ModsBattleEnvironmentCommitted(&before, RHH_BATTLE_ENV_CAUSE_EXPIRED, RHH_BATTLE_NO_BATTLER, MOVE_NONE, ABILITY_NONE);
+#endif
         return TRUE;
     }
     else
     {
         gBattleCommunication[MULTISTRING_CHOOSER] = gBattleWeatherInfo[currBattleWeather].continuesMessage;
         gBattleScripting.animArg1 = gBattleWeatherInfo[currBattleWeather].animation;
+#ifdef NATIVE
+        BattleScriptCall(ModsShowWeatherRecap() ? BattleScript_WeatherContinues : BattleScript_WeatherContinuesSilent);
+        if (tickCaptured) ModsBattleEnvironmentTimerTicked(&before, RHH_BATTLE_ENV_TIMER_WEATHER);
+#else
         BattleScriptCall(BattleScript_WeatherContinues);
+#endif
         return TRUE;
     }
 
@@ -380,8 +398,29 @@ bool32 EndOrContinueWeather(void)
 }
 
 // Gen5+
-static u32 CalcBeatUpPower(void)
+static u32 CalcBeatUpPower(struct DamageContext *ctx)
 {
+#ifdef NATIVE
+    u32 index = gBattleStruct->beatUpSlot;
+    if (!ctx->aiCalc)
+    {
+        ctx->beatUpContributorFlags = 0;
+        if (index < PARTY_SIZE && ctx->updateFlags && ctx->randomFactor
+            && gBattleStruct->beatUpContributorValid && index < gBattleStruct->beatUpContributorCount
+            && gBattleStruct->beatUpContributorBattler == ctx->battlerAtk
+            && ctx->battlerAtk == gBattlerAttacker && ctx->move == gCurrentMove
+            && gBattleStruct->beatUpPartySlots[index] < PARTY_SIZE)
+        {
+            ctx->beatUpContributorSpecies = gBattleStruct->beatUpSpecies[index];
+            ctx->beatUpContributorIndex = index;
+            ctx->beatUpContributorSlot = gBattleStruct->beatUpPartySlots[index];
+            ctx->beatUpContributorFlags = BEAT_UP_CONTRIBUTOR_VALID | BEAT_UP_CONTRIBUTOR_SLOT_KNOWN;
+        }
+    }
+    if (index >= PARTY_SIZE) return 0;
+#else
+    (void)ctx;
+#endif
     enum Species species = gBattleStruct->beatUpSpecies[gBattleStruct->beatUpSlot++];
     // FIXME: Why call CalcBeatUpPower when 'beatUpSlot' is OOB?
     if (species == 0xFFFF)
@@ -477,6 +516,9 @@ static bool32 IsUnnerveAbilityOnOpposingSide(enum BattlerId battler)
 // Functions
 void HandleAction_UseMove(void)
 {
+#ifdef NATIVE
+    ModsMoveEffectReset();
+#endif
     gBattlerAttacker = gBattlerByTurnOrder[gCurrentTurnActionNumber];
     if (!IsBattlerAlive(gBattlerAttacker)
      || gBattleStruct->battlerState[gBattlerAttacker].commandingDondozo)
@@ -549,7 +591,20 @@ void HandleAction_UseMove(void)
     // check Max Move used
     else if (GetActiveGimmick(gBattlerAttacker) == GIMMICK_DYNAMAX)
     {
+#ifdef NATIVE
+        /* Custom types have no dedicated Max Move yet. Preserve the chosen
+         * move's type when the engine falls back to Max Strike, so damage,
+         * STAB and type interactions still use the resolved custom chart. */
+        enum Type baseType = GetBattleMoveType(gCurrentMove);
+        bool32 customMax = GetMoveCategory(gCurrentMove) != DAMAGE_CATEGORY_STATUS
+            && !(gBattleTypeFlags & (BATTLE_TYPE_LINK | BATTLE_TYPE_RECORDED | BATTLE_TYPE_RECORDED_LINK))
+            && RhhModsCustomTypeKey(baseType);
+#endif
         gCurrentMove = gChosenMove = GetMaxMove(gBattlerAttacker, gCurrentMove);
+#ifdef NATIVE
+        if (customMax && gCurrentMove == MOVE_MAX_STRIKE)
+            gBattleStruct->dynamicMoveType = baseType;
+#endif
     }
 
     gBattleStruct->eventState.atkCanceler = 0;
@@ -1107,6 +1162,14 @@ enum BattlerId GetBattlerForBattleScript(u8 caseId)
     case BS_SCRIPTING:
         ret = gBattleScripting.battler;
         break;
+#ifdef NATIVE
+    case BS_MOD_INNATE_SOURCE:
+        ret = ModsInnateStatSource();
+        break;
+    case BS_MOD_EFFECT_RECIPIENT:
+        ret = ModsMoveEffectRecipient();
+        break;
+#endif
     case BS_FAINTED:
         ret = gBattlerFainted;
         break;
@@ -1610,6 +1673,17 @@ u32 TrySetCantSelectMoveBattleScript(enum BattlerId battler)
         }
     }
 
+#ifdef NATIVE
+    if (!limitations && !(gBattleTypeFlags & BATTLE_TYPE_PALACE && gProtectStructs[battler].palaceUnableToUseMove)
+        && !ModsPrepareMoveSelection(battler, moveId))
+    {
+        bool32 customMessage = ModsMoveSelectionMessage(battler) != NULL;
+        if (SetCantSelectScript(battler, move,
+                                customMessage ? BattleScript_ModSelectionDeniedInPalace : BattleScript_SelectingCantUseMoveInPalace,
+                                customMessage ? BattleScript_ModSelectionDenied : BattleScript_SelectingCantUseMove))
+            limitations++;
+    }
+#endif
     return limitations;
 }
 
@@ -1709,6 +1783,10 @@ u32 CheckMoveLimitations(enum BattlerId battler, u8 unusableMoves, u32 check)
                     break;
             }
         }
+#ifdef NATIVE
+        if ((check & MOVE_LIMITATION_MOD_SELECTION) && !(unusableMoves & (1u << i))
+            && !ModsCanSelectMove(battler, i)) unusableMoves |= 1u << i;
+#endif
     }
     return unusableMoves;
 }
@@ -1793,7 +1871,12 @@ void TryToRevertMimicryAndFlags(void)
         gBattleMons[battler].volatiles.terrainAbilityDone = FALSE;
         ResetParadoxTerrainStat(battler);
         if (IsAbilityAndRecord(battler, GetBattlerAbility(battler), ABILITY_MIMICRY))
+        {
             RESTORE_BATTLER_TYPE(battler);
+#ifdef NATIVE
+            ModsBattleMonSpeciesTypes(&gBattleMons[battler]);
+#endif
+        }
     }
 }
 
@@ -2058,7 +2141,7 @@ static bool32 TryChangeWeatherWithAbility(enum BattlerId battler, u32 battleWeat
     return FALSE;
 }
 
-enum WeatherFailure TryChangeBattleWeather(enum BattlerId battler, u32 battleWeatherId, enum Ability ability)
+static enum WeatherFailure TryChangeBattleWeatherInternal(enum BattlerId battler, u32 battleWeatherId, enum Ability ability, enum Move sourceMove, u64 innateAbility)
 {
     if (gBattleWeather & gBattleWeatherInfo[battleWeatherId].flag)
         return WEATHER_FAILURE_SAME_WEATHER;
@@ -2074,7 +2157,13 @@ enum WeatherFailure TryChangeBattleWeather(enum BattlerId battler, u32 battleWea
         return WEATHER_FAILURE_PRIMAL;
     }
 
-    if (GetConfig(B_ABILITY_WEATHER) < GEN_6 && ability != ABILITY_NONE)
+#ifdef NATIVE
+    struct RhhBattleEnvironmentState before;
+    bool32 captured = ModsBattleEnvironmentCapture(&before);
+#else
+    (void)sourceMove;
+#endif
+    if (GetConfig(B_ABILITY_WEATHER) < GEN_6 && (ability != ABILITY_NONE || innateAbility))
     {
         gBattleWeather = gBattleWeatherInfo[battleWeatherId].flag;
     }
@@ -2099,6 +2188,7 @@ enum WeatherFailure TryChangeBattleWeather(enum BattlerId battler, u32 battleWea
     else // Weather started by Move
     {
         gBattleCommunication[MULTISTRING_CHOOSER] = gBattleWeatherInfo[battleWeatherId].moveStartMessage;
+        if (innateAbility) gBattleScripting.animArg1 = gBattleWeatherInfo[battleWeatherId].animation;
     }
 
     for (enum BattlerId i = 0; i < gBattlersCount; i++)
@@ -2107,10 +2197,27 @@ enum WeatherFailure TryChangeBattleWeather(enum BattlerId battler, u32 battleWea
         ResetParadoxWeatherStat(i);
     }
 
+#ifdef NATIVE
+    if (captured) {
+        if (innateAbility) ModsBattleEnvironmentCommittedInnate(&before, battler, innateAbility);
+        else ModsBattleEnvironmentCommitted(&before, ability != ABILITY_NONE ? RHH_BATTLE_ENV_CAUSE_ABILITY
+            : sourceMove != MOVE_NONE ? RHH_BATTLE_ENV_CAUSE_MOVE : RHH_BATTLE_ENV_CAUSE_UNKNOWN, battler, sourceMove, ability);
+    }
+#endif
     return WEATHER_FAILURE_SUCCESS;
 }
 
-bool32 TryChangeBattleTerrain(enum BattlerId battler, enum BattleTerrain terrain)
+enum WeatherFailure TryChangeBattleWeather(enum BattlerId battler, u32 battleWeatherId, enum Ability ability)
+{ return TryChangeBattleWeatherInternal(battler, battleWeatherId, ability, MOVE_NONE, 0); }
+
+enum WeatherFailure TryChangeBattleWeatherFromMove(enum BattlerId battler, u32 battleWeatherId, enum Move move)
+{ return TryChangeBattleWeatherInternal(battler, battleWeatherId, ABILITY_NONE, move, 0); }
+#ifdef NATIVE
+enum WeatherFailure TryChangeBattleWeatherFromInnate(enum BattlerId battler, u32 battleWeatherId, u64 ability)
+{ return TryChangeBattleWeatherInternal(battler, battleWeatherId, ABILITY_NONE, MOVE_NONE, ability); }
+#endif
+
+static bool32 TryChangeBattleTerrainInternal(enum BattlerId battler, enum BattleTerrain terrain, enum Ability sourceAbility, enum Move sourceMove, u64 innateAbility)
 {
     if (terrain == B_TERRAIN_NONE || terrain == gFieldTimers.terrain)
         return FALSE;
@@ -2120,6 +2227,12 @@ bool32 TryChangeBattleTerrain(enum BattlerId battler, enum BattleTerrain terrain
 
     if (gFieldTimers.terrain != terrain)
     {
+#ifdef NATIVE
+        struct RhhBattleEnvironmentState before;
+        bool32 captured = ModsBattleEnvironmentCapture(&before);
+#else
+        (void)sourceAbility; (void)sourceMove; (void)innateAbility;
+#endif
         gFieldTimers.terrain = terrain;
         gBattleCommunication[MULTISTRING_CHOOSER] = gBattleTerrainInfo[terrain].startMessage;
 
@@ -2133,11 +2246,31 @@ bool32 TryChangeBattleTerrain(enum BattlerId battler, enum BattleTerrain terrain
         else
             gFieldTimers.terrainTimer = 5;
         gBattleScripting.battler = battler;
+#ifdef NATIVE
+        if (captured) {
+            if (innateAbility) ModsBattleEnvironmentCommittedInnate(&before, battler, innateAbility);
+            else ModsBattleEnvironmentCommitted(&before, sourceAbility != ABILITY_NONE ? RHH_BATTLE_ENV_CAUSE_ABILITY
+                : sourceMove != MOVE_NONE ? RHH_BATTLE_ENV_CAUSE_MOVE : RHH_BATTLE_ENV_CAUSE_UNKNOWN, battler, sourceMove, sourceAbility);
+        }
+#endif
         return TRUE;
     }
 
     return FALSE;
 }
+
+bool32 TryChangeBattleTerrain(enum BattlerId battler, enum BattleTerrain terrain)
+{ return TryChangeBattleTerrainInternal(battler, terrain, ABILITY_NONE, MOVE_NONE, 0); }
+
+bool32 TryChangeBattleTerrainFromAbility(enum BattlerId battler, enum BattleTerrain terrain, enum Ability ability)
+{ return TryChangeBattleTerrainInternal(battler, terrain, ability, MOVE_NONE, 0); }
+
+bool32 TryChangeBattleTerrainFromMove(enum BattlerId battler, enum BattleTerrain terrain, enum Move move)
+{ return TryChangeBattleTerrainInternal(battler, terrain, ABILITY_NONE, move, 0); }
+#ifdef NATIVE
+bool32 TryChangeBattleTerrainFromInnate(enum BattlerId battler, enum BattleTerrain terrain, u64 ability)
+{ return TryChangeBattleTerrainInternal(battler, terrain, ABILITY_NONE, MOVE_NONE, ability); }
+#endif
 
 static void ForewarnChooseMove(enum BattlerId battler)
 {
@@ -2454,17 +2587,27 @@ static u32 GetFirstBattlerOnSide(enum BattleSide side)
     return GetBattlerAtPosition(side == B_SIDE_PLAYER ? B_POSITION_PLAYER_LEFT : B_POSITION_OPPONENT_LEFT);
 }
 
-static inline bool32 SetStartingFieldTerrain(enum BattleTerrain terrain, u8 *timer, u16 time)
+static inline bool32 SetStartingFieldTerrain(enum BattleTerrain terrain, u8 *timer, u16 time, bool32 worldSeed)
 {
     if (gFieldTimers.terrain != terrain)
     {
+#ifdef NATIVE
+        struct RhhBattleEnvironmentState before;
+        bool32 captured = ModsBattleEnvironmentCapture(&before);
+#else
+        (void)worldSeed;
+#endif
         gBattleCommunication[MULTISTRING_CHOOSER] = gBattleTerrainInfo[terrain].startMessage;
         gFieldTimers.terrain = terrain;
         gBattleScripting.animArg1 = 0;
         *timer = time;
 
         BattleScriptPushCursorAndCallback(BattleScript_OverworldTerrain);
-
+#ifdef NATIVE
+        if (captured) ModsBattleEnvironmentCommitted(&before,
+            worldSeed ? RHH_BATTLE_ENV_CAUSE_WORLD_SEED : RHH_BATTLE_ENV_CAUSE_STARTING_STATUS,
+            RHH_BATTLE_NO_BATTLER, MOVE_NONE, ABILITY_NONE);
+#endif
         return TRUE;
     }
 
@@ -2475,12 +2618,20 @@ static inline bool32 SetStartingFieldStatus(u32 flag, u32 message, u32 anim, u8 
 {
     if (!(gFieldStatuses & flag))
     {
+#ifdef NATIVE
+        struct RhhBattleFieldRules before;
+        bool32 captured = ModsBattleFieldRulesCapture(&before);
+#endif
         gBattleCommunication[MULTISTRING_CHOOSER] = message;
         gFieldStatuses |= flag;
         gBattleScripting.animArg1 = anim;
         *timer = time;
 
         BattleScriptPushCursorAndCallback(BattleScript_OverworldStatusStarts);
+
+#ifdef NATIVE
+        if (captured) ModsBattleFieldRulesCommitted(&before, RHH_BATTLE_FIELD_CAUSE_STARTING, RHH_BATTLE_NO_BATTLER, MOVE_NONE);
+#endif
 
         return TRUE;
     }
@@ -2570,11 +2721,17 @@ static bool32 SetStartingHazardStatus(enum Hazards hazard, u32 targetSide, u8 la
     return effect;
 }
 
-static bool32 SetStartingWeatherStatus(enum BattleWeather weather, bool32 isPermanent)
+static bool32 SetStartingWeatherStatus(enum BattleWeather weather, bool32 isPermanent, bool32 worldSeed)
 {
     if (gBattleWeather & gBattleWeatherInfo[weather].flag)
         return FALSE;
 
+#ifdef NATIVE
+    struct RhhBattleEnvironmentState before;
+    bool32 captured = ModsBattleEnvironmentCapture(&before);
+#else
+    (void)worldSeed;
+#endif
     gBattleWeather = gBattleWeatherInfo[weather].flag;
     gBattleCommunication[MULTISTRING_CHOOSER] = gBattleWeatherInfo[weather].moveStartMessage;
     gBattleScripting.animArg1 = gBattleWeatherInfo[weather].animation;
@@ -2587,8 +2744,32 @@ static bool32 SetStartingWeatherStatus(enum BattleWeather weather, bool32 isPerm
         gBattleStruct->weatherDuration = 5;
 
     BattleScriptPushCursorAndCallback(BattleScript_OverworldSSWeatherStarts);
+#ifdef NATIVE
+    if (captured) ModsBattleEnvironmentCommitted(&before,
+        worldSeed ? RHH_BATTLE_ENV_CAUSE_WORLD_SEED : RHH_BATTLE_ENV_CAUSE_STARTING_STATUS,
+        RHH_BATTLE_NO_BATTLER, MOVE_NONE, ABILITY_NONE);
+#endif
     return TRUE;
 }
+
+#ifdef NATIVE
+static bool32 HasExplicitStartingWeather(void)
+{
+    return gStartingStatuses.weatherSun || gStartingStatuses.weatherSunTemporary
+        || gStartingStatuses.weatherRain || gStartingStatuses.weatherRainTemporary
+        || gStartingStatuses.weatherSandstorm || gStartingStatuses.weatherSandstormTemporary
+        || gStartingStatuses.weatherHail || gStartingStatuses.weatherHailTemporary
+        || gStartingStatuses.weatherSnow || gStartingStatuses.weatherSnowTemporary
+        || gStartingStatuses.weatherFog || gStartingStatuses.weatherFogTemporary;
+}
+static bool32 HasExplicitStartingTerrain(void)
+{
+    return gStartingStatuses.grassyTerrain || gStartingStatuses.grassyTerrainTemporary
+        || gStartingStatuses.mistyTerrain || gStartingStatuses.mistyTerrainTemporary
+        || gStartingStatuses.electricTerrain || gStartingStatuses.electricTerrainTemporary
+        || gStartingStatuses.psychicTerrain || gStartingStatuses.psychicTerrainTemporary;
+}
+#endif
 
 bool32 TryFieldEffects(enum FieldEffectCases caseId)
 {
@@ -2603,28 +2784,28 @@ bool32 TryFieldEffects(enum FieldEffectCases caseId)
         if (gStartingStatuses.electricTerrain || gStartingStatuses.electricTerrainTemporary)
         {
             effect = SetStartingFieldTerrain(B_TERRAIN_ELECTRIC, &gFieldTimers.terrainTimer,
-                gStartingStatuses.electricTerrain ? 0 : 5);
+                gStartingStatuses.electricTerrain ? 0 : 5, FALSE);
             gStartingStatuses.electricTerrainTemporary = gStartingStatuses.electricTerrain = FALSE;
             return effect;
         }
         else if (gStartingStatuses.mistyTerrain || gStartingStatuses.mistyTerrainTemporary)
         {
             effect = SetStartingFieldTerrain(B_TERRAIN_MISTY, &gFieldTimers.terrainTimer,
-                gStartingStatuses.mistyTerrain ? 0 : 5);
+                gStartingStatuses.mistyTerrain ? 0 : 5, FALSE);
             gStartingStatuses.mistyTerrainTemporary = gStartingStatuses.mistyTerrain = FALSE;
             return effect;
         }
         else if (gStartingStatuses.grassyTerrain || gStartingStatuses.grassyTerrainTemporary)
         {
             effect = SetStartingFieldTerrain(B_TERRAIN_GRASSY, &gFieldTimers.terrainTimer,
-                gStartingStatuses.grassyTerrain ? 0 : 5);
+                gStartingStatuses.grassyTerrain ? 0 : 5, FALSE);
             gStartingStatuses.grassyTerrainTemporary = gStartingStatuses.grassyTerrain = FALSE;
             return effect;
         }
         else if (gStartingStatuses.psychicTerrain || gStartingStatuses.psychicTerrainTemporary)
         {
             effect = SetStartingFieldTerrain(B_TERRAIN_PSYCHIC, &gFieldTimers.terrainTimer,
-                gStartingStatuses.psychicTerrain ? 0 : 5);
+                gStartingStatuses.psychicTerrain ? 0 : 5, FALSE);
             gStartingStatuses.psychicTerrainTemporary = gStartingStatuses.psychicTerrain = FALSE;
             return effect;
         }
@@ -2851,42 +3032,60 @@ bool32 TryFieldEffects(enum FieldEffectCases caseId)
         }
         else if (gStartingStatuses.weatherSun || gStartingStatuses.weatherSunTemporary)
         {
-            effect = SetStartingWeatherStatus(BATTLE_WEATHER_SUN, gStartingStatuses.weatherSun);
+            effect = SetStartingWeatherStatus(BATTLE_WEATHER_SUN, gStartingStatuses.weatherSun, FALSE);
             gStartingStatuses.weatherSun = gStartingStatuses.weatherSunTemporary = FALSE;
             return effect;
         }
         else if (gStartingStatuses.weatherRain || gStartingStatuses.weatherRainTemporary)
         {
-            effect = SetStartingWeatherStatus(BATTLE_WEATHER_RAIN, gStartingStatuses.weatherRain);
+            effect = SetStartingWeatherStatus(BATTLE_WEATHER_RAIN, gStartingStatuses.weatherRain, FALSE);
             gStartingStatuses.weatherRain = gStartingStatuses.weatherRainTemporary = FALSE;
             return effect;
         }
         else if (gStartingStatuses.weatherSandstorm || gStartingStatuses.weatherSandstormTemporary)
         {
-            effect = SetStartingWeatherStatus(BATTLE_WEATHER_SANDSTORM, gStartingStatuses.weatherSandstorm);
+            effect = SetStartingWeatherStatus(BATTLE_WEATHER_SANDSTORM, gStartingStatuses.weatherSandstorm, FALSE);
             gStartingStatuses.weatherSandstorm = gStartingStatuses.weatherSandstormTemporary = FALSE;
             return effect;
         }
         else if (gStartingStatuses.weatherHail || gStartingStatuses.weatherHailTemporary)
         {
-            effect = SetStartingWeatherStatus(BATTLE_WEATHER_HAIL, gStartingStatuses.weatherHail);
+            effect = SetStartingWeatherStatus(BATTLE_WEATHER_HAIL, gStartingStatuses.weatherHail, FALSE);
             gStartingStatuses.weatherHail = gStartingStatuses.weatherHailTemporary = FALSE;
             return effect;
         }
         else if (gStartingStatuses.weatherSnow || gStartingStatuses.weatherSnowTemporary)
         {
-            effect = SetStartingWeatherStatus(BATTLE_WEATHER_SNOW, gStartingStatuses.weatherSnow);
+            effect = SetStartingWeatherStatus(BATTLE_WEATHER_SNOW, gStartingStatuses.weatherSnow, FALSE);
             gStartingStatuses.weatherSnow = gStartingStatuses.weatherSnowTemporary = FALSE;
             return effect;
         }
         else if (gStartingStatuses.weatherFog || gStartingStatuses.weatherFogTemporary)
         {
-            effect = SetStartingWeatherStatus(BATTLE_WEATHER_FOG, gStartingStatuses.weatherFog);
+            effect = SetStartingWeatherStatus(BATTLE_WEATHER_FOG, gStartingStatuses.weatherFog, FALSE);
             gStartingStatuses.weatherFog = gStartingStatuses.weatherFogTemporary = FALSE;
             return effect;
         }
         break;
     case FIELD_EFFECT_OVERWORLD_TERRAIN:   // terrain starting from overworld weather
+    {
+#ifdef NATIVE
+        struct RhhBattleEnvironmentState before;
+        bool32 captured = ModsBattleEnvironmentCapture(&before);
+        if (gFieldTimers.terrain == B_TERRAIN_NONE && !HasExplicitStartingTerrain()
+            && !(gBattleTypeFlags & (BATTLE_TYPE_RECORDED | BATTLE_TYPE_LINK)))
+        {
+            enum BattleTerrain terrain = B_TERRAIN_NONE;
+            switch (ModsWorldBattleTerrain())
+            {
+            case RHH_TERRAIN_GRASSY: terrain = B_TERRAIN_GRASSY; break;
+            case RHH_TERRAIN_MISTY: terrain = B_TERRAIN_MISTY; break;
+            case RHH_TERRAIN_ELECTRIC: terrain = B_TERRAIN_ELECTRIC; break;
+            case RHH_TERRAIN_PSYCHIC: terrain = B_TERRAIN_PSYCHIC; break;
+            }
+            if (terrain != B_TERRAIN_NONE) return SetStartingFieldTerrain(terrain, &gFieldTimers.terrainTimer, 0, TRUE);
+        }
+#endif
         if (B_THUNDERSTORM_TERRAIN == TRUE
          && gFieldTimers.terrain != B_TERRAIN_ELECTRIC
          && GetCurrentWeather() == WEATHER_RAIN_THUNDERSTORM)
@@ -2908,8 +3107,36 @@ bool32 TryFieldEffects(enum FieldEffectCases caseId)
             BattleScriptPushCursorAndCallback(BattleScript_OverworldTerrain);
             effect = TRUE;
         }
+#ifdef NATIVE
+        if (effect && captured) ModsBattleEnvironmentCommitted(&before, RHH_BATTLE_ENV_CAUSE_NATURAL_WEATHER,
+            RHH_BATTLE_NO_BATTLER, MOVE_NONE, ABILITY_NONE);
+#endif
         break;
+    }
     case FIELD_EFFECT_OVERWORLD_WEATHER:
+    {
+#ifdef NATIVE
+        struct RhhBattleEnvironmentState before;
+        bool32 captured = ModsBattleEnvironmentCapture(&before);
+        if (!gBattleWeather && !HasExplicitStartingWeather()
+            && !(gBattleTypeFlags & (BATTLE_TYPE_RECORDED | BATTLE_TYPE_LINK)))
+        {
+            enum BattleWeather weather = BATTLE_WEATHER_NONE;
+            switch (ModsWorldBattleWeather())
+            {
+            case RHH_WEATHER_RAIN: weather = BATTLE_WEATHER_RAIN; break;
+            case RHH_WEATHER_SUN: weather = BATTLE_WEATHER_SUN; break;
+            case RHH_WEATHER_SAND: weather = BATTLE_WEATHER_SANDSTORM; break;
+            case RHH_WEATHER_HAIL: weather = BATTLE_WEATHER_HAIL; break;
+            case RHH_WEATHER_SNOW: weather = BATTLE_WEATHER_SNOW; break;
+            case RHH_WEATHER_FOG: weather = BATTLE_WEATHER_FOG; break;
+            case RHH_WEATHER_WIND: weather = BATTLE_WEATHER_STRONG_WINDS; break;
+            case RHH_WEATHER_HARSH_SUN: weather = BATTLE_WEATHER_SUN_PRIMAL; break;
+            case RHH_WEATHER_HEAVY_RAIN: weather = BATTLE_WEATHER_RAIN_PRIMAL; break;
+            }
+            if (weather != BATTLE_WEATHER_NONE) return SetStartingWeatherStatus(weather, TRUE, TRUE);
+        }
+#endif
         if (!(gBattleTypeFlags & BATTLE_TYPE_RECORDED))
         {
             switch (GetCurrentWeather())
@@ -2967,14 +3194,21 @@ bool32 TryFieldEffects(enum FieldEffectCases caseId)
                 break;
             }
         }
+#ifdef NATIVE
+#endif
         if (effect)
         {
             if (GetConfig(B_OVERWORLD_WEATHER_OVERRIDE) >= GEN_9)
                 gBattleStruct->overworldWeatherPresent = TRUE;
             gBattleCommunication[MULTISTRING_CHOOSER] = GetCurrentWeather();
             BattleScriptPushCursorAndCallback(BattleScript_OverworldWeatherStarts);
+#ifdef NATIVE
+            if (captured) ModsBattleEnvironmentCommitted(&before, RHH_BATTLE_ENV_CAUSE_NATURAL_WEATHER,
+                RHH_BATTLE_NO_BATTLER, MOVE_NONE, ABILITY_NONE);
+#endif
         }
         break;
+    }
     }
 
     return effect;
@@ -3364,7 +3598,7 @@ u32 AbilityBattleEffects(enum AbilityEffect caseID, enum BattlerId battler, enum
         case ABILITY_ELECTRIC_SURGE:
             if (!shouldAbilityTrigger)
                 break;
-            if (TryChangeBattleTerrain(battler, B_TERRAIN_ELECTRIC))
+            if (TryChangeBattleTerrainFromAbility(battler, B_TERRAIN_ELECTRIC, gLastUsedAbility))
             {
                 BattleScriptCall(BattleScript_ElectricSurgeActivates);
                 effect++;
@@ -3378,7 +3612,7 @@ u32 AbilityBattleEffects(enum AbilityEffect caseID, enum BattlerId battler, enum
                 BattleScriptCall(BattleScript_HadronEngineActivatesInTerrain);
                 effect++;
             }
-            else if (TryChangeBattleTerrain(battler, B_TERRAIN_ELECTRIC))
+            else if (TryChangeBattleTerrainFromAbility(battler, B_TERRAIN_ELECTRIC, gLastUsedAbility))
             {
                 BattleScriptCall(BattleScript_HadronEngineActivates);
                 effect++;
@@ -3387,7 +3621,7 @@ u32 AbilityBattleEffects(enum AbilityEffect caseID, enum BattlerId battler, enum
         case ABILITY_GRASSY_SURGE:
             if (!shouldAbilityTrigger)
                 break;
-            if (TryChangeBattleTerrain(battler, B_TERRAIN_GRASSY))
+            if (TryChangeBattleTerrainFromAbility(battler, B_TERRAIN_GRASSY, gLastUsedAbility))
             {
                 BattleScriptCall(BattleScript_GrassySurgeActivates);
                 effect++;
@@ -3396,7 +3630,7 @@ u32 AbilityBattleEffects(enum AbilityEffect caseID, enum BattlerId battler, enum
         case ABILITY_MISTY_SURGE:
             if (!shouldAbilityTrigger)
                 break;
-            if (TryChangeBattleTerrain(battler, B_TERRAIN_MISTY))
+            if (TryChangeBattleTerrainFromAbility(battler, B_TERRAIN_MISTY, gLastUsedAbility))
             {
                 BattleScriptCall(BattleScript_MistySurgeActivates);
                 effect++;
@@ -3405,7 +3639,7 @@ u32 AbilityBattleEffects(enum AbilityEffect caseID, enum BattlerId battler, enum
         case ABILITY_PSYCHIC_SURGE:
             if (!shouldAbilityTrigger)
                 break;
-            if (TryChangeBattleTerrain(battler, B_TERRAIN_PSYCHIC))
+            if (TryChangeBattleTerrainFromAbility(battler, B_TERRAIN_PSYCHIC, gLastUsedAbility))
             {
                 BattleScriptCall(BattleScript_PsychicSurgeActivates);
                 effect++;
@@ -3665,7 +3899,14 @@ u32 AbilityBattleEffects(enum AbilityEffect caseID, enum BattlerId battler, enum
                 if ((gBattleMons[battler].status1 & STATUS1_ANY)
                  && (GetConfig(B_ABILITY_TRIGGER_CHANCE) == GEN_4 ? RandomPercentage(RNG_SHED_SKIN, 30) : RandomChance(RNG_SHED_SKIN, 1, 3)))
                 {
-                ABILITY_HEAL_MON_STATUS:
+                ABILITY_HEAL_MON_STATUS: ;
+#ifdef NATIVE
+                    u32 beforeCure = gBattleMons[battler].status1;
+                    u32 curingAbility = gLastUsedAbility;
+                    struct BattleScriptsStack *cureStack = gBattleResources ? gBattleResources->battleScriptsStack : NULL;
+                    u32 cureStackSize = cureStack ? cureStack->size : 0;
+                    const u8 *cureResume = gBattlescriptCurrInstr;
+#endif
                     if (gBattleMons[battler].status1 & (STATUS1_POISON | STATUS1_TOXIC_POISON))
                         gBattleCommunication[MULTISTRING_CHOOSER] = B_MSG_CURED_POISON;
                     if (gBattleMons[battler].status1 & STATUS1_SLEEP)
@@ -3688,6 +3929,12 @@ u32 AbilityBattleEffects(enum AbilityEffect caseID, enum BattlerId battler, enum
                     BattleScriptCall(BattleScript_ShedSkinActivates);
                     BtlController_EmitSetMonData(battler, B_COMM_TO_CONTROLLER, REQUEST_STATUS_BATTLE, 0, 4, &gBattleMons[battler].status1);
                     MarkBattlerForControllerExec(battler);
+#ifdef NATIVE
+                    bool32 curePresentation = cureStack && gBattleResources && gBattleResources->battleScriptsStack == cureStack
+                        && cureStackSize < ARRAY_COUNT(cureStack->ptr) && cureStack->size == cureStackSize + 1
+                        && cureStack->ptr[cureStackSize] == cureResume;
+                    ModsBattleAbilityStatusCured(battler, curingAbility, beforeCure, RHH_BATTLE_CURE_END_TURN_ABILITY, curePresentation);
+#endif
                     effect++;
                 }
                 break;
@@ -3959,11 +4206,20 @@ u32 AbilityBattleEffects(enum AbilityEffect caseID, enum BattlerId battler, enum
                     break;
                 }
 
+#ifdef NATIVE
+                struct ModsAbilityChangeCapture change;
+                u32 triggeringAbility = gLastUsedAbility;
+                ModsAbilityChangeCapture(gBattlerAttacker, &change);
+#endif
                 RemoveAbilityFlags(gBattlerAttacker);
                 gLastUsedAbility = gBattleMons[gBattlerAttacker].ability;
                 gBattleMons[gBattlerAttacker].ability = gBattleMons[gBattlerAttacker].volatiles.overwrittenAbility = gBattleMons[gBattlerTarget].ability;
                 BattleScriptCall(BattleScript_MummyActivates);
                 effect++;
+#ifdef NATIVE
+                ModsAbilityContactChangesCommitted(&change, 1, RHH_ABILITY_MUTATION_CONTACT_COPY,
+                                                   gBattlerTarget, move, triggeringAbility);
+#endif
                 break;
             }
             break;
@@ -3985,12 +4241,22 @@ u32 AbilityBattleEffects(enum AbilityEffect caseID, enum BattlerId battler, enum
                     break;
                 }
 
+#ifdef NATIVE
+                struct ModsAbilityChangeCapture changes[2];
+                u32 triggeringAbility = gLastUsedAbility;
+                ModsAbilityChangeCapture(gBattlerAttacker, &changes[0]);
+                ModsAbilityChangeCapture(gBattlerTarget, &changes[1]);
+#endif
                 RemoveAbilityFlags(gBattlerAttacker);
                 gLastUsedAbility = gBattleMons[gBattlerAttacker].ability;
                 gBattleMons[gBattlerAttacker].ability = gBattleMons[gBattlerAttacker].volatiles.overwrittenAbility = gBattleMons[gBattlerTarget].ability;
                 gBattleMons[gBattlerTarget].ability = gBattleMons[gBattlerTarget].volatiles.overwrittenAbility = gLastUsedAbility;
                 BattleScriptCall(BattleScript_WanderingSpiritActivates);
                 effect++;
+#ifdef NATIVE
+                ModsAbilityContactChangesCommitted(changes, 2, RHH_ABILITY_MUTATION_CONTACT_SWAP,
+                                                   gBattlerTarget, move, triggeringAbility);
+#endif
                 break;
             }
             break;
@@ -4288,7 +4554,7 @@ u32 AbilityBattleEffects(enum AbilityEffect caseID, enum BattlerId battler, enum
             break;
         case ABILITY_SEED_SOWER:
             if (IsBattlerTurnDamaged(gBattlerTarget, EXCLUDING_SUBSTITUTES)
-             && TryChangeBattleTerrain(gBattlerTarget, B_TERRAIN_GRASSY))
+             && TryChangeBattleTerrainFromAbility(gBattlerTarget, B_TERRAIN_GRASSY, gLastUsedAbility))
             {
                 BattleScriptCall(BattleScript_SeedSowerActivates);
                 effect++;
@@ -4657,6 +4923,10 @@ u32 AbilityBattleEffects(enum AbilityEffect caseID, enum BattlerId battler, enum
     case ABILITYEFFECT_NEUTRALIZINGGAS:
         if (ability == ABILITY_NEUTRALIZING_GAS && !gBattleMons[battler].volatiles.neutralizingGas)
         {
+#ifdef NATIVE
+            struct ModsGasChangeCapture gasChange;
+            ModsGasChangeCapture(&gasChange);
+#endif
             for (enum BattlerId battlerDef = B_BATTLER_0; battlerDef < gBattlersCount; battlerDef++)
             {
                 if (battler == battlerDef || GetBattlerHoldEffectIgnoreAbility(battlerDef) == HOLD_EFFECT_ABILITY_SHIELD)
@@ -4669,6 +4939,9 @@ u32 AbilityBattleEffects(enum AbilityEffect caseID, enum BattlerId battler, enum
             gBattleCommunication[MULTISTRING_CHOOSER] = B_MSG_SWITCHIN_NEUTRALIZING_GAS;
             BattleScriptCall(BattleScript_SwitchInAbilityMsg);
             effect++;
+#ifdef NATIVE
+            ModsGasChangeCommitted(&gasChange, RHH_GAS_ACTIVATED, battler, 0);
+#endif
         }
         break;
     case ABILITYEFFECT_UNNERVE:
@@ -4920,9 +5193,13 @@ enum Ability GetBattlerAbility(enum BattlerId battler)
     return GetBattlerAbilityInternal(battler, FALSE, FALSE);
 }
 
-enum Ability GetBattlerAbilityInternal(enum BattlerId battler, bool32 ignoreMoldBreaker, bool32 noAbilityShield)
+static enum HoldEffect GetBattlerHoldEffectInternalReadOnly(enum BattlerId battler, enum Ability ability);
+
+static enum Ability BattlerAbilityInternal(enum BattlerId battler, bool32 ignoreMoldBreaker, bool32 noAbilityShield, bool32 readOnly)
 {
-    bool32 hasAbilityShield = !noAbilityShield && GetBattlerHoldEffectIgnoreAbility(battler) == HOLD_EFFECT_ABILITY_SHIELD;
+    bool32 hasAbilityShield = !noAbilityShield && (readOnly
+        ? GetBattlerHoldEffectInternalReadOnly(battler, ABILITY_NONE)
+        : GetBattlerHoldEffectIgnoreAbility(battler)) == HOLD_EFFECT_ABILITY_SHIELD;
     bool32 abilityCantBeSuppressed = gAbilitiesInfo[gBattleMons[battler].ability].cantBeSuppressed;
 
     if (gBattleStruct->battlerState[battler].notOnField || gSpecialStatuses[battler].attackerInParty)
@@ -4954,6 +5231,16 @@ enum Ability GetBattlerAbilityInternal(enum BattlerId battler, bool32 ignoreMold
         return ABILITY_NONE;
 
     return gBattleMons[battler].ability;
+}
+
+enum Ability GetBattlerAbilityInternal(enum BattlerId battler, bool32 ignoreMoldBreaker, bool32 noAbilityShield)
+{
+    return BattlerAbilityInternal(battler, ignoreMoldBreaker, noAbilityShield, FALSE);
+}
+
+enum Ability GetBattlerAbilityReadOnly(enum BattlerId battler, bool32 ignoreMoldBreaker)
+{
+    return BattlerAbilityInternal(battler, ignoreMoldBreaker, FALSE, TRUE);
 }
 
 u32 IsAbilityOnSide(enum BattlerId battler, enum Ability ability)
@@ -5730,7 +6017,7 @@ enum HoldEffect GetBattlerHoldEffectIgnoreAbility(enum BattlerId battler)
     return GetBattlerHoldEffectInternal(battler, ABILITY_NONE);
 }
 
-enum HoldEffect GetBattlerHoldEffectInternal(enum BattlerId battler, enum Ability ability)
+static enum HoldEffect BattlerHoldEffectInternal(enum BattlerId battler, enum Ability ability, bool32 readOnly)
 {
     enum HoldEffect holdEffect;
 
@@ -5750,17 +6037,39 @@ enum HoldEffect GetBattlerHoldEffectInternal(enum BattlerId battler, enum Abilit
 
         if (holdEffect == HOLD_EFFECT_DOUBLE_PRIZE)
         {
-            gPotentialItemEffectBattler = battler;
+            if (!readOnly) gPotentialItemEffectBattler = battler;
             return holdEffect;
         }
         return HOLD_EFFECT_NONE;
     }
 
-    gPotentialItemEffectBattler = battler;
+    if (!readOnly) gPotentialItemEffectBattler = battler;
     if (gBattleMons[battler].item == ITEM_ENIGMA_BERRY_E_READER)
         return gEnigmaBerries[battler].holdEffect;
     else
         return GetItemHoldEffect(gBattleMons[battler].item);
+}
+
+enum HoldEffect GetBattlerHoldEffectInternal(enum BattlerId battler, enum Ability ability)
+{
+    return BattlerHoldEffectInternal(battler, ability, FALSE);
+}
+
+static enum HoldEffect GetBattlerHoldEffectInternalReadOnly(enum BattlerId battler, enum Ability ability)
+{
+    return BattlerHoldEffectInternal(battler, ability, TRUE);
+}
+
+#ifdef NATIVE
+enum HoldEffect GetBattlerHoldEffectReadOnly(enum BattlerId battler, enum Ability ability)
+{
+    return GetBattlerHoldEffectInternalReadOnly(battler, ability);
+}
+#endif
+
+enum HoldEffect GetBattlerHoldEffectIgnoreAbilityReadOnly(enum BattlerId battler)
+{
+    return GetBattlerHoldEffectInternalReadOnly(battler, ABILITY_NONE);
 }
 
 enum HoldEffect GetBattlerHoldEffectIgnoreNegation(enum BattlerId battler)
@@ -5953,7 +6262,8 @@ static bool32 IsBattlerUngroundedByAbilityItemOrEffect(enum BattlerId battler, e
     return FALSE;
 }
 
-static bool32 IsBattlerGroundedInverseCheck(enum BattlerId battler, enum Ability ability, enum HoldEffect holdEffect, enum InverseBattleCheck checkInverse, bool32 isAnticipation)
+static bool32 IsBattlerGroundedWithFlying(enum BattlerId battler, enum Ability ability, enum HoldEffect holdEffect,
+                                         enum InverseBattleCheck checkInverse, bool32 isAnticipation, s32 flying)
 {
     if (holdEffect == HOLD_EFFECT_IRON_BALL)
         return TRUE;
@@ -5965,10 +6275,23 @@ static bool32 IsBattlerGroundedInverseCheck(enum BattlerId battler, enum Ability
         return TRUE;
     if (IsBattlerUngroundedByAbilityItemOrEffect(battler, ability, holdEffect))
         return FALSE;
-    if (IS_BATTLER_OF_TYPE(battler, TYPE_FLYING) && (checkInverse != INVERSE_BATTLE || !FlagGet(B_FLAG_INVERSE_BATTLE)))
+    if (flying < 0) flying = IS_BATTLER_OF_TYPE(battler, TYPE_FLYING);
+    if (flying && (checkInverse != INVERSE_BATTLE || !FlagGet(B_FLAG_INVERSE_BATTLE)))
         return FALSE;
     return TRUE;
 }
+
+static bool32 IsBattlerGroundedInverseCheck(enum BattlerId battler, enum Ability ability, enum HoldEffect holdEffect, enum InverseBattleCheck checkInverse, bool32 isAnticipation)
+{
+    return IsBattlerGroundedWithFlying(battler, ability, holdEffect, checkInverse, isAnticipation, -1);
+}
+
+#ifdef NATIVE
+bool32 IsBattlerGroundedAssumingFlying(enum BattlerId battler, enum Ability ability, enum HoldEffect holdEffect, bool32 flying)
+{
+    return IsBattlerGroundedWithFlying(battler, ability, holdEffect, NOT_INVERSE_BATTLE, FALSE, flying);
+}
+#endif
 
 bool32 IsBattlerGrounded(enum BattlerId battler, enum Ability ability, enum HoldEffect holdEffect)
 {
@@ -6420,7 +6743,7 @@ static inline u32 CalcMoveBasePower(struct DamageContext *ctx)
         break;
     case EFFECT_BEAT_UP:
         if (GetConfig(B_BEAT_UP) >= GEN_5)
-            basePower = CalcBeatUpPower();
+            basePower = CalcBeatUpPower(ctx);
         break;
     case EFFECT_RAGE_FIST:
         basePower += 50 * GetBattlerPartyState(battlerAtk)->timesGotHit;
@@ -7676,8 +7999,15 @@ static inline uq4_12_t GetOtherModifiers(struct DamageContext *ctx)
 
 #undef DAMAGE_ACCUMULATE_MULTIPLIER
 
+static s32 ApplyDamageModifier(uq4_12_t modifier, s32 damage)
+{
+    if (damage <= 0) return 0;
+    u64 scaled = ((u64)modifier * (u32)damage + UQ_4_12_ROUND - 1) >> UQ_4_12_SHIFT;
+    return scaled > INT32_MAX ? INT32_MAX : scaled;
+}
+
 #define DAMAGE_APPLY_MODIFIER(modifier) do {               \
-    dmg = uq4_12_multiply_by_int_half_down(modifier, dmg); \
+    dmg = ApplyDamageModifier(modifier, dmg);              \
 } while (0)
 
 static inline s32 DoMoveDamageCalcVars(struct DamageContext *ctx)
@@ -7686,6 +8016,9 @@ static inline s32 DoMoveDamageCalcVars(struct DamageContext *ctx)
     u32 userFinalAttack;
     u32 targetFinalDefense;
 
+#ifdef NATIVE
+    if (!ctx->aiCalc) ctx->beatUpContributorFlags = 0;
+#endif
     if (ctx->fixedBasePower)
         gBattleMovePower = ctx->fixedBasePower;
     else
@@ -7694,8 +8027,14 @@ static inline s32 DoMoveDamageCalcVars(struct DamageContext *ctx)
     if (gBattleMovePower == 0)
         return 0;
 
+#ifdef NATIVE
+    gBattleMovePower = ModsMovePower(ctx, gBattleMovePower);
+#endif
     userFinalAttack = CalcAttackStat(ctx);
     targetFinalDefense = CalcDefenseStat(ctx);
+#ifdef NATIVE
+    ModsDamageStats(ctx, gBattleMovePower, &userFinalAttack, &targetFinalDefense);
+#endif
 
     dmg = CalculateBaseDamage(gBattleMovePower, userFinalAttack, gBattleMons[ctx->battlerAtk].level, targetFinalDefense);
     DAMAGE_APPLY_MODIFIER(GetTargetDamageModifier(ctx));
@@ -7711,6 +8050,12 @@ static inline s32 DoMoveDamageCalcVars(struct DamageContext *ctx)
     }
     else // Apply rest of modifiers in the ai function
     {
+#ifdef NATIVE
+        // Confusion and disobedience use the unrandomized formula directly;
+        // unlike AI previews, no later post-roll phase will visit this damage.
+        if (ctx->isSelfInflicted && !ctx->aiCalc)
+            dmg = ModsSelfFinalDamage(ctx, dmg);
+#endif
         if (dmg == 0)
             dmg = 1;
         return dmg;
@@ -7725,14 +8070,20 @@ static inline s32 DoMoveDamageCalcVars(struct DamageContext *ctx)
 
 s32 ApplyModifiersAfterDmgRoll(struct DamageContext *ctx, s32 dmg)
 {
-    if (GetActiveGimmick(ctx->battlerAtk) == GIMMICK_TERA)
-        DAMAGE_APPLY_MODIFIER(GetTeraMultiplier(ctx));
-    else
-        DAMAGE_APPLY_MODIFIER(GetSameTypeAttackBonusModifier(ctx));
+    bool32 isTera = GetActiveGimmick(ctx->battlerAtk) == GIMMICK_TERA;
+    uq4_12_t stab = isTera ? GetTeraMultiplier(ctx) : GetSameTypeAttackBonusModifier(ctx);
+#ifdef NATIVE
+    stab = ModsTypeStab(ctx, stab, isTera);
+#endif
+    DAMAGE_APPLY_MODIFIER(stab);
     DAMAGE_APPLY_MODIFIER(ctx->typeEffectivenessModifier);
     DAMAGE_APPLY_MODIFIER(GetBurnOrFrostBiteModifier(ctx));
     DAMAGE_APPLY_MODIFIER(GetMoveAgainstProtectionModifier(ctx));
     DAMAGE_APPLY_MODIFIER(GetOtherModifiers(ctx));
+
+#ifdef NATIVE
+    dmg = ModsFinalDamage(ctx, dmg);
+#endif
 
     return dmg;
 }
@@ -7884,17 +8235,19 @@ static const u32 sGen6CriticalHitOdds[] = {16,  8,  2,  1,   1}; // 1/X
 static const u32 sCriticalHitOdds[]     = {16,  8,  4,  3,   2}; // 1/X, Gens 3,4,5
 static const u32 sGen2CriticalHitOdds[] = {17, 32, 64, 85, 128}; // X/256
 
-u32 GetCriticalHitOdds(u32 critChance)
+u32 GetCriticalHitOddsForGeneration(u32 critChance, u32 generation)
 {
-    if (GetConfig(B_CRIT_CHANCE) >= GEN_7)
+    if (generation >= GEN_7)
         return sGen7CriticalHitOdds[critChance];
-    if (GetConfig(B_CRIT_CHANCE) == GEN_6)
+    if (generation == GEN_6)
         return sGen6CriticalHitOdds[critChance];
-    if (GetConfig(B_CRIT_CHANCE) == GEN_2)
+    if (generation == GEN_2)
         return sGen2CriticalHitOdds[critChance];
 
     return sCriticalHitOdds[critChance];
 }
+u32 GetCriticalHitOdds(u32 critChance)
+{ return GetCriticalHitOddsForGeneration(critChance, GetConfig(B_CRIT_CHANCE)); }
 
 static inline bool32 IsBattlerLeekAffected(enum BattlerId battler, enum HoldEffect holdEffect)
 {
@@ -7972,7 +8325,11 @@ s32 CalcCritChanceStage(struct DamageContext *ctx)
         critChance = CRITICAL_HIT_BLOCKED;
     }
 
+#ifdef NATIVE
+    return ModsMoveCriticalStage(ctx, critChance, GetConfig(B_CRIT_CHANCE));
+#else
     return critChance;
+#endif
 }
 
 // Bulbapedia: https://bulbapedia.bulbagarden.net/wiki/Critical_hit#Generation_I
@@ -7982,6 +8339,8 @@ s32 CalcCritChanceStage(struct DamageContext *ctx)
 // Focus Energy = 4 * (Base Speed / 2)
 s32 CalcCritChanceStageGen1(struct DamageContext *ctx)
 {
+    if (gSideStatuses[GetBattlerSide(ctx->battlerDef)] & SIDE_STATUS_LUCKY_CHANT)
+        return CRITICAL_HIT_BLOCKED;
     s32 critChance = 0;
     s32 moveCritStage = GetMoveCriticalHitStage(ctx->move);
     s32 bonusCritStage = gBattleMons[ctx->battlerAtk].volatiles.bonusCritStages; // G-Max Chi Strike
@@ -8024,7 +8383,11 @@ s32 CalcCritChanceStageGen1(struct DamageContext *ctx)
         critChance = CRITICAL_HIT_ALWAYS;
     }
 
+#ifdef NATIVE
+    return ModsMoveCriticalStage(ctx, critChance, GEN_1);
+#else
     return critChance;
+#endif
 }
 
 static bool32 IsCriticalHit(struct DamageContext *ctx)
@@ -8148,7 +8511,7 @@ s32 CalculateMoveDamageVars(struct DamageContext *ctx)
     return DoMoveDamageCalcVars(ctx);
 }
 
-static inline void MulByTypeEffectiveness(struct DamageContext *ctx, uq4_12_t *modifier, enum Type defType)
+static inline uq4_12_t GetEffectiveTypeFactor(struct DamageContext *ctx, enum Type defType)
 {
     uq4_12_t mod = GetTypeModifier(ctx->moveType, defType);
 
@@ -8197,7 +8560,71 @@ static inline void MulByTypeEffectiveness(struct DamageContext *ctx, uq4_12_t *m
         }
     }
 
-    *modifier = uq4_12_multiply(*modifier, mod);
+    return mod;
+}
+
+static void AccumulateTypeFactor(uq4_12_t factor, s32 *exponent, bool32 *immune)
+{
+    if (factor == UQ_4_12(0.0)) *immune = TRUE;
+    else if (factor == UQ_4_12(0.5)) --*exponent;
+    else if (factor == UQ_4_12(2.0)) ++*exponent;
+}
+
+/* Compose first, then clamp. Intermediate saturation would make a sequence
+ * of weaknesses followed by resistances depend on the order of the types. */
+static uq4_12_t ApplyTypeExponent(uq4_12_t initial, s32 exponent, bool32 immune)
+{
+    if (immune || !initial) return 0;
+    if (exponent >= 32) return 0xffffffffu;
+    if (exponent <= -32) return 1;
+    if (exponent >= 0)
+    {
+        u64 value = (u64)initial << exponent;
+        return value > 0xffffffffu ? 0xffffffffu : value;
+    }
+    u32 shift = -exponent;
+    u64 value = ((u64)initial + ((u64)1 << (shift - 1))) >> shift;
+    return value ? value : 1;
+}
+
+static void AccumulateTypeEffectiveness(struct DamageContext *ctx, const enum Type *types, u32 count,
+                                        s32 *exponent, bool32 *immune)
+{
+    struct BattleTypeSet seen = {0};
+    for (u32 i = 0; i < count; ++i)
+    {
+        u32 type = types[i];
+        if (type == TYPE_NONE || type == TYPE_MYSTERY || type >= BATTLE_TYPE_SET_CAPACITY
+            || (seen.words[type / 32] & (1u << (type % 32))))
+            continue;
+        BattleTypeSetAdd(&seen, type);
+        AccumulateTypeFactor(GetEffectiveTypeFactor(ctx, type), exponent, immune);
+    }
+}
+
+uq4_12_t GetTypeEffectivenessForTypes(struct DamageContext *ctx, uq4_12_t initial, const enum Type *types, u32 count)
+{
+    s32 exponent = 0;
+    bool32 immune = FALSE;
+    AccumulateTypeEffectiveness(ctx, types, count, &exponent, &immune);
+    return ApplyTypeExponent(initial, exponent, immune);
+}
+
+uq4_12_t GetTypeModifierForTypes(enum Type attack, const enum Type *types, u32 count)
+{
+    struct BattleTypeSet seen = {0};
+    s32 exponent = 0;
+    bool32 immune = FALSE;
+    for (u32 i = 0; i < count; ++i)
+    {
+        u32 type = types[i];
+        if (type == TYPE_NONE || type == TYPE_MYSTERY || type >= BATTLE_TYPE_SET_CAPACITY
+            || (seen.words[type / 32] & (1u << (type % 32))))
+            continue;
+        BattleTypeSetAdd(&seen, type);
+        AccumulateTypeFactor(GetTypeModifier(attack, type), &exponent, &immune);
+    }
+    return ApplyTypeExponent(UQ_4_12(1.0), exponent, immune);
 }
 
 static inline void TryNoticeIllusionInTypeEffectiveness(struct DamageContext *ctx, uq4_12_t resultingModifier, enum Species illusionSpecies)
@@ -8210,9 +8637,9 @@ static inline void TryNoticeIllusionInTypeEffectiveness(struct DamageContext *ct
     illusionContext.abilities[illusionContext.battlerDef] = ABILITY_ILLUSION;
     illusionContext.typeEffectivenessModifier = presumedModifier;
 
-    MulByTypeEffectiveness(&illusionContext, &presumedModifier, GetSpeciesType(illusionSpecies, 0));
-    if (GetSpeciesType(illusionSpecies, 1) != GetSpeciesType(illusionSpecies, 0))
-        MulByTypeEffectiveness(&illusionContext, &presumedModifier, GetSpeciesType(illusionSpecies, 1));
+    struct BattleTypeList types;
+    GetSpeciesTypeList(illusionSpecies, &types);
+    presumedModifier = GetTypeEffectivenessForTypes(&illusionContext, presumedModifier, types.types, types.count);
 
     if (presumedModifier != resultingModifier)
         RecordAbilityBattle(illusionContext.battlerDef, ABILITY_ILLUSION);
@@ -8252,37 +8679,41 @@ void UpdateMoveResultFlags(uq4_12_t modifier, u32 *resultFlags)
     }
 }
 
-static inline uq4_12_t CalcTypeEffectivenessMultiplierInternal(struct DamageContext *ctx, uq4_12_t modifier)
+static inline void CalcTypeEffectivenessMultiplierInternal(struct DamageContext *ctx, s32 *exponent, bool32 *immune)
 {
     enum Species illusionSpecies;
-    enum Type types[3];
-    GetBattlerTypes(ctx->battlerDef, FALSE, types);
+    struct BattleTypeList types;
+    GetBattlerTypeList(ctx->battlerDef, FALSE, &types);
 
-    MulByTypeEffectiveness(ctx, &modifier, types[0]);
-    if (types[1] != types[0])
-        MulByTypeEffectiveness(ctx, &modifier, types[1]);
-    if (types[2] != TYPE_MYSTERY && types[2] != types[1] && types[2] != types[0])
-        MulByTypeEffectiveness(ctx, &modifier, types[2]);
+    AccumulateTypeEffectiveness(ctx, types.types, types.count, exponent, immune);
     if (ctx->moveType == TYPE_FIRE && gBattleMons[ctx->battlerDef].volatiles.tarShot)
-        modifier = uq4_12_multiply(modifier, UQ_4_12(2.0));
+        ++*exponent;
 
     if (ctx->updateFlags && (illusionSpecies = GetIllusionMonSpecies(ctx->battlerDef)))
-        TryNoticeIllusionInTypeEffectiveness(ctx, modifier, illusionSpecies);
+        TryNoticeIllusionInTypeEffectiveness(ctx, ApplyTypeExponent(UQ_4_12(1.0), *exponent, *immune), illusionSpecies);
 
     bool32 isPresentHealing = GetMoveEffect(ctx->move) == EFFECT_PRESENT && gBattleStruct->presentBasePower == 0;
     bool32 ignoreTypeCalc = isPresentHealing || IsBattleMoveStatus(ctx->move);
     if (ignoreTypeCalc && ctx->move != MOVE_THUNDER_WAVE)
     {
-        modifier = UQ_4_12(1.0);
+        *exponent = 0; *immune = FALSE;
         if (B_GLARE_GHOST < GEN_4 && ctx->move == MOVE_GLARE && IS_BATTLER_OF_TYPE(ctx->battlerDef, TYPE_GHOST))
-            modifier = UQ_4_12(0.0);
+            *immune = TRUE;
     }
     else if (ctx->moveType == TYPE_GROUND
         && !IsBattlerGroundedInverseCheck(ctx->battlerDef, ctx->abilities[ctx->battlerDef], ctx->holdEffects[ctx->battlerDef], INVERSE_BATTLE, ctx->isAnticipation)
         && !(MoveIgnoresTypeIfFlyingAndUngrounded(ctx->move))
-        && !(ctx->holdEffects[ctx->battlerDef] == HOLD_EFFECT_RING_TARGET && IS_BATTLER_OF_TYPE(ctx->battlerDef, TYPE_FLYING) && !IsBattlerUngroundedByAbilityItemOrEffect(ctx->battlerDef, ctx->abilities[ctx->battlerDef], ctx->holdEffects[ctx->battlerDef])))
+        && !(ctx->holdEffects[ctx->battlerDef] == HOLD_EFFECT_RING_TARGET && IS_BATTLER_OF_TYPE(ctx->battlerDef, TYPE_FLYING) && !IsBattlerUngroundedByAbilityItemOrEffect(ctx->battlerDef, ctx->abilities[ctx->battlerDef], ctx->holdEffects[ctx->battlerDef]))
+#ifdef NATIVE
+        /* Flying's chart immunity can be edited without changing whether the
+         * battler is grounded for terrain or other field effects. */
+        && !(IS_BATTLER_OF_TYPE(ctx->battlerDef, TYPE_FLYING)
+             && !IsBattlerUngroundedByAbilityItemOrEffect(ctx->battlerDef, ctx->abilities[ctx->battlerDef], ctx->holdEffects[ctx->battlerDef])
+             && GetTypeModifier(TYPE_GROUND, TYPE_FLYING) != UQ_4_12(0.0))
+#endif
+       )
     {
-        modifier = UQ_4_12(0.0);
+        *immune = TRUE;
         if (ctx->updateFlags && (ctx->abilities[ctx->battlerDef] == ABILITY_LEVITATE || ctx->abilities[ctx->battlerDef] == ABILITY_EELEVATE))
         {
             gBattleStruct->moveResultFlags[ctx->battlerDef] |= (MOVE_RESULT_MISSED | MOVE_RESULT_DOESNT_AFFECT_FOE);
@@ -8297,7 +8728,7 @@ static inline uq4_12_t CalcTypeEffectivenessMultiplierInternal(struct DamageCont
     }
     else if (MoveHasNoEffectOnSameType(ctx->move) && IS_BATTLER_OF_TYPE(ctx->battlerDef, GetMoveType(ctx->move)))
     {
-        modifier = UQ_4_12(0.0);
+        *immune = TRUE;
     }
 
     // Thousand Arrows ignores type modifiers for flying mons
@@ -8305,7 +8736,7 @@ static inline uq4_12_t CalcTypeEffectivenessMultiplierInternal(struct DamageCont
      && !IsBattlerGrounded(ctx->battlerDef, ctx->abilities[ctx->battlerDef], ctx->holdEffects[ctx->battlerDef])
      && IS_BATTLER_OF_TYPE(ctx->battlerDef, TYPE_FLYING))
     {
-        modifier = UQ_4_12(1.0);
+        *exponent = 0; *immune = FALSE;
     }
 
     // Iron Ball ignores type modifiers for flying-type mons if it is the only source of grounding
@@ -8316,14 +8747,14 @@ static inline uq4_12_t CalcTypeEffectivenessMultiplierInternal(struct DamageCont
         && !IsBattlerGrounded(ctx->battlerDef, ctx->abilities[ctx->battlerDef], HOLD_EFFECT_NONE) // We want to ignore Iron Ball so skip item check
         && !FlagGet(B_FLAG_INVERSE_BATTLE))
     {
-        modifier = UQ_4_12(1.0);
+        *exponent = 0; *immune = FALSE;
     }
 
-    if (((ctx->abilities[ctx->battlerDef] == ABILITY_WONDER_GUARD && modifier <= UQ_4_12(1.0) && !isPresentHealing)
+    if (((ctx->abilities[ctx->battlerDef] == ABILITY_WONDER_GUARD && (*immune || *exponent <= 0) && !isPresentHealing)
         || (ctx->abilities[ctx->battlerDef] == ABILITY_TELEPATHY && ctx->battlerDef == GetPartnerBattler(ctx->battlerAtk)))
         && GetMovePower(ctx->move) != 0)
     {
-        modifier = UQ_4_12(0.0);
+        *immune = TRUE;
         ctx->abilityBlocked = TRUE;
         if (ctx->updateFlags)
         {
@@ -8336,7 +8767,6 @@ static inline uq4_12_t CalcTypeEffectivenessMultiplierInternal(struct DamageCont
     if (ctx->updateFlags)
         TryInitializeFirstSTABMoveTrainerSlide(ctx->battlerDef, ctx->battlerAtk, ctx->moveType);
 
-    return modifier;
 }
 
 static inline bool32 MoveIgnoresType(struct DamageContext *ctx)
@@ -8360,21 +8790,23 @@ static inline bool32 MoveIgnoresType(struct DamageContext *ctx)
 
 uq4_12_t CalcTypeEffectivenessMultiplier(struct DamageContext *ctx)
 {
-    uq4_12_t modifier = UQ_4_12(1.0);
+    s32 exponent = 0;
+    bool32 immune = FALSE;
 
     if (!MoveIgnoresType(ctx))
     {
-        modifier = CalcTypeEffectivenessMultiplierInternal(ctx, modifier);
+        CalcTypeEffectivenessMultiplierInternal(ctx, &exponent, &immune);
         if (GetMoveEffect(ctx->move) == EFFECT_TWO_TYPED_MOVE && !ctx->isAnticipation)
         {
             enum Type primaryType = ctx->moveType;
 
             ctx->moveType = GetMoveArgType(ctx->move);
-            modifier = CalcTypeEffectivenessMultiplierInternal(ctx, modifier);
+            CalcTypeEffectivenessMultiplierInternal(ctx, &exponent, &immune);
             ctx->moveType = primaryType;
         }
     }
 
+    uq4_12_t modifier = ApplyTypeExponent(UQ_4_12(1.0), exponent, immune);
     if (ctx->updateFlags)
         UpdateMoveResultFlags(modifier, &gBattleStruct->moveResultFlags[ctx->battlerDef]);
     return modifier;
@@ -8393,9 +8825,9 @@ uq4_12_t CalcPartyMonTypeEffectivenessMultiplier(enum Move move, enum Species sp
         ctx.updateFlags = FALSE;
         ctx.abilities[B_BATTLER_0] = abilityDef;
 
-        MulByTypeEffectiveness(&ctx, &modifier, GetSpeciesType(speciesDef, 0));
-        if (GetSpeciesType(speciesDef, 1) != GetSpeciesType(speciesDef, 0))
-            MulByTypeEffectiveness(&ctx, &modifier, GetSpeciesType(speciesDef, 1));
+        struct BattleTypeList types;
+        GetSpeciesTypeList(speciesDef, &types);
+        modifier = GetTypeEffectivenessForTypes(&ctx, modifier, types.types, types.count);
 
         if (ctx.moveType == TYPE_GROUND
          && (abilityDef == ABILITY_LEVITATE || abilityDef == ABILITY_EELEVATE)
@@ -8438,12 +8870,9 @@ uq4_12_t GetOverworldTypeEffectiveness(struct Pokemon *mon, enum Type moveType)
     ctx.updateFlags = FALSE;
 
     enum Species speciesDef = GetMonData(mon, MON_DATA_SPECIES);
-    enum Type type1 = GetSpeciesType(speciesDef, 0);
-    enum Type type2 = GetSpeciesType(speciesDef, 1);
-
-    MulByTypeEffectiveness(&ctx, &modifier, type1);
-    if (type2 != type1)
-        MulByTypeEffectiveness(&ctx, &modifier, type2);
+    struct BattleTypeList types;
+    GetSpeciesTypeList(speciesDef, &types);
+    modifier = GetTypeEffectivenessForTypes(&ctx, modifier, types.types, types.count);
 
     if ((modifier <= UQ_4_12(1.0) && ctx.abilities[B_BATTLER_0] == ABILITY_WONDER_GUARD)
      || CanAbilityAbsorbMove(&ctx))
@@ -8454,62 +8883,55 @@ uq4_12_t GetOverworldTypeEffectiveness(struct Pokemon *mon, enum Type moveType)
 
 uq4_12_t GetTypeModifier(enum Type atkType, enum Type defType)
 {
-    if (B_FLAG_INVERSE_BATTLE != 0 && FlagGet(B_FLAG_INVERSE_BATTLE))
-        return GetInverseTypeMultiplier(gTypeEffectivenessTable[atkType][defType]);
-    return gTypeEffectivenessTable[atkType][defType];
+    bool32 inverse = B_FLAG_INVERSE_BATTLE != 0 && FlagGet(B_FLAG_INVERSE_BATTLE);
+#ifdef NATIVE
+    u32 runtimeModifier;
+    if (ModsRuntimeTypeMatchup(atkType, defType, inverse, &runtimeModifier))
+        return runtimeModifier;
+#endif
+    uq4_12_t modifier = gTypeEffectivenessTable[atkType][defType];
+#ifdef NATIVE
+    modifier = ModsTypeMatchup(atkType, defType, modifier, inverse);
+#endif
+    return inverse ? GetInverseTypeMultiplier(modifier) : modifier;
+}
+
+s32 GetStealthHazardDamageForTypes(enum TypeSideHazard hazardType, const enum Type *types, u32 count, u32 maxHp)
+{
+    struct BattleTypeSet seen = {0};
+    s32 exponent = 0;
+    bool32 immune = FALSE;
+    for (u32 i = 0; i < count; ++i)
+    {
+        u32 type = types[i];
+        if (type == TYPE_NONE || type == TYPE_MYSTERY || type >= BATTLE_TYPE_SET_CAPACITY
+            || (seen.words[type / 32] & (1u << (type % 32))))
+            continue;
+        BattleTypeSetAdd(&seen, type);
+        AccumulateTypeFactor(GetTypeModifier((u8)hazardType, type), &exponent, &immune);
+    }
+    if (immune || !maxHp) return 0;
+    /* Hazard damage is one eighth HP at neutral effectiveness.  Delay
+     * rounding and clamping until every weakness and resistance is counted. */
+    if (exponent >= 3) return maxHp;
+    if (exponent <= -29) return 1;
+    u32 dmg = maxHp >> (3 - exponent);
+    return dmg ? dmg : 1;
 }
 
 s32 GetStealthHazardDamageByTypesAndHP(enum TypeSideHazard hazardType, enum Type type1, enum Type type2, u32 maxHp)
 {
-    s32 dmg = 0;
-    uq4_12_t modifier = UQ_4_12(1.0);
-
-    modifier = uq4_12_multiply(modifier, GetTypeModifier((u8)hazardType, type1));
-    if (type2 != type1)
-        modifier = uq4_12_multiply(modifier, GetTypeModifier((u8)hazardType, type2));
-
-    switch (modifier)
-    {
-    case UQ_4_12(0.0):
-        dmg = 0;
-        break;
-    case UQ_4_12(0.25):
-        dmg = maxHp / 32;
-        if (dmg == 0)
-            dmg = 1;
-        break;
-    case UQ_4_12(0.5):
-        dmg = maxHp / 16;
-        if (dmg == 0)
-            dmg = 1;
-        break;
-    case UQ_4_12(1.0):
-        dmg = maxHp / 8;
-        if (dmg == 0)
-            dmg = 1;
-        break;
-    case UQ_4_12(2.0):
-        dmg = maxHp / 4;
-        if (dmg == 0)
-            dmg = 1;
-        break;
-    case UQ_4_12(4.0):
-        dmg = maxHp / 2;
-        if (dmg == 0)
-            dmg = 1;
-        break;
-    }
-
-    return dmg;
+    const enum Type types[] = {type1, type2};
+    return GetStealthHazardDamageForTypes(hazardType, types, ARRAY_COUNT(types), maxHp);
 }
 
 s32 GetStealthHazardDamage(enum TypeSideHazard hazardType, enum BattlerId battler)
 {
-    enum Type types[3];
-    GetBattlerTypes(battler, FALSE, types);
+    struct BattleTypeList types;
+    GetBattlerTypeList(battler, FALSE, &types);
     u32 maxHp = gBattleMons[battler].maxHP;
 
-    return GetStealthHazardDamageByTypesAndHP(hazardType, types[0], types[1], maxHp);
+    return GetStealthHazardDamageForTypes(hazardType, types.types, types.count, maxHp);
 }
 
 bool32 IsPartnerMonFromSameTrainer(enum BattlerId battler)
@@ -8794,7 +9216,11 @@ bool32 TryBattleFormChange(enum BattlerId battler, enum FormChanges method, enum
             GetBattlerPartyState(battler)->changedSpecies = gBattleMons[battler].species;
 
         TryToSetBattleFormChangeMoves(mon, method);
+#ifdef NATIVE
+        SetMonSpeciesWithOwnedReceipt(mon, &targetSpecies);
+#else
         SetMonData(mon, MON_DATA_SPECIES, &targetSpecies);
+#endif
         gBattleMons[battler].species = targetSpecies;
         if (GetConfig(B_AUTOTOMIZE_FORM_CHANGE) >= GEN_6)
             gBattleMons[battler].volatiles.autotomizeCount = 0;
@@ -8807,25 +9233,11 @@ bool32 TryBattleFormChange(enum BattlerId battler, enum FormChanges method, enum
 
 bool32 DoBattlersShareType(enum BattlerId battler1, enum BattlerId battler2)
 {
-    s32 i;
-    s32 j;
-    enum Type types1[3], types2[3];
-    GetBattlerTypes(battler1, FALSE, types1);
-    GetBattlerTypes(battler2, FALSE, types2);
-
-    for (i = 0; i < 3; i++)
-    {
-        if (types1[i] == TYPE_MYSTERY)
-            continue;
-
-        for (j = 0; j < 3; j++)
-        {
-            if (types2[j] == TYPE_MYSTERY)
-                continue;
-            if (types1[i] == types2[j])
-                return TRUE;
-        }
-    }
+    struct BattleTypeList types1, types2;
+    GetBattlerTypeList(battler1, FALSE, &types1);
+    GetBattlerTypeList(battler2, FALSE, &types2);
+    for (u32 i = 0; i < types1.count; ++i)
+        if (BattleTypeListContains(&types2, types1.types[i])) return TRUE;
 
     return FALSE;
 }
@@ -8945,7 +9357,14 @@ void SetIllusionMon(struct Pokemon *mon, enum BattlerId battler)
 enum ImmunityHealStatusOutcome TryImmunityAbilityHealStatus(enum BattlerId battler)
 {
     enum ImmunityHealStatusOutcome outcome = IMMUNITY_NO_EFFECT;
-    switch (GetBattlerAbilityIgnoreMoldBreaker(battler))
+    enum Ability cureAbility = GetBattlerAbilityIgnoreMoldBreaker(battler);
+#ifdef NATIVE
+    u32 beforeCure = gBattleMons[battler].status1;
+    struct BattleScriptsStack *cureStack = gBattleResources ? gBattleResources->battleScriptsStack : NULL;
+    u32 cureStackSize = cureStack ? cureStack->size : 0;
+    const u8 *cureResume = gBattlescriptCurrInstr;
+#endif
+    switch (cureAbility)
     {
     case ABILITY_IMMUNITY:
     case ABILITY_PASTEL_VEIL:
@@ -9043,6 +9462,12 @@ enum ImmunityHealStatusOutcome TryImmunityAbilityHealStatus(enum BattlerId battl
     {
         BtlController_EmitSetMonData(battler, B_COMM_TO_CONTROLLER, REQUEST_STATUS_BATTLE, 0, 4, &gBattleMons[battler].status1);
         MarkBattlerForControllerExec(battler);
+#ifdef NATIVE
+        bool32 curePresentation = cureStack && gBattleResources && gBattleResources->battleScriptsStack == cureStack
+            && cureStackSize < ARRAY_COUNT(cureStack->ptr) && cureStack->size == cureStackSize + 1
+            && cureStack->ptr[cureStackSize] == cureResume;
+        ModsBattleAbilityStatusCured(battler, cureAbility, beforeCure, RHH_BATTLE_CURE_IMMUNITY_ABILITY, curePresentation);
+#endif
     }
     return outcome;
 }
@@ -9083,10 +9508,13 @@ enum DamageCategory GetBattleMoveCategory(enum Move move)
 
     if (B_PHYSICAL_SPECIAL_SPLIT < GEN_4)
     {
-        if (inBattle)
-            return gTypesInfo[GetBattleMoveType(move)].damageCategory;
-        else
-            return gTypesInfo[GetMoveType(move)].damageCategory;
+        enum Type type = inBattle ? GetBattleMoveType(move) : GetMoveType(move);
+        if (type < NUMBER_OF_MON_TYPES) return gTypesInfo[type].damageCategory;
+#ifdef NATIVE
+        return ModsLegacyTypeCategory(type, GetMoveCategory(move));
+#else
+        return GetMoveCategory(move);
+#endif
     }
 
     return GetMoveCategory(move);
@@ -9510,7 +9938,7 @@ static u32 CanBattlerHitBothFoesInTerrain(enum BattlerId battler, enum Move move
         && IsBattlerTerrainAffected(battler, GetBattlerAbility(battler), GetBattlerHoldEffect(battler), GetMoveTerrainBoost_Terrain(move), gFieldTimers.terrain);
 }
 
-enum MoveTarget GetBattlerMoveSelectionTargetType(enum BattlerId battler, enum Move move)
+static enum MoveTarget GetBattlerMoveSelectionTargetTypeBase(enum BattlerId battler, enum Move move)
 {
     enum BattleMoveEffects effect = GetMoveEffect(move);
     if (effect == EFFECT_CURSE && !IS_BATTLER_OF_TYPE(battler, TYPE_GHOST))
@@ -9520,13 +9948,23 @@ enum MoveTarget GetBattlerMoveSelectionTargetType(enum BattlerId battler, enum M
 
     return GetMoveTarget(move);
 }
+enum MoveTarget GetBattlerMoveSelectionTargetType(enum BattlerId battler, enum Move move)
+{
+    enum MoveTarget target = GetBattlerMoveSelectionTargetTypeBase(battler, move);
+#ifdef NATIVE
+    target = ModsMoveContextualTarget(battler, move, target, RHH_MOVE_TARGET_SELECTION);
+#endif
+    return target;
+}
 
 enum MoveTarget GetBattlerMoveTargetType(enum BattlerId battler, enum Move move)
 {
-    if (CanBattlerHitBothFoesInTerrain(battler, move, GetMoveEffect(move)))
-        return TARGET_BOTH;
-
-    return GetBattlerMoveSelectionTargetType(battler, move);
+    enum MoveTarget target = CanBattlerHitBothFoesInTerrain(battler, move, GetMoveEffect(move))
+        ? TARGET_BOTH : GetBattlerMoveSelectionTargetTypeBase(battler, move);
+#ifdef NATIVE
+    target = ModsMoveContextualTarget(battler, move, target, RHH_MOVE_TARGET_EXECUTION);
+#endif
+    return target;
 }
 
 bool32 CanTargetBattler(enum BattlerId battlerAtk, enum BattlerId battlerDef, enum Move move)
@@ -9588,6 +10026,9 @@ void CopyMonAbilityAndTypesToBattleMon(enum BattlerId battler, struct Pokemon *m
     gBattleMons[battler].types[0] = GetSpeciesType(gBattleMons[battler].species, 0);
     gBattleMons[battler].types[1] = GetSpeciesType(gBattleMons[battler].species, 1);
     gBattleMons[battler].types[2] = TYPE_MYSTERY;
+#ifdef NATIVE
+    ModsBattleMonSpeciesTypes(&gBattleMons[battler]);
+#endif
 }
 
 void RecalcBattlerStats(enum BattlerId battler, struct Pokemon *mon, bool32 isDynamaxing)
@@ -9765,7 +10206,7 @@ bool32 CanMonParticipateInSkyBattle(struct Pokemon *mon)
     enum Ability ability = GetSpeciesAbility(species, monAbilityNum);
 
     bool32 hasLevitateAbility = (ability == ABILITY_LEVITATE || ability == ABILITY_EELEVATE);
-    bool32 isFlyingType = GetSpeciesType(species, 0) == TYPE_FLYING || GetSpeciesType(species, 1) == TYPE_FLYING;
+    bool32 isFlyingType = IsSpeciesOfType(species, TYPE_FLYING);
     bool32 monIsValidAndNotEgg = GetMonData(mon, MON_DATA_SANITY_HAS_SPECIES) && !GetMonData(mon, MON_DATA_IS_EGG);
 
     if (monIsValidAndNotEgg)
@@ -9774,6 +10215,19 @@ bool32 CanMonParticipateInSkyBattle(struct Pokemon *mon)
             return TRUE;
     }
     return FALSE;
+}
+
+void ApplyRoostToTypes(enum Type types[static 3])
+{
+    if (types[0] == TYPE_FLYING && types[1] == TYPE_FLYING
+        && (types[2] == TYPE_MYSTERY || types[2] == TYPE_NONE || types[2] == TYPE_FLYING))
+        types[0] = types[1] = B_ROOST_PURE_FLYING >= GEN_5 ? TYPE_NORMAL : TYPE_MYSTERY;
+    else
+    {
+        if (types[0] == TYPE_FLYING) types[0] = TYPE_MYSTERY;
+        if (types[1] == TYPE_FLYING) types[1] = TYPE_MYSTERY;
+    }
+    if (types[2] == TYPE_FLYING) types[2] = TYPE_MYSTERY;
 }
 
 void GetBattlerTypes(enum BattlerId battler, bool32 ignoreTera, enum Type types[static 3])
@@ -9796,14 +10250,58 @@ void GetBattlerTypes(enum BattlerId battler, bool32 ignoreTera, enum Type types[
 
     // Roost.
     if (!isTera && gBattleMons[battler].volatiles.roostActive)
+        ApplyRoostToTypes(types);
+}
+
+void GetBattlerRawTypeList(enum BattlerId battler, struct BattleTypeList *list)
+{
+    list->count = 0;
+    for (u32 i = 0; i < 3; ++i) BattleTypeListAdd(list, gBattleMons[battler].types[i]);
+#ifdef NATIVE
+    for (u32 i = 0; i < gBattleMons[battler].extraTypeCount; ++i)
+        BattleTypeListAdd(list, gBattleMons[battler].extraTypes[i]);
+#endif
+}
+
+void GetBattlerTypeList(enum BattlerId battler, bool32 ignoreTera, struct BattleTypeList *list)
+{
+    bool32 isTera = GetActiveGimmick(battler) == GIMMICK_TERA;
+    if (!ignoreTera && isTera && GetBattlerTeraType(battler) != TYPE_STELLAR)
     {
-        if (types[0] == TYPE_FLYING && types[1] == TYPE_FLYING)
-            types[0] = types[1] = B_ROOST_PURE_FLYING >= GEN_5 ? TYPE_NORMAL : TYPE_MYSTERY;
-        else if (types[0] == TYPE_FLYING)
-            types[0] = TYPE_MYSTERY;
-        else if (types[1] == TYPE_FLYING)
-            types[1] = TYPE_MYSTERY;
+        list->count = 0;
+        BattleTypeListAdd(list, GetBattlerTeraType(battler));
+        return;
     }
+    GetBattlerRawTypeList(battler, list);
+    if (!isTera && gBattleMons[battler].volatiles.roostActive)
+        ApplyRoostToTypeList(list);
+}
+
+void ApplyRoostToTypeList(struct BattleTypeList *list)
+{
+    if (BattleTypeListContains(list, TYPE_FLYING))
+    {
+        bool32 pureFlying = list->count == 1;
+        for (u32 i = 0; i < list->count; ++i)
+            if (list->types[i] == TYPE_FLYING)
+            {
+                memmove(&list->types[i], &list->types[i + 1], (list->count - i - 1) * sizeof(list->types[0]));
+                --list->count;
+                break;
+            }
+        if (pureFlying && B_ROOST_PURE_FLYING >= GEN_5) BattleTypeListAdd(list, TYPE_NORMAL);
+    }
+}
+
+bool32 IsBattlerRawType(enum BattlerId battler, enum Type type)
+{
+    for (u32 i = 0; i < 3; ++i)
+        if (gBattleMons[battler].types[i] == type) return TRUE;
+#ifdef NATIVE
+    for (u32 i = 0; i < gBattleMons[battler].extraTypeCount; ++i)
+        if (gBattleMons[battler].extraTypes[i] == type) return TRUE;
+#endif
+    return FALSE;
 }
 
 void RemoveBattlerType(enum BattlerId battler, enum Type type)
@@ -9811,11 +10309,24 @@ void RemoveBattlerType(enum BattlerId battler, enum Type type)
     u32 i;
     if (GetActiveGimmick(battler) == GIMMICK_TERA) // don't remove type if Terastallized
         return;
+#ifdef NATIVE
+    if (gBattleMons[battler].addedTypeValid && gBattleMons[battler].addedType == type)
+        gBattleMons[battler].addedTypeValid = FALSE;
+#endif
     for (i = 0; i < 3; i++)
     {
         if (*(u8 *)(&gBattleMons[battler].types[0] + i) == type)
             *(u8 *)(&gBattleMons[battler].types[0] + i) = TYPE_MYSTERY;
     }
+#ifdef NATIVE
+    for (i = 0; i < gBattleMons[battler].extraTypeCount;)
+    {
+        if (gBattleMons[battler].extraTypes[i] != type) { ++i; continue; }
+        --gBattleMons[battler].extraTypeCount;
+        memmove(&gBattleMons[battler].extraTypes[i], &gBattleMons[battler].extraTypes[i + 1],
+                gBattleMons[battler].extraTypeCount - i);
+    }
+#endif
 }
 
 void SetShellSideArmCategory(void)
@@ -10654,6 +11165,9 @@ bool32 DoesMoveMissTarget(struct BattleCalcValues *cv)
         return FALSE;
 
     u32 accuracy = GetTotalAccuracy(cv, weather);
+#ifdef NATIVE
+    accuracy = ModsMoveAccuracy(cv, weather, accuracy, FALSE);
+#endif
 
     return !RandomPercentage(RNG_ACCURACY, accuracy);
 }

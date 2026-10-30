@@ -3,6 +3,7 @@
 #include "battle_anim.h"
 #include "battle_controllers.h"
 #include "battle_message.h"
+#include "battle_main.h"
 #include "main.h"
 #include "menu.h"
 #include "menu_helpers.h"
@@ -1486,7 +1487,7 @@ static void PrintSecondaryEntries(struct BattleDebugMenu *data)
         {
             enum Type *types = &gBattleMons[data->battlerId].types[0];
 
-            PadString(gTypesInfo[types[i]].name, text);
+            PadString(GetTypeName(types[i]), text);
             printer.currentY = printer.y = (i * yMultiplier) + sSecondaryListTemplate.upText_Y;
             AddTextPrinter(&printer, 0, NULL);
         }

@@ -255,6 +255,10 @@ bool8 IsWirelessAdapterConnected(void);
 void Task_DestroySelf(u8 taskId);
 void OpenLink(void);
 void CloseLink(void);
+#ifdef NATIVE
+bool8 NativeLinkSessionOpen(void);
+bool32 NativeNatureRejectLink(void);
+#endif
 u16 LinkMain2(const u16 *heldKeys);
 void ClearLinkCallback(void);
 void ClearLinkCallback_2(void);

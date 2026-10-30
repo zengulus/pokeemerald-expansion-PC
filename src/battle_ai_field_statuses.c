@@ -2,6 +2,7 @@
 #include "battle_z_move.h"
 #include "malloc.h"
 #include "battle.h"
+#include "battle_main.h"
 #include "battle_anim.h"
 #include "battle_ai_field_statuses.h"
 #include "battle_ai_util.h"
@@ -512,7 +513,7 @@ static enum FieldEffectOutcome BenefitsFromTrickRoom(enum BattlerId battler)
         for (u32 moveIndex = 0; moveIndex < MAX_MON_MOVES; moveIndex++)
         {
             enum Move move = aiMoves[moveIndex];
-            if (GetBattleMovePriority(battler, gAiLogicData->abilities[battler], move) > 0 && !(GetMovePriority(move) > 0 && IsBattleMoveStatus(move)))
+            if (GetAiBattleMovePriority(battler, gAiLogicData->abilities[battler], move) > 0 && !(GetMovePriority(move) > 0 && IsBattleMoveStatus(move)))
             {
                 return FIELD_EFFECT_POSITIVE;
             }

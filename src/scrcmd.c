@@ -1,4 +1,7 @@
 #include "global.h"
+#ifdef NATIVE
+#include "mods.h"
+#endif
 #include "frontier_util.h"
 #include "battle_setup.h"
 #include "battle_util.h"
@@ -81,13 +84,89 @@ static EWRAM_DATA u16 sFieldEffectScriptId = 0;
 
 static u8 sBrailleWindowId;
 static bool8 sIsScriptedWildDouble;
+#ifdef NATIVE
+static struct RhhWildCheckpoint sScriptedWildCheckpoint;
+static bool8 sScriptedWildPending, sPreviousScriptedWildDouble, sScriptedWildEventMon;
+static u8 sScriptedWildCount;
+static struct RhhWildEncounterCancellation sScriptedWildLastCancellation;
+static bool8 sScriptedWildLastDenied, sScriptedWildLastEventMon;
+static struct RhhWildCheckpoint sTutorialWildCheckpoint;
+static struct RhhWildEncounterCancellation sTutorialWildLastCancellation;
+static bool8 sTutorialWildPending, sTutorialWildLastDenied;
+
+void ModsWildTutorialCheckpointBegin(void)
+{
+    ModsWildCheckpointSave(&sTutorialWildCheckpoint);
+    sTutorialWildPending = TRUE;
+}
+
+void ModsWildScriptedCheckpointBegin(u32 count, bool32 eventMon)
+{
+    ModsWildCheckpointSave(&sScriptedWildCheckpoint);
+    sPreviousScriptedWildDouble = sIsScriptedWildDouble;
+    sScriptedWildCount = count == 2 ? 2 : 1;
+    sScriptedWildEventMon = eventMon;
+    sScriptedWildPending = TRUE;
+}
+#endif
 
 extern const SpecialFunc gSpecials[];
+u16 ScriptedWildBattleAllowed(void);
+u16 TutorialWildBattleAllowed(void);
 extern const u8 *gStdScripts[];
 extern const u8 *gStdScripts_End[];
 
 static void CloseBrailleWindow(void);
 static void DynamicMultichoiceSortList(struct ListMenuItem *items, u32 count);
+
+#ifdef NATIVE
+static struct RhhScriptedEncounterSource ScriptWildSource(const struct ScriptContext *ctx)
+{
+    return (struct RhhScriptedEncounterSource){.struct_size = sizeof(struct RhhScriptedEncounterSource),
+        .preparation = ctx->wildPreparedKind, .encounter = ctx->wildPreparedKey};
+}
+static bool32 IsScriptWildBattleSpecial(SpecialFunc func)
+{
+    uintptr_t address = (uintptr_t)func;
+    return address == (uintptr_t)BattleSetup_StartLatiBattle || address == (uintptr_t)BattleSetup_StartLegendaryBattle
+        || address == (uintptr_t)StartGroudonKyogreBattle || address == (uintptr_t)StartRegiBattle
+        || address == (uintptr_t)StartMarowakBattle || address == (uintptr_t)StartPreparedMarowakBattle
+        || address == (uintptr_t)StartWallyTutorialBattle
+        || address == (uintptr_t)StartOldManTutorialBattle || address == (uintptr_t)StartPreparedTutorialBattle
+        || address == (uintptr_t)ChooseStarter;
+}
+static struct RhhScriptedEncounterSource EnterScriptSpecial(struct ScriptContext *ctx, SpecialFunc func)
+{
+    if ((uintptr_t)func == (uintptr_t)CreateEnemyEventMon)
+    {
+        ctx->wildPreparedKey = ctx->wildPendingKey; ctx->wildPendingKey = 0;
+        ctx->wildPreparedKind = RHH_SCRIPTED_EVENT_MON;
+    }
+    else if ((uintptr_t)func == (uintptr_t)StartWallyTutorialBattle
+        || (uintptr_t)func == (uintptr_t)StartOldManTutorialBattle
+        || (uintptr_t)func == (uintptr_t)PrepareWallyTutorialBattle
+        || (uintptr_t)func == (uintptr_t)PrepareOldManTutorialBattle
+        || (uintptr_t)func == (uintptr_t)ChooseStarter)
+    {
+        ctx->wildPreparedKey = ctx->wildPendingKey; ctx->wildPendingKey = 0;
+        ctx->wildPreparedKind = RHH_SCRIPTED_DIRECT_SPECIAL;
+    }
+    return ModsWildScriptedScopeSwap(ScriptWildSource(ctx));
+}
+#endif
+
+/* A script annotation contains a stable ASCII ID, not a script address. */
+void ScriptSetWildEncounterIdentity(struct ScriptContext *ctx)
+{
+    Script_RequestEffects(SCREFF_V1);
+    const char *id = (const char *)ctx->scriptPtr;
+    while (ScriptReadByte(ctx)) {}
+#ifdef NATIVE
+    ctx->wildPendingKey = ModsWildScriptedKey(id);
+#else
+    (void)id;
+#endif
+}
 
 static const u8 sScriptConditionTable[COMPARISON_OPERATORS_COUNT][3] =
 {
@@ -119,6 +198,9 @@ bool8 ScrCmd_end(struct ScriptContext *ctx)
 {
     Script_RequestEffects(SCREFF_V1);
 
+#ifdef NATIVE
+    ScriptContext_RecordExplicitEnd(ctx);
+#endif
     FlagClear(FLAG_SAFE_FOLLOWER_MOVEMENT);
     StopScript(ctx);
     return FALSE;
@@ -142,7 +224,15 @@ bool8 ScrCmd_special(struct ScriptContext *ctx)
     Script_RequestEffects(SCREFF_V1);
     Script_CheckEffectInstrumentedSpecial(index);
 
+#ifdef NATIVE
+    struct RhhScriptedEncounterSource previous = EnterScriptSpecial(ctx, gSpecials[index]);
+#endif
     gSpecials[index]();
+#ifdef NATIVE
+    ModsWildScriptedScopeSwap(previous);
+    if (IsScriptWildBattleSpecial(gSpecials[index]))
+    { ctx->wildPreparedKey = 0; ctx->wildPreparedKind = 0; sScriptedWildPending = sTutorialWildPending = FALSE; }
+#endif
     return FALSE;
 }
 
@@ -156,7 +246,29 @@ bool8 ScrCmd_specialvar(struct ScriptContext *ctx)
     Script_RequestWriteVar(varId);
     Script_CheckEffectInstrumentedSpecial(index);
 
+#ifdef NATIVE
+    struct RhhScriptedEncounterSource previous = EnterScriptSpecial(ctx, gSpecials[index]);
+#endif
     *ptr = gSpecials[index]();
+#ifdef NATIVE
+    if (gSpecials[index] == ScriptedWildBattleAllowed && ScriptContext_IsGlobal(ctx) && sScriptedWildLastDenied)
+    {
+        ModsWildScriptCleanupQueue(&sScriptedWildLastCancellation, sScriptedWildLastEventMon);
+        sScriptedWildLastDenied = FALSE;
+    }
+    if (gSpecials[index] == ScriptedWildBattleAllowed && !*ptr)
+    { ctx->wildPreparedKey = 0; ctx->wildPreparedKind = 0; }
+    if (gSpecials[index] == TutorialWildBattleAllowed && ScriptContext_IsGlobal(ctx) && sTutorialWildLastDenied)
+    {
+        ModsWildScriptCleanupQueue(&sTutorialWildLastCancellation, 2);
+        sTutorialWildLastDenied = FALSE;
+    }
+    if (gSpecials[index] == TutorialWildBattleAllowed && !*ptr)
+    { ctx->wildPreparedKey = 0; ctx->wildPreparedKind = 0; }
+    ModsWildScriptedScopeSwap(previous);
+    if (IsScriptWildBattleSpecial(gSpecials[index]))
+    { ctx->wildPreparedKey = 0; ctx->wildPreparedKind = 0; sScriptedWildPending = sTutorialWildPending = FALSE; }
+#endif
     return FALSE;
 }
 
@@ -2478,6 +2590,15 @@ bool8 ScrCmd_setwildbattle(struct ScriptContext *ctx)
 
     Script_RequestEffects(SCREFF_V1);
 
+#ifdef NATIVE
+    ModsWildScriptedCheckpointBegin(species2 == SPECIES_NONE ? 1 : 2, FALSE);
+    ctx->wildPreparedKey = ctx->wildPendingKey; ctx->wildPendingKey = 0;
+    ctx->wildPreparedKind = RHH_SCRIPTED_WILD_COMMAND;
+    struct RhhScriptedEncounterSource previous = ModsWildScriptedScopeSwap(ScriptWildSource(ctx));
+    species = ModsWildScriptedCandidate(species, level, 0);
+    if (species2 != SPECIES_NONE)
+        species2 = ModsWildScriptedCandidate(species2, level2, 1);
+#endif
     if (species2 == SPECIES_NONE)
     {
         CreateScriptedWildMon(species, level, item);
@@ -2488,18 +2609,121 @@ bool8 ScrCmd_setwildbattle(struct ScriptContext *ctx)
         CreateScriptedDoubleWildMon(species, level, item, species2, level2, item2);
         sIsScriptedWildDouble = TRUE;
     }
+#ifdef NATIVE
+    ModsWildScriptedScopeSwap(previous);
+#endif
 
     return FALSE;
+}
+
+/* Called immediately after a preparation by scripts that can safely abort. */
+u16 ScriptedWildBattleAllowed(void)
+{
+#ifdef NATIVE
+    sScriptedWildLastDenied = FALSE;
+    if (sScriptedWildPending)
+    {
+        sScriptedWildPending = FALSE;
+        for (u32 slot = 0; slot < sScriptedWildCount; ++slot)
+        {
+            struct RhhWildEncounterCancellation cancel = {0};
+            if (!ModsWildScriptedPermission(&gParties[B_TRAINER_OPPONENT_A][slot], slot, sScriptedWildEventMon, &cancel))
+            {
+                ModsWildCheckpointRestore(&sScriptedWildCheckpoint);
+                sIsScriptedWildDouble = sPreviousScriptedWildDouble;
+                if (sScriptedWildEventMon) ModsWildEventCancelled(&cancel);
+                else ModsWildCancelled(&cancel);
+                sScriptedWildLastCancellation = cancel;
+                sScriptedWildLastEventMon = sScriptedWildEventMon;
+                sScriptedWildLastDenied = TRUE;
+                return FALSE;
+            }
+        }
+    }
+#endif
+    return TRUE;
+}
+
+u16 TutorialWildBattleAllowed(void)
+{
+#ifdef NATIVE
+    sTutorialWildLastDenied = FALSE;
+    if (sTutorialWildPending)
+    {
+        sTutorialWildPending = FALSE;
+        struct RhhWildEncounterCancellation cancel = {0};
+        if (!ModsWildTutorialPermission(&gParties[B_TRAINER_OPPONENT_A][0], &cancel))
+        {
+            ModsWildCheckpointRestore(&sTutorialWildCheckpoint);
+            ModsWildTutorialCancelled(&cancel);
+            sTutorialWildLastCancellation = cancel;
+            sTutorialWildLastDenied = TRUE;
+            return FALSE;
+        }
+    }
+#endif
+    return TRUE;
+}
+
+u16 ScriptGetSavedWeather(void)
+{
+    return GetSavedWeather();
+}
+
+/* Revert the weather changed by a cancelled cutscene without recording a
+ * second weather transition as a new rain event. */
+u16 ScriptRestoreEncounterWeather(void)
+{
+    if (gSpecialVar_0x8004 < WEATHER_COUNT)
+    {
+        gSaveBlock1Ptr->weather = gSpecialVar_0x8004;
+        DoCurrentWeather();
+    }
+    return 0;
+}
+
+/* The object was temporarily added by a cutscene. Its existing hide flag
+ * must survive cancellation exactly as it was before the scene. */
+u16 ScriptRemoveObjectWithoutFlag(void)
+{
+    u8 objectId;
+    if (!TryGetObjectEventIdByLocalIdAndMap(gSpecialVar_0x8004,
+            gSaveBlock1Ptr->location.mapNum, gSaveBlock1Ptr->location.mapGroup, &objectId))
+        RemoveObjectEvent(&gObjectEvents[objectId]);
+    return 0;
+}
+
+u16 ScriptRestoreEncounterObject(void)
+{
+    u8 objectId;
+    if (!TryGetObjectEventIdByLocalIdAndMap(gSpecialVar_0x8004,
+            gSaveBlock1Ptr->location.mapNum, gSaveBlock1Ptr->location.mapGroup, &objectId))
+    {
+        struct Sprite *sprite = &gSprites[gObjectEvents[objectId].spriteId];
+        FreeSpriteOamMatrix(sprite);
+        CalcCenterToCornerVec(sprite, sprite->oam.shape, sprite->oam.size, sprite->oam.affineMode);
+        if (sprite->subspriteTables) sprite->subspriteMode = SUBSPRITES_ON;
+    }
+    return 0;
 }
 
 bool8 ScrCmd_dowildbattle(struct ScriptContext *ctx)
 {
     Script_RequestEffects(SCREFF_V1 | SCREFF_HARDWARE);
+#ifdef NATIVE
+    sScriptedWildPending = FALSE;
+    struct RhhScriptedEncounterSource previous = ModsWildScriptedScopeSwap(ScriptWildSource(ctx));
+#endif
 
     if (sIsScriptedWildDouble == FALSE)
         BattleSetup_StartScriptedWildBattle();
     else
         BattleSetup_StartScriptedDoubleWildBattle();
+
+#ifdef NATIVE
+    ModsWildScriptedScopeSwap(previous);
+    ctx->wildPreparedKey = 0; ctx->wildPreparedKind = 0;
+#endif
 
     ScriptContext_Stop();
 

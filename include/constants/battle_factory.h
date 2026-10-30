@@ -31,6 +31,9 @@ enum FactoryStyle {
 #define BATTLE_FACTORY_FUNC_GET_OPPONENT_STYLE      15
 #define BATTLE_FACTORY_FUNC_RESET_HELD_ITEMS        16
 
+/* A native custom-type name is supplied in STR_VAR_1 for this result. */
+#define FACTORY_CUSTOM_TYPE_HINT (NUMBER_OF_MON_TYPES + 1)
+
 #define FACTORY_DATA_WIN_STREAK         1
 #define FACTORY_DATA_WIN_STREAK_ACTIVE  2
 #define FACTORY_DATA_WIN_STREAK_SWAPS   3

@@ -15,7 +15,7 @@ static inline unsigned Read16(const uint8_t *p) { return p[0] | (unsigned)p[1] <
 static inline void Write16(uint8_t *p, unsigned n) { p[0] = n; p[1] = n >> 8; }
 static inline int HostOK(const struct RhhModHostV1 *host)
 {
-    if (!host || host->abi_version != RHH_MOD_ABI_V1 || host->struct_size < sizeof(*host)) return 0;
+    if (!host || host->abi_version != RHH_MOD_ABI_V1 || host->struct_size < RHH_MOD_HOST_V1_BASE_SIZE) return 0;
     sHost = host; return 1;
 }
 static inline int ReadByte(const void *state, const char *id, const char *key, unsigned type, struct RhhModValue *out)

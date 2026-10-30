@@ -339,6 +339,8 @@ enum BattleScriptOpcode
 #define BS_OPPONENT2                14
 #define BS_ABILITY_BATTLER          15
 #define BS_ATTACKER_PARTNER         16
+#define BS_MOD_INNATE_SOURCE        17
+#define BS_MOD_EFFECT_RECIPIENT     18
 
 // compare operands
 #define CMP_EQUAL               0

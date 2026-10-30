@@ -62,6 +62,11 @@ enum CompressionMode {
 
 void DecompressDataWithHeaderVram(const u32 *src, void *dest);
 void DecompressDataWithHeaderWram(const u32 *src, void *dest);
+#ifdef NATIVE
+/* Trusted asset data only; returns FALSE on an unsupported header or an
+ * internal scratch-allocation failure. The caller supplies sufficient output. */
+bool32 TryDecompressDataWithHeaderWram(const u32 *src, void *dest);
+#endif
 
 // Lucky's fast lz decompression function
 void FastLZ77UnCompWram(const u32 *src, void *dest);

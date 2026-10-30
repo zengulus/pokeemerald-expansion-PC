@@ -15,6 +15,9 @@
 #include "util.h"
 #include "mystery_event_msg.h"
 #include "pokemon_storage_system.h"
+#ifdef NATIVE
+#include "mods.h"
+#endif
 
 extern ScrCmdFunc gMysteryEventScriptCmdTable[];
 extern ScrCmdFunc gMysteryEventScriptCmdTableEnd[];
@@ -335,6 +338,12 @@ bool8 MEScrCmd_givepokemon(struct ScriptContext *ctx)
     }
     else
     {
+#ifdef NATIVE
+        struct RhhOwnedGift gift;
+        bool32 notifyGift = ModsOwnedGiftCapture(&pokemon.box, RHH_GIFT_MYSTERY_EVENT, &gift);
+        if (notifyGift) ModsOwnedGiftDestination(&gParties[B_TRAINER_PLAYER][PARTY_SIZE - 1].box,
+                                                 RHH_MON_PARTY, 0, PARTY_SIZE - 1, &gift);
+#endif
         memcpy(&gParties[B_TRAINER_PLAYER][PARTY_SIZE - 1], pokemonPtr, sizeof(struct Pokemon));
         memcpy(&mail, mailPtr, sizeof(struct Mail));
 
@@ -348,6 +357,10 @@ bool8 MEScrCmd_givepokemon(struct ScriptContext *ctx)
         heldItem = GetMonData(&gParties[B_TRAINER_PLAYER][PARTY_SIZE - 1], MON_DATA_HELD_ITEM);
         if (ItemIsMail(heldItem))
             GiveMailToMon(&gParties[B_TRAINER_PLAYER][PARTY_SIZE - 1], &mail);
+#ifdef NATIVE
+        if (notifyGift) ModsOwnedGiftCommitted(&gParties[B_TRAINER_PLAYER][PARTY_SIZE - 1].box, &gift);
+        else NativeOwnedTrackerUnsupported();
+#endif
         CompactPartySlots();
         CalculatePlayerPartyCount();
         StringExpandPlaceholders(gStringVar4, gText_MysteryEventSentOver);

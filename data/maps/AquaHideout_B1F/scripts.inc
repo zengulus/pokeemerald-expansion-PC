@@ -29,7 +29,10 @@ AquaHideout_B1F_EventScript_ShowElectrode2::
 AquaHideout_B1F_EventScript_Electrode1::
 	lock
 	faceplayer
+AquaHideout_B1F_EventScript_PrepareElectrode1::
+	identifywildencounter "rhh:encounter/aqua_hideout_b1f/electrode_1"
 	setwildbattle SPECIES_ELECTRODE, 30
+	guardwildbattle release
 	waitse
 	playmoncry SPECIES_ELECTRODE, CRY_MODE_ENCOUNTER
 	delay 40
@@ -53,7 +56,9 @@ AquaHideout_B1F_EventScript_DefeatedElectrode1::
 AquaHideout_B1F_EventScript_Electrode2::
 	lock
 	faceplayer
+	identifywildencounter "rhh:encounter/aqua_hideout_b1f/electrode_2"
 	setwildbattle SPECIES_ELECTRODE, 30
+	guardwildbattle release
 	waitse
 	playmoncry SPECIES_ELECTRODE, CRY_MODE_ENCOUNTER
 	delay 40
@@ -143,14 +148,14 @@ AquaHideout_B1F_Text_Grunt5Defeat:
 	.string "Oh, I lost…$"
 
 AquaHideout_B1F_Text_Grunt5PostBattle:
-	.string "If you scurry too much, other TEAM\n"
-	.string "AQUA members might get you.$"
+	.string "If you scurry too much, other Team\n"
+	.string "Aqua members might get you.$"
 
 AquaHideout_B1F_Text_Grunt7Intro:
 	.string "Hey!\n"
 	.string "You there!\p"
 	.string "Which do you think is cooler?\n"
-	.string "TEAM AQUA's uniform or TEAM MAGMA's?$"
+	.string "Team Aqua's uniform or Team Magma's?$"
 
 AquaHideout_B1F_Text_Grunt7Defeat:
 	.string "I lost in a cool way…$"

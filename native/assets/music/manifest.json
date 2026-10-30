@@ -123,83 +123,107 @@
     },
     {
       "path": "gen4/wild.mid",
-      "source": "https://www.vgmusic.com/music/console/nintendo/ds/Pokemon_Diamond_Pearl_Wild_Pokemon_Battle.mid",
-      "author": "Electric Concerto",
+      "source": "https://fi.zophar.net/soundfiles/nintendo-ds-2sf/pokemon-diamond/Pokemon%20Diamond%20%28EMU%29.zophar.zip",
+      "source_sha256": "066490afc2937fa15a3c3e9723a3a47090ceb70b1bc1d009fc29d1f5708f3777",
       "format": "midi",
       "id": "rhh:midi/gen4/wild",
-      "source_catalogue": "https://www.vgmusic.com/music/console/nintendo/ds/",
-      "sha256": "492d3c6d208ae1eaf77d4091dcec65250a9bc46523fa6fb9f2702cc2b70331e6",
-      "size": 18558
+      "sequence": "SEQ_BA_POKE",
+      "extractor": "VGMTrans 1.3 (fe806cf76a45d517c1b2cfbb8a3b624081671b25)",
+      "derived": true,
+      "size": 16290,
+      "sha256": "db09bcecc5f8b9cba9f045f167a22af7c64921f125badbdc927e6901f04cb6d8",
+      "loop_markers": "native/annotate_ds_music.py"
     },
     {
       "path": "gen4/trainer.mid",
-      "source": "https://www.vgmusic.com/music/console/nintendo/ds/Trainer.mid",
-      "author": "Brian Hayden",
+      "source": "https://fi.zophar.net/soundfiles/nintendo-ds-2sf/pokemon-diamond/Pokemon%20Diamond%20%28EMU%29.zophar.zip",
+      "source_sha256": "066490afc2937fa15a3c3e9723a3a47090ceb70b1bc1d009fc29d1f5708f3777",
       "format": "midi",
       "id": "rhh:midi/gen4/trainer",
-      "source_catalogue": "https://www.vgmusic.com/music/console/nintendo/ds/",
-      "sha256": "1f3bcc1fda2897f8c9b8ddc2374b78644de397bf23e9d80cac228c98695aa19f",
-      "size": 65008
+      "sequence": "SEQ_BA_TRAIN",
+      "extractor": "VGMTrans 1.3 (fe806cf76a45d517c1b2cfbb8a3b624081671b25)",
+      "derived": true,
+      "size": 22228,
+      "sha256": "c0173be7d0fb2a5fc36a25ac1dc9f752cd65afc665ac7eedfc21023629617efc",
+      "loop_markers": "native/annotate_ds_music.py"
     },
     {
       "path": "gen4/gym.mid",
-      "source": "https://www.vgmusic.com/music/console/nintendo/ds/PMDPgymbattle.mid",
-      "author": "foxT.A.K.A",
+      "source": "https://fi.zophar.net/soundfiles/nintendo-ds-2sf/pokemon-diamond/Pokemon%20Diamond%20%28EMU%29.zophar.zip",
+      "source_sha256": "066490afc2937fa15a3c3e9723a3a47090ceb70b1bc1d009fc29d1f5708f3777",
       "format": "midi",
       "id": "rhh:midi/gen4/gym",
-      "source_catalogue": "https://www.vgmusic.com/music/console/nintendo/ds/",
-      "sha256": "b1f64d63743f3d59ef4f8822976b7454c105441986e83b7696d69687c19d69c8",
-      "size": 88085
+      "sequence": "SEQ_BA_GYM",
+      "extractor": "VGMTrans 1.3 (fe806cf76a45d517c1b2cfbb8a3b624081671b25)",
+      "derived": true,
+      "size": 28144,
+      "sha256": "10b75e0a5331f25374d702379fafedb91816e3f4ffc9d3d9a755183103b9328a",
+      "loop_markers": "native/annotate_ds_music.py"
     },
     {
       "path": "gen4/champion.mid",
-      "source": "https://www.vgmusic.com/music/console/nintendo/ds/pmdpp_champbattle.mid",
-      "author": "Joanna",
+      "source": "https://fi.zophar.net/soundfiles/nintendo-ds-2sf/pokemon-diamond/Pokemon%20Diamond%20%28EMU%29.zophar.zip",
+      "source_sha256": "066490afc2937fa15a3c3e9723a3a47090ceb70b1bc1d009fc29d1f5708f3777",
       "format": "midi",
       "id": "rhh:midi/gen4/champion",
-      "source_catalogue": "https://www.vgmusic.com/music/console/nintendo/ds/",
-      "sha256": "0b51a426164e4acdc8578d33eeae51a1183758b6fcb04daeed36c72a23c3c171",
-      "size": 52720
+      "sequence": "SEQ_BA_CHANP",
+      "extractor": "VGMTrans 1.3 (fe806cf76a45d517c1b2cfbb8a3b624081671b25)",
+      "derived": true,
+      "size": 27847,
+      "sha256": "242577db3e9f96e5933ed74a1a33f4eebed0a71068e00c0ab30c4d2863e42b68",
+      "loop_markers": "native/annotate_ds_music.py"
     },
     {
       "path": "gen5/wild.mid",
-      "source": "https://www.vgmusic.com/music/console/nintendo/ds/PKMN_BW_wild_battle_midi.mid",
-      "author": "Neocrystal3D/Superpokemonray1234",
+      "source": "https://fi.zophar.net/soundfiles/nintendo-ds-2sf/pokemon-black-white/Pokemon%20Black%20%26%20White%20%28EMU%29.zophar.zip",
+      "source_sha256": "55fc3c09dd1a4110ff33e8351b12526953f54602b25005d0069566f2789ff1cf",
       "format": "midi",
       "id": "rhh:midi/gen5/wild",
-      "source_catalogue": "https://www.vgmusic.com/music/console/nintendo/ds/",
-      "sha256": "96adddf29a54a8f95004adb113918e007df5843ddfdb45fbc9ac1668993498f0",
-      "size": 44510
+      "sequence": "SEQ_BGM_VS_NORAPOKE",
+      "extractor": "VGMTrans 1.3 (fe806cf76a45d517c1b2cfbb8a3b624081671b25)",
+      "derived": true,
+      "size": 27125,
+      "sha256": "6d99dc200a24d33adbda8540df4bca023f43caad20f41cdb339a389e62f3d1de",
+      "loop_markers": "native/annotate_ds_music.py"
     },
     {
       "path": "gen5/trainer.mid",
-      "source": "https://www.vgmusic.com/music/console/nintendo/ds/TrainerWhite.mid",
-      "author": "Fortwaffles",
+      "source": "https://fi.zophar.net/soundfiles/nintendo-ds-2sf/pokemon-black-white/Pokemon%20Black%20%26%20White%20%28EMU%29.zophar.zip",
+      "source_sha256": "55fc3c09dd1a4110ff33e8351b12526953f54602b25005d0069566f2789ff1cf",
       "format": "midi",
       "id": "rhh:midi/gen5/trainer",
-      "source_catalogue": "https://www.vgmusic.com/music/console/nintendo/ds/",
-      "sha256": "6d6cc032106515335f4d46cd959371866986764ee7134bf6045b88735e40a568",
-      "size": 38053
+      "sequence": "SEQ_BGM_VS_TRAINER",
+      "extractor": "VGMTrans 1.3 (fe806cf76a45d517c1b2cfbb8a3b624081671b25)",
+      "derived": true,
+      "size": 36167,
+      "sha256": "be98d589a466808a476b018b856d6d020e6cfac19622932047d9c2bef2508e69",
+      "loop_markers": "native/annotate_ds_music.py"
     },
     {
       "path": "gen5/gym.mid",
-      "source": "https://www.vgmusic.com/music/console/nintendo/ds/Gym_Leader.mid",
-      "author": "Fortwaffles",
+      "source": "https://fi.zophar.net/soundfiles/nintendo-ds-2sf/pokemon-black-white/Pokemon%20Black%20%26%20White%20%28EMU%29.zophar.zip",
+      "source_sha256": "55fc3c09dd1a4110ff33e8351b12526953f54602b25005d0069566f2789ff1cf",
       "format": "midi",
       "id": "rhh:midi/gen5/gym",
-      "source_catalogue": "https://www.vgmusic.com/music/console/nintendo/ds/",
-      "sha256": "5c325e3efb9f185b93a814154caced61fc2fcee841e8078dbb8da65bc763de07",
-      "size": 30863
+      "sequence": "SEQ_BGM_VS_GYMLEADER",
+      "extractor": "VGMTrans 1.3 (fe806cf76a45d517c1b2cfbb8a3b624081671b25)",
+      "derived": true,
+      "size": 28896,
+      "sha256": "049b82826c27c342297647b18726a36e4608b64090b784be14086616a150cabf",
+      "loop_markers": "native/annotate_ds_music.py"
     },
     {
       "path": "gen5/champion.mid",
-      "source": "https://www.vgmusic.com/music/console/nintendo/ds/irisfix.mid",
-      "author": "Wobuffet3",
+      "source": "https://fi.zophar.net/soundfiles/nintendo-ds-2sf/pokemon-black-white/Pokemon%20Black%20%26%20White%20%28EMU%29.zophar.zip",
+      "source_sha256": "55fc3c09dd1a4110ff33e8351b12526953f54602b25005d0069566f2789ff1cf",
       "format": "midi",
       "id": "rhh:midi/gen5/champion",
-      "source_catalogue": "https://www.vgmusic.com/music/console/nintendo/ds/",
-      "sha256": "6a34b43b7bd4c4686b935b433715472a8ac7c87ff7a558626c606c8b0dcedc98",
-      "size": 35997
+      "sequence": "SEQ_BGM_VS_CHAMP",
+      "extractor": "VGMTrans 1.3 (fe806cf76a45d517c1b2cfbb8a3b624081671b25)",
+      "derived": true,
+      "size": 38117,
+      "sha256": "8833266621fd74936de10fd4e228b4bef76571286630c6843f5cbfc4cc0e2a45",
+      "loop_markers": "native/annotate_ds_music.py"
     },
     {
       "path": "fonts/gen12.sf2",
@@ -241,6 +265,88 @@
       "id": "rhh:soundfont/gen5",
       "sha256": "767ff2e9cdff4ecf643e09299cf4e188cb411a2393f3a4b84c7d9c67b6bcd518",
       "size": 27705906
+    },
+    {
+      "path": "fonts/gen4-native.sf2",
+      "source": "https://fi.zophar.net/soundfiles/nintendo-ds-2sf/pokemon-diamond/Pokemon%20Diamond%20%28EMU%29.zophar.zip",
+      "source_sha256": "066490afc2937fa15a3c3e9723a3a47090ceb70b1bc1d009fc29d1f5708f3777",
+      "format": "sf2",
+      "id": "rhh:soundfont/gen4/native",
+      "sequence": "SEQ_BA_POKE",
+      "extractor": "VGMTrans 1.3 (fe806cf76a45d517c1b2cfbb8a3b624081671b25)",
+      "derived": true,
+      "size": 2591638,
+      "sha256": "a3a3725e263b1acd83e5101f13a2d38795ee4a02463d0b08d95cb0903aea5711"
+    },
+    {
+      "path": "fonts/gen5-wild.sf2",
+      "source": "https://fi.zophar.net/soundfiles/nintendo-ds-2sf/pokemon-black-white/Pokemon%20Black%20%26%20White%20%28EMU%29.zophar.zip",
+      "source_sha256": "55fc3c09dd1a4110ff33e8351b12526953f54602b25005d0069566f2789ff1cf",
+      "format": "sf2",
+      "id": "rhh:soundfont/gen5/wild",
+      "sequence": "SEQ_BGM_VS_NORAPOKE",
+      "extractor": "VGMTrans 1.3 (fe806cf76a45d517c1b2cfbb8a3b624081671b25)",
+      "derived": true,
+      "size": 1492982,
+      "sha256": "b3ac7905c674eec46713664b9c56e163ac0a751900ca65a67414f7a76fe14822"
+    },
+    {
+      "path": "fonts/gen5-trainer.sf2",
+      "source": "https://fi.zophar.net/soundfiles/nintendo-ds-2sf/pokemon-black-white/Pokemon%20Black%20%26%20White%20%28EMU%29.zophar.zip",
+      "source_sha256": "55fc3c09dd1a4110ff33e8351b12526953f54602b25005d0069566f2789ff1cf",
+      "format": "sf2",
+      "id": "rhh:soundfont/gen5/trainer",
+      "sequence": "SEQ_BGM_VS_TRAINER",
+      "extractor": "VGMTrans 1.3 (fe806cf76a45d517c1b2cfbb8a3b624081671b25)",
+      "derived": true,
+      "size": 1502210,
+      "sha256": "b54072799a76fd9f31134442766cae1399a24d02c8c2fd98fa22810b833ae30e"
+    },
+    {
+      "path": "fonts/gen5-gym.sf2",
+      "source": "https://fi.zophar.net/soundfiles/nintendo-ds-2sf/pokemon-black-white/Pokemon%20Black%20%26%20White%20%28EMU%29.zophar.zip",
+      "source_sha256": "55fc3c09dd1a4110ff33e8351b12526953f54602b25005d0069566f2789ff1cf",
+      "format": "sf2",
+      "id": "rhh:soundfont/gen5/gym",
+      "sequence": "SEQ_BGM_VS_GYMLEADER",
+      "extractor": "VGMTrans 1.3 (fe806cf76a45d517c1b2cfbb8a3b624081671b25)",
+      "derived": true,
+      "size": 1522514,
+      "sha256": "05cebc473d9d99881f93e933edb7db96f8efb0b911d5ac975426c821cf2dd807"
+    },
+    {
+      "path": "fonts/gen5-champion.sf2",
+      "source": "https://fi.zophar.net/soundfiles/nintendo-ds-2sf/pokemon-black-white/Pokemon%20Black%20%26%20White%20%28EMU%29.zophar.zip",
+      "source_sha256": "55fc3c09dd1a4110ff33e8351b12526953f54602b25005d0069566f2789ff1cf",
+      "format": "sf2",
+      "id": "rhh:soundfont/gen5/champion",
+      "sequence": "SEQ_BGM_VS_CHAMP",
+      "extractor": "VGMTrans 1.3 (fe806cf76a45d517c1b2cfbb8a3b624081671b25)",
+      "derived": true,
+      "size": 1489358,
+      "sha256": "5efb9d42b5ea3cfcbe9a529bfbb8d1d1c26ed139b13eaf809c4ed27ed5047193"
+    },
+    {
+      "path": "gameboy/gen1.gbs",
+      "source": "https://fi.zophar.net/soundfiles/gameboy-gbs/pokemon-red/Pokemon%20Red%20%28EMU%29.zophar.zip",
+      "zip_entry": "DMG-APAE-USA.gbs",
+      "zip_archive_small": true,
+      "format": "gbs",
+      "id": "rhh:gameboy/gen1",
+      "size": 49434,
+      "sha256": "ffe8c2fe1f65ecc4044f5b0e4ddd048f23d18daa23d5656ae1195fb41d125566",
+      "source_sha256": "dfba721f7e8b0300e14f5e4d8135a2117c2fdf10052f6a643b6e21b51223e7c4"
+    },
+    {
+      "path": "gameboy/gen2.gbs",
+      "source": "https://fi.zophar.net/soundfiles/gameboy-gbs/pokemon-gold/Pokemon%20Gold%20%28EMU%29.zophar.zip",
+      "zip_entry": "DMG-AAUJ-JPN.gbs",
+      "zip_archive_small": true,
+      "format": "gbs",
+      "id": "rhh:gameboy/gen2",
+      "size": 98638,
+      "sha256": "18ec2e0fa1eacb15471930e025df34efe4547be474d781967ccc38cbc9ff59c9",
+      "source_sha256": "2af120a66272675ae69c287d6608f6fb9bca106758b4b18a807bc277c0bb87e5"
     }
   ],
   "packs": [
@@ -253,6 +359,15 @@
         "trainer": "gen1/trainer.mid",
         "gym": "gen1/gym.mid",
         "champion": "gen1/champion.mid"
+      },
+      "gameboy": {
+        "file": "gameboy/gen1.gbs",
+        "tracks": {
+          "wild": 23,
+          "trainer": 22,
+          "gym": 21,
+          "champion": 24
+        }
       }
     },
     {
@@ -264,6 +379,15 @@
         "trainer": "gen2/trainer.mid",
         "gym": "gen2/gym.mid",
         "champion": "gen2/champion.mid"
+      },
+      "gameboy": {
+        "file": "gameboy/gen2.gbs",
+        "tracks": {
+          "wild": 40,
+          "trainer": 41,
+          "gym": 45,
+          "champion": 46
+        }
       }
     },
     {
@@ -280,7 +404,7 @@
     {
       "id": "rhh:music/gen4",
       "generation": 4,
-      "font": "fonts/gen4.sf2",
+      "font": "fonts/gen4-native.sf2",
       "tracks": {
         "wild": "gen4/wild.mid",
         "trainer": "gen4/trainer.mid",
@@ -291,12 +415,17 @@
     {
       "id": "rhh:music/gen5",
       "generation": 5,
-      "font": "fonts/gen5.sf2",
       "tracks": {
         "wild": "gen5/wild.mid",
         "trainer": "gen5/trainer.mid",
         "gym": "gen5/gym.mid",
         "champion": "gen5/champion.mid"
+      },
+      "fonts": {
+        "wild": "fonts/gen5-wild.sf2",
+        "trainer": "fonts/gen5-trainer.sf2",
+        "gym": "fonts/gen5-gym.sf2",
+        "champion": "fonts/gen5-champion.sf2"
       }
     }
   ]

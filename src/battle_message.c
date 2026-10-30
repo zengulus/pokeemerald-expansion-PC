@@ -1,9 +1,13 @@
 #include "global.h"
+#ifdef NATIVE
+#include "mods.h"
+#endif
 #include "battle.h"
 #include "battle_anim.h"
 #include "battle_ai_record.h"
 #include "battle_controllers.h"
 #include "battle_message.h"
+#include "battle_main.h"
 #include "battle_setup.h"
 #include "battle_special.h"
 #include "battle_z_move.h"
@@ -26,6 +30,7 @@
 #include "trainer_tower.h"
 #include "window.h"
 #include "line_break.h"
+#include "move.h"
 #include "constants/abilities.h"
 #include "constants/battle_dome.h"
 #include "constants/battle_string_ids.h"
@@ -389,7 +394,7 @@ const u8 *const gBattleStringsTable[STRINGID_COUNT] =
     [STRINGID_WILDPKMNFLED]                         = COMPOUND_STRING("{PLAY_SE SE_FLEE}The wild {B_BUFF1} fled!"),
     [STRINGID_NORUNNINGFROMTRAINERS]                = COMPOUND_STRING("No! There's no running from a Trainer battle!\p"),
     [STRINGID_CANTESCAPE]                           = COMPOUND_STRING("You can't escape!\p"),
-    [STRINGID_DONTLEAVEBIRCH]                       = COMPOUND_STRING("PROF. BIRCH: Don't leave me like this!\p"), //no decapitalize until it is everywhere
+    [STRINGID_DONTLEAVEBIRCH]                       = COMPOUND_STRING("Prof. Birch: Don't leave me like this!\p"), //no decapitalize until it is everywhere
     [STRINGID_BUTNOTHINGHAPPENED]                   = COMPOUND_STRING("But nothing happened!"),
     [STRINGID_BUTITFAILED]                          = COMPOUND_STRING("But it failed!"),
     [STRINGID_ITHURTCONFUSION]                      = COMPOUND_STRING("It hurt itself in its confusion!"),
@@ -1554,9 +1559,9 @@ const u8 *const gRefereeStringsTable[] =
 {
     [B_MSG_REF_NOTHING_IS_DECIDED] = COMPOUND_STRING("REFEREE: If nothing is decided in 3 turns, we will go to judging!"),
     [B_MSG_REF_THATS_IT]           = COMPOUND_STRING("REFEREE: That's it! We will now go to judging to determine the winner!"),
-    [B_MSG_REF_JUDGE_MIND]         = COMPOUND_STRING("REFEREE: Judging category 1, Mind! The POKéMON showing the most guts!\p"),
-    [B_MSG_REF_JUDGE_SKILL]        = COMPOUND_STRING("REFEREE: Judging category 2, Skill! The POKéMON using moves the best!\p"),
-    [B_MSG_REF_JUDGE_BODY]         = COMPOUND_STRING("REFEREE: Judging category 3, Body! The POKéMON with the most vitality!\p"),
+    [B_MSG_REF_JUDGE_MIND]         = COMPOUND_STRING("REFEREE: Judging category 1, Mind! The Pokémon showing the most guts!\p"),
+    [B_MSG_REF_JUDGE_SKILL]        = COMPOUND_STRING("REFEREE: Judging category 2, Skill! The Pokémon using moves the best!\p"),
+    [B_MSG_REF_JUDGE_BODY]         = COMPOUND_STRING("REFEREE: Judging category 3, Body! The Pokémon with the most vitality!\p"),
     [B_MSG_REF_PLAYER_WON]         = COMPOUND_STRING("REFEREE: Judgment: {B_BUFF1} to {B_BUFF2}! The winner is {B_PLAYER_NAME}'s {B_PLAYER_MON1_NAME}!\p"),
     [B_MSG_REF_OPPONENT_WON]       = COMPOUND_STRING("REFEREE: Judgment: {B_BUFF1} to {B_BUFF2}! The winner is {B_TRAINER1_NAME}'s {B_OPPONENT_MON1_NAME}!\p"),
     [B_MSG_REF_DRAW]               = COMPOUND_STRING("REFEREE: Judgment: 3 to 3! We have a draw!\p"),
@@ -2420,7 +2425,11 @@ static const struct BattleWindowText *const sBattleTextOnWindowsInfo[] =
     [B_WIN_TYPE_KANTO_TUTORIAL] = sTextOnWindowsInfo_KantoTutorial,
 };
 
-static const u8 sRecordedBattleTextSpeeds[] = {8, 4, 1, 0};
+static const u8 sRecordedBattleTextSpeeds[] = {8, 4, 1, 0
+#ifdef NATIVE
+    , 1
+#endif
+};
 
 void BufferStringBattle(enum StringID stringID, enum BattlerId battler)
 {
@@ -2721,9 +2730,12 @@ void BufferStringBattle(enum StringID stringID, enum BattlerId battler)
         break;
     case STRINGID_USEDMOVE: // Pokémon used a move msg
         if (gBattleMsgDataPtr->currentMove >= MOVES_COUNT
+#ifdef NATIVE
+         && !ModsIsCustomMove(gBattleMsgDataPtr->currentMove)
+#endif
          && !IsZMove(gBattleMsgDataPtr->currentMove)
          && !IsMaxMove(gBattleMsgDataPtr->currentMove))
-            StringCopy(gBattleTextBuff3, gTypesInfo[*(&gBattleStruct->stringMoveType)].generic);
+            StringCopy(gBattleTextBuff3, GetTypeGenericName(gBattleStruct->stringMoveType));
         else
             StringCopy(gBattleTextBuff3, GetMoveName(gBattleMsgDataPtr->currentMove));
         stringPtr = sText_AttackerUsedX;
@@ -2800,6 +2812,15 @@ void BufferStringBattle(enum StringID stringID, enum BattlerId battler)
     case STRINGID_TRAINERSLIDE:
         stringPtr = gBattleStruct->trainerSlideMsg;
         break;
+#ifdef NATIVE
+    case STRINGID_MOD_EFFECT_MESSAGE:
+        stringPtr = ModsMoveEffectMessageText();
+        break;
+    case STRINGID_MOD_SELECTION_DENIAL:
+        stringPtr = ModsMoveSelectionMessage(battler);
+        if (!stringPtr) stringPtr = gBattleStringsTable[STRINGID_CANTUSEMOVE];
+        break;
+#endif
     default: // load a string from the table
         if (stringID >= STRINGID_COUNT)
         {
@@ -3213,17 +3234,23 @@ u32 BattleStringExpandPlaceholders(const u8 *src, u8 *dst, u32 dstSize)
                 break;
             case B_TXT_CURRENT_MOVE: // current move name
                 if (gBattleMsgDataPtr->currentMove >= MOVES_COUNT
+#ifdef NATIVE
+                 && !ModsIsCustomMove(gBattleMsgDataPtr->currentMove)
+#endif
                  && !IsZMove(gBattleMsgDataPtr->currentMove)
                  && !IsMaxMove(gBattleMsgDataPtr->currentMove))
-                    toCpy = gTypesInfo[gBattleStruct->stringMoveType].generic;
+                    toCpy = GetTypeGenericName(gBattleStruct->stringMoveType);
                 else
                     toCpy = GetMoveName(gBattleMsgDataPtr->currentMove);
                 break;
             case B_TXT_LAST_MOVE: // originally used move name
                 if (gBattleMsgDataPtr->originallyUsedMove >= MOVES_COUNT
+#ifdef NATIVE
+                 && !ModsIsCustomMove(gBattleMsgDataPtr->originallyUsedMove)
+#endif
                  && !IsZMove(gBattleMsgDataPtr->currentMove)
                  && !IsMaxMove(gBattleMsgDataPtr->currentMove))
-                    toCpy = gTypesInfo[gBattleStruct->stringMoveType].generic;
+                    toCpy = GetTypeGenericName(gBattleStruct->stringMoveType);
                 else
                     toCpy = GetMoveName(gBattleMsgDataPtr->originallyUsedMove);
                 break;
@@ -3752,7 +3779,7 @@ void ExpandBattleTextBuffPlaceholders(const u8 *src, u8 *dst)
             srcID += 3;
             break;
         case B_BUFF_TYPE: // type name
-            StringAppend(dst, gTypesInfo[src[srcID + 1]].name);
+            StringAppend(dst, GetTypeName(src[srcID + 1]));
             srcID += 2;
             break;
         case B_BUFF_MON_NICK_WITH_PREFIX: // poke nick with prefix

@@ -1,4 +1,5 @@
 #include "global.h"
+#include "mods.h"
 #include "battle.h"
 #include "battle_anim.h"
 #include "battle_bg.h"
@@ -879,6 +880,9 @@ static void LoadBattleEnvironmentGfx(u16 environment)
     DecompressDataWithHeaderVram(gBattleEnvironmentInfo[environment].background.tileset, (void *)(BG_CHAR_ADDR(2)));
     DecompressDataWithHeaderVram(gBattleEnvironmentInfo[environment].background.tilemap, (void *)(BG_SCREEN_ADDR(26)));
     LoadPalette(gBattleEnvironmentInfo[environment].palette, BG_PLTT_ID(2), 3 * PLTT_SIZE_4BPP);
+#ifdef NATIVE
+    ModsBattleBackdropLoaded(environment);
+#endif
 }
 
 // Loads the entry associated with the battle environment.
@@ -935,6 +939,9 @@ static u8 GetBattleEnvironmentOverride(void)
 
 void BattleInitBgsAndWindows(void)
 {
+#ifdef NATIVE
+    ModsBattleBackdropReset();
+#endif
     ResetBgsAndClearDma3BusyFlags(0);
     InitBgsFromTemplates(0, gBattleBgTemplates, ARRAY_COUNT(gBattleBgTemplates));
 
@@ -1337,15 +1344,30 @@ bool8 LoadChosenBattleElement(u8 caseId)
     case 2:
         LoadPalette(gBattleTextboxPalette, BG_PLTT_ID(0), 2 * PLTT_SIZE_4BPP);
         break;
-    case 3:
-        DecompressDataWithHeaderVram(gBattleEnvironmentInfo[GetBattleEnvironmentOverride()].background.tileset, (void *)(BG_CHAR_ADDR(2)));
+    case 3: {
+        u8 environment = GetBattleEnvironmentOverride();
+#ifdef NATIVE
+        ModsBattleBackdropPart(3, environment);
+#endif
+        DecompressDataWithHeaderVram(gBattleEnvironmentInfo[environment].background.tileset, (void *)(BG_CHAR_ADDR(2)));
         break;
-    case 4:
-        DecompressDataWithHeaderVram(gBattleEnvironmentInfo[GetBattleEnvironmentOverride()].background.tilemap, (void *)(BG_SCREEN_ADDR(26)));
+    }
+    case 4: {
+        u8 environment = GetBattleEnvironmentOverride();
+        DecompressDataWithHeaderVram(gBattleEnvironmentInfo[environment].background.tilemap, (void *)(BG_SCREEN_ADDR(26)));
+#ifdef NATIVE
+        ModsBattleBackdropPart(4, environment);
+#endif
         break;
-    case 5:
-        LoadPalette(gBattleEnvironmentInfo[GetBattleEnvironmentOverride()].palette, BG_PLTT_ID(2), 3 * PLTT_SIZE_4BPP);
+    }
+    case 5: {
+        u8 environment = GetBattleEnvironmentOverride();
+        LoadPalette(gBattleEnvironmentInfo[environment].palette, BG_PLTT_ID(2), 3 * PLTT_SIZE_4BPP);
+#ifdef NATIVE
+        ModsBattleBackdropPart(5, environment);
+#endif
         break;
+    }
     case 6:
         LoadBattleMenuWindowGfx();
         break;

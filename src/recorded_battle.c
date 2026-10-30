@@ -20,6 +20,12 @@
 #include "frontier_util.h"
 #include "constants/trainers.h"
 #include "constants/rgb.h"
+#ifdef NATIVE
+#include "native.h"
+#include "owned_identity_ledger.h"
+#include "mods.h"
+#include "nature_storage.h"
+#endif
 
 struct PlayerInfo
 {
@@ -31,7 +37,9 @@ struct PlayerInfo
 };
 
 // Save data using TryWriteSpecialSaveSector is allowed to exceed SECTOR_DATA_SIZE (up to the counter field)
+#ifndef NATIVE
 STATIC_ASSERT(sizeof(struct RecordedBattleSave) <= SECTOR_COUNTER_OFFSET, RecordedBattleSaveFreeSpace);
+#endif
 
 EWRAM_DATA rng_value_t gRecordedBattleRngSeed = RNG_VALUE_EMPTY;
 EWRAM_DATA rng_value_t gBattlePalaceMoveSelectionRngValue = RNG_VALUE_EMPTY;
@@ -51,6 +59,14 @@ EWRAM_DATA static u8 sTextSpeed = 0;
 EWRAM_DATA static u32 sBattleFlags = 0;
 EWRAM_DATA static u64 sAI_Scripts[MAX_BATTLERS_COUNT] = {0};
 EWRAM_DATA static struct Pokemon *sSavedParties = NULL;
+#ifdef NATIVE
+static u32 sRecordedOriginalPartyCount;
+static bool32 sRecordedCaptureNatureFormat, sRecordedNaturePlayback;
+static unsigned sRecordedPlaybackNatureFormat;
+#define NATIVE_RECORDED_NATURE_FLAGS (BATTLE_TYPE_FIRST_BATTLE | BATTLE_TYPE_EREADER_TRAINER)
+int NativeRecordedBattleNatureMode(void)
+{ return sRecordedNaturePlayback && (gBattleTypeFlags & BATTLE_TYPE_RECORDED) ? (int)sRecordedPlaybackNatureFormat : -1; }
+#endif
 EWRAM_DATA static u16 sPlayerMonMoves[MAX_BATTLERS_COUNT / 2][MAX_MON_MOVES] = {0};
 EWRAM_DATA static struct PlayerInfo sPlayers[MAX_LINK_PLAYERS] = {0};
 EWRAM_DATA static bool8 sIsPlaybackFinished = 0;
@@ -64,13 +80,17 @@ static u8 sRecordMixFriendLanguage;
 static u8 sApprenticeLanguage;
 
 static u8 GetNextRecordedDataByte(u8 *, u8 *, u8 *);
-static bool32 CopyRecordedBattleFromSave(struct RecordedBattleSave *);
+static bool32 CopyRecordedBattleFromSave(struct RecordedBattleSave *, unsigned *);
 static void RecordedBattle_RestoreSavedParties(void);
 static void CB2_RecordedBattle(void);
 
 void RecordedBattle_Init(u8 mode)
 {
     s32 i, j;
+
+#ifdef NATIVE
+    if (mode == B_RECORD_MODE_RECORDING) { sRecordedNaturePlayback = FALSE; sRecordedPlaybackNatureFormat = 0; }
+#endif
 
     sRecordMode = mode;
     sIsPlaybackFinished = FALSE;
@@ -248,7 +268,7 @@ static u8 GetNextRecordedDataByte(u8 *data, u8 *idx, u8 *size)
 bool32 CanCopyRecordedBattleSaveData(void)
 {
     struct RecordedBattleSave *dst = AllocZeroed(sizeof(struct RecordedBattleSave));
-    bool32 ret = CopyRecordedBattleFromSave(dst);
+    bool32 ret = CopyRecordedBattleFromSave(dst, NULL);
     Free(dst);
     return ret;
 }
@@ -265,14 +285,70 @@ static bool32 IsRecordedBattleSaveValid(struct RecordedBattleSave *save)
     return TRUE;
 }
 
+#ifdef NATIVE
+static bool32 RecordedNaturePartiesValid(const struct RecordedBattleSave *record)
+{
+    for (u32 trainer = 0; trainer < MAX_BATTLE_TRAINERS; ++trainer)
+        for (u32 slot = 0; slot < PARTY_SIZE; ++slot)
+        {
+            const struct BoxPokemon *box = &record->parties[trainer][slot].box;
+            unsigned nature, overridden;
+            if (box->isBadEgg || (box->hasSpecies && NativeNatureStorageRead(box, &nature, &overridden))) return FALSE;
+        }
+    return TRUE;
+}
+int NativeNatureRecordingEncode(const struct RecordedBattleSave *source, int natureFormat, struct RecordedBattleSave *out)
+{
+    if (!source || !out || (natureFormat != 0 && natureFormat != 1)) return -1;
+    struct RecordedBattleSave staged = *source;
+    if (!IsRecordedBattleSaveValid(&staged)
+        || (natureFormat && (staged.padding || !RecordedNaturePartiesValid(&staged)))) return -1;
+    if (natureFormat)
+    {
+        staged.battleFlags |= NATIVE_RECORDED_NATURE_FLAGS; staged.padding = 1;
+        staged.checksum = CalcByteArraySum((const u8 *)&staged, sizeof(staged) - sizeof(staged.checksum));
+    }
+    *out = staged; return 0;
+}
+int NativeNatureRecordingDecode(const struct RecordedBattleSave *source, struct RecordedBattleSave *out,
+                                unsigned *requiresFormat)
+{
+    if (!source || !out || !requiresFormat) return -1;
+    struct RecordedBattleSave staged = *source;
+    if (!staged.battleFlags || CalcByteArraySum((const u8 *)&staged, sizeof(staged) - sizeof(staged.checksum)) != staged.checksum)
+        return -1;
+    u32 invalid = staged.battleFlags & BATTLE_TYPE_RECORDED_INVALID;
+    unsigned format = 0;
+    if (invalid)
+    {
+        if (invalid != NATIVE_RECORDED_NATURE_FLAGS || !staged.padding || !RecordedNaturePartiesValid(&staged)) return -1;
+        format = 1; staged.battleFlags &= ~NATIVE_RECORDED_NATURE_FLAGS; staged.padding = 0;
+        staged.checksum = CalcByteArraySum((const u8 *)&staged, sizeof(staged) - sizeof(staged.checksum));
+    }
+    if (!IsRecordedBattleSaveValid(&staged)) return -1;
+    *out = staged; *requiresFormat = format; return 0;
+}
+#endif
+
 static bool32 RecordedBattleToSave(struct RecordedBattleSave *battleSave, struct RecordedBattleSave *saveSector)
 {
+#ifdef NATIVE
+    memset(saveSector, 0, sizeof(*saveSector));
+#else
     memset(saveSector, 0, SECTOR_SIZE);
+#endif
     memcpy(saveSector, battleSave, sizeof(*battleSave));
 
     saveSector->checksum = CalcByteArraySum((void *)(saveSector), sizeof(*saveSector) - 4);
+#ifdef NATIVE
+    if (NativeNatureRecordingEncode(saveSector, sRecordedCaptureNatureFormat, saveSector)) return FALSE;
+#endif
 
+#ifdef NATIVE
+    if (NativeSaveSpecialWrite(SECTOR_ID_RECORDED_BATTLE, saveSector, sizeof(*saveSector)))
+#else
     if (TryWriteSpecialSaveSector(SECTOR_ID_RECORDED_BATTLE, (void *)(saveSector)) != SAVE_STATUS_OK)
+#endif
         return FALSE;
     else
         return TRUE;
@@ -287,7 +363,11 @@ bool32 MoveRecordedBattleToSaveData(void)
 
     saveAttempts = 0;
     battleSave = AllocZeroed(sizeof(struct RecordedBattleSave));
+#ifdef NATIVE
+    savSection = AllocZeroed(sizeof(*savSection));
+#else
     savSection = AllocZeroed(SECTOR_SIZE);
+#endif
 
     memcpy(battleSave->parties, sSavedParties, sizeof(struct Pokemon[MAX_BATTLE_TRAINERS][PARTY_SIZE]));
 
@@ -436,26 +516,42 @@ bool32 MoveRecordedBattleToSaveData(void)
     return ret;
 }
 
-static bool32 TryCopyRecordedBattleSaveData(struct RecordedBattleSave *dst, struct SaveSector *saveBuffer)
+static bool32 TryCopyRecordedBattleSaveData(struct RecordedBattleSave *dst, struct SaveSector *saveBuffer, unsigned *natureFormat)
 {
+#ifdef NATIVE
+    (void)saveBuffer;
+    if (NativeSaveSpecialRead(SECTOR_ID_RECORDED_BATTLE, dst, sizeof(*dst))) return FALSE;
+#else
     if (TryReadSpecialSaveSector(SECTOR_ID_RECORDED_BATTLE, (void *)(saveBuffer)) != SAVE_STATUS_OK)
         return FALSE;
 
     memcpy(dst, saveBuffer, sizeof(struct RecordedBattleSave));
+#endif
 
+#ifdef NATIVE
+    unsigned format;
+    if (NativeNatureRecordingDecode(dst, dst, &format)) return FALSE;
+    if (natureFormat) *natureFormat = format;
+#else
+    (void)natureFormat;
     if (!IsRecordedBattleSaveValid(dst))
         return FALSE;
+#endif
 
     return TRUE;
 }
 
-static bool32 CopyRecordedBattleFromSave(struct RecordedBattleSave *dst)
+static bool32 CopyRecordedBattleFromSave(struct RecordedBattleSave *dst, unsigned *natureFormat)
 {
+#ifdef NATIVE
+    return TryCopyRecordedBattleSaveData(dst, NULL, natureFormat);
+#else
     struct SaveSector *savBuffer = AllocZeroed(SECTOR_SIZE);
-    bool32 ret = TryCopyRecordedBattleSaveData(dst, savBuffer);
+    bool32 ret = TryCopyRecordedBattleSaveData(dst, savBuffer, natureFormat);
     Free(savBuffer);
 
     return ret;
+#endif
 }
 
 static void CB2_RecordedBattleEnd(void)
@@ -485,6 +581,12 @@ static void Task_StartAfterCountdown(u8 taskId)
 
 void SetPartiesFromRecordedSave(struct RecordedBattleSave *src)
 {
+#ifdef NATIVE
+    /* Playback has no checked mapping to the owned field party, including
+     * when the current slots are empty or the recorded bytes are identical. */
+    NativeOwnedTrackUnreportedCopy(gParties[B_TRAINER_PLAYER], src->parties[B_TRAINER_PLAYER],
+                                   sizeof(gParties[B_TRAINER_PLAYER]));
+#endif
     for (enum BattleTrainer trainer = B_TRAINER_PLAYER; trainer < MAX_BATTLE_TRAINERS; trainer++)
     {
         ZeroPartyMons(gParties[trainer]);
@@ -550,11 +652,17 @@ void SetVariablesForRecordedBattle(struct RecordedBattleSave *src)
 void PlayRecordedBattle(void (*CB2_After)(void))
 {
     struct RecordedBattleSave *battleSave = AllocZeroed(sizeof(struct RecordedBattleSave));
-    if (CopyRecordedBattleFromSave(battleSave) == TRUE)
+    unsigned natureFormat = 0;
+    if (CopyRecordedBattleFromSave(battleSave, &natureFormat) == TRUE)
     {
         u8 taskId;
 
         RecordedBattle_SaveParties();
+#ifdef NATIVE
+        sRecordedNaturePlayback = TRUE; sRecordedPlaybackNatureFormat = natureFormat;
+        sRecordedOriginalPartyCount = gPartiesCount[B_TRAINER_PLAYER];
+        ModsOwnedRecordedPartyBegin(sSavedParties, sRecordedOriginalPartyCount);
+#endif
         SetVariablesForRecordedBattle(battleSave);
 
         taskId = CreateTask(Task_StartAfterCountdown, 1);
@@ -588,6 +696,9 @@ u8 GetRecordedBattleFronterBrainSymbol(void)
 
 void RecordedBattle_SaveParties(void)
 {
+#ifdef NATIVE
+    sRecordedCaptureNatureFormat = ModsNatureFormatEnabled();
+#endif
     sSavedParties = AllocZeroed(sizeof(struct Pokemon[MAX_BATTLE_TRAINERS][PARTY_SIZE]));
 
     memcpy(sSavedParties, gParties, sizeof(struct Pokemon[MAX_BATTLE_TRAINERS][PARTY_SIZE]));
@@ -595,7 +706,18 @@ void RecordedBattle_SaveParties(void)
 
 static void RecordedBattle_RestoreSavedParties(void)
 {
+#ifdef NATIVE
+    ModsOwnedRecordedPartyBeforeRestore(sSavedParties);
+    NativeOwnedTrackUnreportedCopy(gParties[B_TRAINER_PLAYER], sSavedParties,
+                                   sizeof(gParties[B_TRAINER_PLAYER]));
+#endif
     memcpy(gParties, sSavedParties, sizeof(struct Pokemon[MAX_BATTLE_TRAINERS][PARTY_SIZE]));
+
+#ifdef NATIVE
+    gPartiesCount[B_TRAINER_PLAYER] = sRecordedOriginalPartyCount;
+    ModsOwnedRecordedPartyAfterRestore();
+    sRecordedNaturePlayback = FALSE; sRecordedPlaybackNatureFormat = 0;
+#endif
 
     Free(sSavedParties);
 }

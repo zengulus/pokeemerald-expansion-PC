@@ -12,7 +12,7 @@ RocketHideout_B3F_EventScript_Grunt2::
 	end
 
 RocketHideout_B3F_Text_Grunt1Intro::
-	.string "Stop meddling in TEAM ROCKET's\n"
+	.string "Stop meddling in Team Rocket's\n"
 	.string "affairs or else!$"
 
 RocketHideout_B3F_Text_Grunt1Defeat::

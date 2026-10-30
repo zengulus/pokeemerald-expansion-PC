@@ -704,6 +704,9 @@ BattleScript_EffectJungleHealing::
 	jumpifteamhealthy BattleScript_ButItFailed
 	attackanimation
 	waitanimation
+#ifdef NATIVE
+	callnative BS_ModCaptureJungleCureActor
+#endif
 	copybyte gBattlerTarget, gBattlerAttacker
 	setbyte gBattleCommunication, 0
 JungleHealing_RestoreTargetHealth:
@@ -717,10 +720,16 @@ BattleScript_JungleHealing_TryCureStatus:
 	jumpifstatus BS_TARGET, STATUS1_ANY, BattleScript_JungleHealingCureStatus
 	goto BattleScript_JungleHealingTryRestoreAlly
 BattleScript_JungleHealingCureStatus:
+#ifdef NATIVE
+	callnative BS_ModJungleCureBegin
+#endif
 	curestatus BS_TARGET
 	updatestatusicon BS_TARGET
 	printfromtable gCureStatusStringIds
 	waitmessage B_WAIT_TIME_LONG
+#ifdef NATIVE
+	callnative BS_ModScriptCureReactions
+#endif
 BattleScript_JungleHealingTryRestoreAlly:
 	jumpifbyte CMP_NOT_EQUAL, gBattleCommunication, 0x0, BattleScript_MoveEnd
 	addbyte gBattleCommunication, 1
@@ -800,10 +809,16 @@ BattleScript_EffectPurify::
 BattleScript_PurifyWorks:
 	attackanimation
 	waitanimation
+#ifdef NATIVE
+	callnative BS_ModMoveCureBegin
+#endif
 	curestatus BS_TARGET
 	updatestatusicon BS_TARGET
 	printstring STRINGID_ATTACKERCUREDTARGETSTATUS
 	waitmessage B_WAIT_TIME_LONG
+#ifdef NATIVE
+	callnative BS_ModScriptCureReactions
+#endif
 	tryhealhalfhealth BS_ATTACKER, BattleScript_AlreadyAtFullHp
 	goto BattleScript_RestoreHp
 
@@ -934,10 +949,16 @@ BattleScript_EffectPsychoShiftCanWork:
 	updatestatusicon BS_TARGET
 	waitstate
 	trysynchronize
+#ifdef NATIVE
+	callnative BS_ModMoveCureBegin
+#endif
 	curestatus BS_ATTACKER
 	printfromtable gCureStatusStringIds
 	waitmessage B_WAIT_TIME_LONG
 	updatestatusicon BS_ATTACKER
+#ifdef NATIVE
+	callnative BS_ModScriptCureReactions
+#endif
 	goto BattleScript_MoveEnd
 
 BattleScript_ItDoesntAffectScrTarget::
@@ -1454,6 +1475,9 @@ BattleScript_EffectHit::
 	resultmessage
 	waitmessage B_WAIT_TIME_LONG
 	setadditionaleffects
+#ifdef NATIVE
+	callnative BS_ModMoveDamageEffect
+#endif
 BattleScript_MoveEnd::
 	moveendall
 	end
@@ -1932,6 +1956,97 @@ BattleScript_EffectCelebrate::
 	waitmessage B_WAIT_TIME_LONG
 	goto BattleScript_MoveEnd
 
+#ifdef NATIVE
+BattleScript_EffectModCustomStatus::
+	attackcanceler
+	attackanimation
+	waitanimation
+	callnative BS_ModMoveEffect
+BattleScript_ModEffectNextAction::
+	callnative BS_ModMoveEffectAction
+	healthbarupdate BS_TARGET
+	datahpupdate BS_TARGET, ASSURANCE_IGNORE
+	goto BattleScript_ModEffectNextAction
+BattleScript_ModEffectHealUser::
+	healthbarupdate BS_ATTACKER
+	datahpupdate BS_ATTACKER, ASSURANCE_IGNORE
+	goto BattleScript_ModEffectNextAction
+BattleScript_ModEffectHealBattler::
+	healthbarupdate BS_MOD_EFFECT_RECIPIENT
+	datahpupdate BS_MOD_EFFECT_RECIPIENT, ASSURANCE_IGNORE
+	goto BattleScript_ModEffectNextAction
+BattleScript_ModEffectAnimation::
+	playanimation_var BS_MOD_EFFECT_RECIPIENT, gModEffectAnimation
+	waitstate
+	goto BattleScript_ModEffectNextAction
+BattleScript_ModEffectTrickRoom::
+	printfromtable gRoomsStringIds
+	waitmessage B_WAIT_TIME_LONG
+	call BattleScript_TryRoomServiceLoop
+	goto BattleScript_ModEffectNextAction
+BattleScript_ModEffectRoom::
+	printfromtable gRoomsStringIds
+	waitmessage B_WAIT_TIME_LONG
+	goto BattleScript_ModEffectNextAction
+BattleScript_ModEffectSport::
+	printfromtable gSportsUsedStringIds
+	waitmessage B_WAIT_TIME_LONG
+	goto BattleScript_ModEffectNextAction
+BattleScript_ModEffectFairyLock::
+	printstring STRINGID_NOONEWILLBEABLETORUNAWAY
+	waitmessage B_WAIT_TIME_LONG
+	goto BattleScript_ModEffectNextAction
+BattleScript_ModResolutionCues::
+	callnative BS_ModResolutionCue
+	playanimation_var BS_MOD_EFFECT_RECIPIENT, gModEffectAnimation
+	waitstate
+	goto BattleScript_ModResolutionCues
+BattleScript_ModResolutionCuesEnd::
+	return
+BattleScript_ModStatusReaction::
+	callnative BS_ModStatusReaction
+	playanimation_var BS_MOD_EFFECT_RECIPIENT, gModEffectAnimation
+	waitstate
+	goto BattleScript_ModStatusReaction
+BattleScript_ModStatusReactionEnd::
+	return
+BattleScript_ModStatusReactionHeal::
+	healthbarupdate BS_MOD_EFFECT_RECIPIENT
+	datahpupdate BS_MOD_EFFECT_RECIPIENT, ASSURANCE_IGNORE
+	goto BattleScript_ModStatusReaction
+BattleScript_ModStatusReactionStat::
+	trybattlerstatchange BS_MOD_EFFECT_RECIPIENT, STAT_CHANGE_CERTAIN
+	goto BattleScript_ModStatusReaction
+BattleScript_ModStatusReactionSourcedStat::
+	trystatchanges BS_MOD_INNATE_SOURCE, STAT_CHANGE_IGNORE_SELF | STAT_CHANGE_IGNORE_SUBSTITUTE
+	goto BattleScript_ModStatusReaction
+BattleScript_ModStatusReactionDamage::
+	healthbarupdate BS_MOD_EFFECT_RECIPIENT
+	datahpupdate BS_MOD_EFFECT_RECIPIENT, ASSURANCE_IGNORE
+	tryfaintmon BS_MOD_EFFECT_RECIPIENT
+	tryactivateitem BS_MOD_EFFECT_RECIPIENT, ACTIVATION_ON_HP_THRESHOLD
+	goto BattleScript_ModStatusReaction
+BattleScript_ModStatusReactionCure::
+	updatestatusicon BS_MOD_EFFECT_RECIPIENT
+	waitstate
+	callnative BS_ModStatusCureForm
+	goto BattleScript_ModStatusReaction
+BattleScript_ModEffectDamageBattler::
+	healthbarupdate BS_MOD_EFFECT_RECIPIENT
+	datahpupdate BS_MOD_EFFECT_RECIPIENT, ASSURANCE_DOUBLE
+	tryfaintmon BS_MOD_EFFECT_RECIPIENT
+	callnative BS_ModMoveEffectItemBegin
+	tryactivateitem BS_MOD_EFFECT_RECIPIENT, ACTIVATION_ON_HP_THRESHOLD
+	callnative BS_ModMoveEffectItemEnd
+	goto BattleScript_ModEffectNextAction
+BattleScript_ModEffectNextMessage::
+	callnative BS_ModMoveEffectMessage
+	waitmessage B_WAIT_TIME_LONG
+	goto BattleScript_ModEffectNextMessage
+BattleScript_ModEffectAfterMessages::
+	goto BattleScript_MoveEnd
+#endif
+
 BattleScript_EffectHappyHour::
 	attackcanceler
 	attackanimation
@@ -2030,6 +2145,9 @@ BattleScript_EffectHealBell::
 	attackcanceler
 	attackanimation
 	waitanimation
+#ifdef NATIVE
+	callnative BS_ModMoveCureBegin
+#endif
 	healpartystatus
 	waitstate
 	printfromtable gPartyStatusHealStringIds
@@ -2047,15 +2165,24 @@ BattleScript_CheckHealBellMon2Unaffected::
 BattleScript_PartyHealEnd::
 	updatestatusicon BS_ATTACKER_WITH_PARTNER
 	waitstate
+#ifdef NATIVE
+	callnative BS_ModScriptCureReactions
+#endif
 	goto BattleScript_MoveEnd
 
 BattleScript_MoveEffectAromatherapy::
+#ifdef NATIVE
+	callnative BS_ModMoveCureBegin
+#endif
 	healpartystatus
 	waitstate
 	printfromtable gPartyStatusHealStringIds
 	waitmessage B_WAIT_TIME_LONG
 	updatestatusicon BS_ATTACKER_WITH_PARTNER
 	waitstate
+#ifdef NATIVE
+	callnative BS_ModScriptCureReactions
+#endif
 	return
 
 BattleScript_EffectMeanLook::
@@ -2656,12 +2783,18 @@ BattleScript_EffectImprison::
 
 BattleScript_EffectRefresh::
 	attackcanceler
+#ifdef NATIVE
+	callnative BS_ModMoveCureBegin
+#endif
 	curestatuswithmove BattleScript_ButItFailed
 	attackanimation
 	waitanimation
 	printfromtable gCureStatusStringIds
 	waitmessage B_WAIT_TIME_LONG
 	updatestatusicon BS_ATTACKER
+#ifdef NATIVE
+	callnative BS_ModScriptCureReactions
+#endif
 	goto BattleScript_MoveEnd
 
 BattleScript_EffectGrudge::
@@ -2852,6 +2985,70 @@ BattleScript_FirstTurnSwitchInEvents::
 BattleScript_EndTurnEvents::
 	endturnevents
 	end
+
+#ifdef NATIVE
+BattleScript_ModConditionMessages::
+	callnative BS_ModConditionMessage
+	waitmessage B_WAIT_TIME_LONG
+	goto BattleScript_ModConditionMessages
+BattleScript_ModConditionAnimation::
+	playanimation_var BS_MOD_EFFECT_RECIPIENT, gModEffectAnimation
+	waitstate
+	goto BattleScript_ModConditionMessages
+BattleScript_ModConditionMessagesEnd::
+	return
+
+BattleScript_ModInnateTurnAction::
+	callnative BS_ModInnateTurnAction
+	healthbarupdate BS_SCRIPTING
+	datahpupdate BS_SCRIPTING, ASSURANCE_IGNORE
+	goto BattleScript_ModInnateTurnAction
+BattleScript_ModInnateTurnStat::
+	trybattlerstatchange BS_SCRIPTING, STAT_CHANGE_CERTAIN
+	goto BattleScript_ModInnateTurnAction
+BattleScript_ModInnateTurnSourcedStat::
+	trystatchanges BS_MOD_INNATE_SOURCE, STAT_CHANGE_IGNORE_SELF | STAT_CHANGE_IGNORE_SUBSTITUTE
+	goto BattleScript_ModInnateTurnAction
+BattleScript_ModInnateTurnAnimation::
+	playanimation_var BS_SCRIPTING, gModEffectAnimation
+	waitstate
+	goto BattleScript_ModInnateTurnAction
+
+BattleScript_ModInnateHeal::
+	callnative BS_ModInnateHeal
+	healthbarupdate BS_SCRIPTING
+	datahpupdate BS_SCRIPTING, ASSURANCE_IGNORE
+	goto BattleScript_ModInnateHeal
+BattleScript_ModInnateStat::
+	callnative BS_ModInnateStat
+	trybattlerstatchange BS_SCRIPTING, STAT_CHANGE_CERTAIN
+	goto BattleScript_ModInnateStat
+BattleScript_ModInnateSourcedStat::
+	trystatchanges BS_MOD_INNATE_SOURCE, STAT_CHANGE_IGNORE_SELF | STAT_CHANGE_IGNORE_SUBSTITUTE
+	goto BattleScript_ModInnateStat
+BattleScript_ModInnateMessages::
+	callnative BS_ModInnateMessage
+	waitmessage B_WAIT_TIME_LONG
+	goto BattleScript_ModInnateMessages
+BattleScript_ModInnateEnvironmentWeather::
+    printfromtable gMoveWeatherChangeStringIds
+    waitmessage B_WAIT_TIME_LONG
+    playanimation_var BS_BATTLER_0, sB_ANIM_ARG1
+    call BattleScript_ActivateWeatherAbilities
+    return
+BattleScript_ModInnateEnvironmentTerrain::
+    printfromtable gTerrainStringIds
+    waitmessage B_WAIT_TIME_LONG
+    playanimation BS_SCRIPTING, B_ANIM_RESTORE_BG
+    call BattleScript_ActivateTerrainEffects
+    return
+BattleScript_ModInnateAnimation::
+	playanimation_var BS_SCRIPTING, gModEffectAnimation
+	waitstate
+	goto BattleScript_ModInnateMessages
+BattleScript_ModInnateMessagesEnd::
+	return
+#endif
 
 BattleScript_LocalTrainerBattleWon::
 	jumpifbattletype BATTLE_TYPE_TWO_OPPONENTS, BattleScript_LocalTwoTrainersDefeated
@@ -3166,6 +3363,7 @@ BattleScript_WeatherContinues::
 	printfromtable gWeatherTurnStringIds
 	waitmessage B_WAIT_TIME_LONG
 	playanimation_var BS_ATTACKER, sB_ANIM_ARG1
+BattleScript_WeatherContinuesSilent::
 	setbyte gBattleCommunication, 0
 	call BattleScript_ActivateWeatherAbilities
 	return
@@ -4629,10 +4827,16 @@ BattleScript_SolarPowerActivates::
 
 BattleScript_HealerActivates::
 	call BattleScript_AbilityPopUp
+#ifdef NATIVE
+	callnative BS_ModHealerCureBegin
+#endif
 	curestatus BS_SCRIPTING
 	updatestatusicon BS_SCRIPTING
 	printfromtable gCureStatusStringIds
 	waitmessage B_WAIT_TIME_LONG
+#ifdef NATIVE
+	callnative BS_ModScriptCureReactions
+#endif
 	return
 
 BattleScript_ShedSkinActivates::
@@ -5453,6 +5657,16 @@ BattleScript_SelectingNotAllowedMoveAssaultVestInPalace::
 	printstring STRINGID_ASSAULTVESTDOESNTALLOW
 	goto BattleScript_SelectingUnusableMoveInPalace
 
+#ifdef NATIVE
+BattleScript_ModSelectionDenied::
+	printselectionstring STRINGID_MOD_SELECTION_DENIAL
+	endselectionscript
+
+BattleScript_ModSelectionDeniedInPalace::
+	printstring STRINGID_MOD_SELECTION_DENIAL
+	goto BattleScript_SelectingUnusableMoveInPalace
+#endif
+
 BattleScript_SelectingCantUseMove::
 	printselectionstring STRINGID_CANTUSEMOVE
 	endselectionscript
@@ -5687,13 +5901,13 @@ BattleScript_ActivateTeraformZeroRemovesOnlyTerrain::
 	jumpifterrain CMP_NOT_EQUAL, B_TERRAIN_NONE, BattleScript_ActivateTeraformZero_RemoveTerrain
 	goto BattleScript_ActivateTeraformZero_Ret
 BattleScript_ActivateTeraformZero_RemoveWeather:
-	removeweather
+	removeweatherteraformzero
 	printfromtable gWeatherEndsStringIds
 	waitmessage B_WAIT_TIME_LONG
 	call BattleScript_ActivateWeatherAbilities
 	jumpifterrain CMP_NOT_EQUAL, B_TERRAIN_NONE, BattleScript_ActivateTeraformZero_RemoveTerrain
 BattleScript_ActivateTeraformZero_RemoveTerrain:
-	removeterrain
+	removeterrainteraformzero
 	playanimation BS_ATTACKER, B_ANIM_RESTORE_BG
 	printfromtable gTerrainStringIds
 	waitmessage B_WAIT_TIME_LONG
@@ -5810,7 +6024,7 @@ BattleScript_HealReplacementZMove::
 	return
 
 BattleScript_RemoveTerrain::
-	removeterrain
+	removeterrainmove
 	playanimation BS_ATTACKER, B_ANIM_RESTORE_BG
 	printfromtable gTerrainStringIds
 	waitmessage B_WAIT_TIME_LONG
@@ -5913,6 +6127,9 @@ BattleScript_DoesntAffectScripting::
 	return
 
 BattleScript_PastelVeilActivates::
+#ifdef NATIVE
+	callnative BS_ModCapturePastelCureActor
+#endif
 	setbyte gBattleCommunication, 0
 	setbyte gBattleCommunication + 1, 0
 BattleScript_PastelVeil_TryCurePoison:
@@ -5925,8 +6142,14 @@ BattleScript_PastelVeilCurePoison:
 BattleScript_PastelVeilCurePoisonNoPopUp: @ Only show Pastel Veil pop up once if it cures two mons
 	printfromtable gSwitchInAbilityStringIds
 	waitmessage B_WAIT_TIME_LONG
+#ifdef NATIVE
+	callnative BS_ModPastelCureBegin
+#endif
 	curestatus BS_TARGET
 	updatestatusicon BS_TARGET
+#ifdef NATIVE
+	callnative BS_ModScriptCureReactions
+#endif
 BattleScript_PastelVeilLoopIncrement:
 	jumpifbyte CMP_NOT_EQUAL, gBattleCommunication, 0x0, BattleScript_PastelVeilEnd
 	addbyte gBattleCommunication, 1

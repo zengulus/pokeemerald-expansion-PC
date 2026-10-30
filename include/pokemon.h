@@ -125,6 +125,10 @@ enum MonData {
     MON_DATA_GIGANTAMAX_FACTOR,
     MON_DATA_TERA_TYPE,
     MON_DATA_EVOLUTION_TRACKER,
+#ifdef NATIVE
+    /* Reserved for staged native nature-format validation; not a mod API. */
+    MON_DATA_NATIVE_NATURE_CODE,
+#endif
 };
 
 #define BLOCK_AI_DYNAMAX 15 // Used as dynamax level value by the AI to indicate this mon shouldn't dynamax
@@ -134,7 +138,11 @@ struct PokemonSubstruct0
     enum Species species:11; // 2047 species.
     enum Type teraType:5; // 30 types.
     enum Item heldItem:10; // 1023 items.
+#ifdef NATIVE
+    u16 nativeNatureCode:6; // Zero means personality-derived; 1..25 encode a nature.
+#else
     u16 unused_02:6;
+#endif
     u32 experience:21;
     u32 nickname11:8; // 11th character of nickname.
     u32 unused_04:3;
@@ -373,7 +381,24 @@ struct BattlePokemon
     u8 metLevel:7;
     u8 isShiny:1;
     u8 affectionHearts;
+#ifdef NATIVE
+    /* Native-only active type overflow. It is deliberately excluded from
+     * battle-controller transfers, which use the original prefix. */
+    u8 extraTypeCount;
+    u8 extraTypes[251];
+    /* The replaceable type added by Forest's Curse or Trick-or-Treat. */
+    u8 addedType, addedTypeValid;
+    /* Captured from the actual source Pokémon; not part of controller data. */
+    u8 nativeNature, nativeStatNature, nativeNatureFlags;
+    u32 nativeNaturePersonality, nativeNatureOtId;
+#endif
 };
+
+#ifdef NATIVE
+#define BATTLE_POKEMON_TRANSFER_SIZE ((offsetof(struct BattlePokemon, extraTypeCount) + __alignof__(struct BattlePokemon) - 1) & ~(__alignof__(struct BattlePokemon) - 1))
+#else
+#define BATTLE_POKEMON_TRANSFER_SIZE sizeof(struct BattlePokemon)
+#endif
 
 struct EvolutionParam
 {
@@ -767,6 +792,13 @@ extern const struct BehaviorOWE gOWESpeciesBehavior[OWE_SPECIES_BEHAVIOR_COUNT];
 
 void ZeroBoxMonData(struct BoxPokemon *boxMon);
 void ZeroMonData(struct Pokemon *mon);
+#ifdef NATIVE
+void ZeroMonDataWithOwnedReceipt(struct Pokemon *mon);
+void ZeroBoxMonDataWithOwnedReceipt(struct BoxPokemon *mon);
+/* For engine-validated form changes and checked evolution/fusion receipts. */
+void SetMonSpeciesWithOwnedReceipt(struct Pokemon *mon, const void *species);
+void SetBoxMonSpeciesWithOwnedReceipt(struct BoxPokemon *mon, const void *species);
+#endif
 void ZeroPartyMons(struct Pokemon *party);
 void ZeroPlayerPartyMons(void);
 void ZeroEnemyPartyMons(void);
@@ -789,6 +821,10 @@ enum TrainerPicID GetUnionRoomTrainerPic(void);
 enum TrainerClassID GetUnionRoomTrainerClass(void);
 void CreateEnemyEventMon(void);
 void CalculateMonStats(struct Pokemon *mon);
+#ifdef NATIVE
+/* Compute a copied Pokémon's stats without publishing HP hooks or battle state. */
+void CalculateMonStatsPreview(struct Pokemon *mon);
+#endif
 void CalculateMonStatsCont(struct Pokemon *mon, bool32 updateSpeedStat);
 void BoxMonToMon(const struct BoxPokemon *src, struct Pokemon *dest);
 u8 GetLevelFromMonExp(struct Pokemon *mon);
@@ -828,10 +864,19 @@ u32 GetMonData3(struct Pokemon *mon, s32 field, u8 *data);
 u32 GetMonData2(struct Pokemon *mon, s32 field);
 u32 GetBoxMonData3(struct BoxPokemon *boxMon, s32 field, u8 *data);
 u32 GetBoxMonData2(struct BoxPokemon *boxMon, s32 field);
+#ifdef NATIVE
+bool32 GetBoxMonStoredTeraType(const struct BoxPokemon *boxMon, u32 *out);
+#endif
 
 void SetMonData(struct Pokemon *mon, s32 field, const void *dataArg);
 void SetBoxMonData(struct BoxPokemon *boxMon, s32 field, const void *dataArg);
 void CopyMon(void *dest, void *src, size_t size);
+#ifdef NATIVE
+/* Internal engine helpers: only use after capturing the matching ownership receipt. */
+void CopyMonWithOwnedReceipt(void *dest, void *src, size_t size);
+u8 CopyMonToPCWithOwnedReceipt(struct Pokemon *mon);
+u8 GiveCapturedMonToPlayerWithOwnedReceipt(struct Pokemon *mon);
+#endif
 u8 GiveCapturedMonToPlayer(struct Pokemon *mon);
 u8 CopyMonToPC(struct Pokemon *mon);
 u8 CalculatePlayerPartyCount(void);
@@ -840,6 +885,7 @@ u8 CalculateEnemyPartyCount(void);
 u8 GetMonsStateToDoubles(void);
 u8 GetMonsStateToDoubles_2(void);
 enum Ability GetAbilityBySpecies(enum Species species, u8 abilityNum);
+enum Ability GetAbilityBySpeciesReadOnly(enum Species species, u8 abilityNum);
 enum Ability GetMonAbility(struct Pokemon *mon);
 void CreateSecretBaseEnemyParty(struct SecretBase *secretBaseRecord);
 enum TrainerPicID GetSecretBaseTrainerPicIndex(void);
@@ -852,6 +898,9 @@ const u8 *GetSpeciesPokedexDescription(enum Species species);
 u32 GetSpeciesHeight(enum Species species);
 u32 GetSpeciesWeight(enum Species species);
 enum Type GetSpeciesType(enum Species species, u8 slot);
+struct BattleTypeList;
+void GetSpeciesTypes(enum Species species, enum Type types[static 3]);
+void GetSpeciesTypeList(enum Species species, struct BattleTypeList *list);
 enum Ability GetSpeciesAbility(enum Species species, u8 slot);
 u32 GetSpeciesBaseHP(enum Species species);
 u32 GetSpeciesBaseAttack(enum Species species);
@@ -873,11 +922,15 @@ void RemoveMonPPBonus(struct Pokemon *mon, u8 moveIndex);
 void RemoveBoxMonPPBonus(struct BoxPokemon *mon, u8 moveIndex);
 void RemoveBattleMonPPBonus(struct BattlePokemon *mon, u8 moveIndex);
 void PokemonToBattleMon(struct Pokemon *src, struct BattlePokemon *dst);
+#ifdef NATIVE
+void CaptureBattleMonNature(struct BattlePokemon *dst, struct Pokemon *src);
+#endif
 bool8 ExecuteTableBasedItemEffect(struct Pokemon *mon, enum Item item, u8 partyIndex, u8 moveIndex);
 bool8 PokemonUseItemEffects(struct Pokemon *mon, enum Item item, u8 partyIndex, u8 moveIndex, u8 usedByAI);
 bool8 HealStatusConditions(struct Pokemon *mon, u32 healMask, enum BattlerId battler);
 u8 GetItemEffectParamOffset(enum BattlerId battler, enum Item itemId, u8 effectByte, u8 effectBit);
 u8 GetNature(struct Pokemon *mon);
+u8 GetBoxMonNature(struct BoxPokemon *mon);
 u8 GetNatureFromPersonality(u32 personality);
 enum Species GetGMaxTargetSpecies(enum Species species);
 bool32 DoesMonMeetAdditionalConditions(struct Pokemon *mon, const struct EvolutionParam *params, struct Pokemon *tradePartner, u32 partyId, bool32 *canStopEvo, enum EvoState evoState);
@@ -923,6 +976,7 @@ bool32 IsMoveHM(enum Move move);
 bool32 CannotForgetMove(enum Move move);
 bool8 IsMonSpriteNotFlipped(enum Species species);
 s8 GetMonFlavorRelation(struct Pokemon *mon, enum Flavor flavor);
+s8 GetFlavorRelationByNature(u8 nature, enum Flavor flavor);
 s8 GetFlavorRelationByPersonality(u32 personality, enum Flavor flavor);
 bool8 IsTradedMon(struct Pokemon *mon);
 bool8 IsOtherTrainer(u32 otId, u8 *otName);
@@ -961,6 +1015,7 @@ void TryToSetBattleFormChangeMoves(struct Pokemon *mon, enum FormChanges method)
 u32 GetMonFriendshipScore(struct Pokemon *pokemon);
 u32 GetMonAffectionHearts(struct Pokemon *pokemon);
 void UpdateMonPersonality(struct BoxPokemon *boxMon, u32 personality);
+bool32 UpdateBoxMonOtId(struct BoxPokemon *boxMon, u32 otId);
 u8 CalculatePartyCount(enum BattleTrainer trainer);
 u8 CalculatePartyCountOfSide(enum BattlerId battler);
 enum Species SanitizeSpeciesId(enum Species species);

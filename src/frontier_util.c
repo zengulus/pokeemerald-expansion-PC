@@ -14,6 +14,7 @@
 #include "main.h"
 #include "window.h"
 #include "menu.h"
+#include "mods.h"
 #include "text.h"
 #include "battle_records.h"
 #include "international_string_util.h"
@@ -152,7 +153,7 @@ const struct FrontierBrain gFrontierBrainInfo[NUM_FRONTIER_FACILITIES] =
         },
         .wonTexts = {
             COMPOUND_STRING(
-                "Your POKéMON are wimpy because\n"
+                "Your Pokémon are wimpy because\n"
                 "you're wimpy as a TRAINER!"),           //Silver
             COMPOUND_STRING(
                 "Gwahahaha!\n"
@@ -980,7 +981,13 @@ static void SetSelectedPartyOrder(void)
     ClearSelectedPartyOrder();
     for (i = 0; i < gSpecialVar_0x8005; i++)
         gSelectedOrderFromParty[i] = gSaveBlock2Ptr->frontier.selectedPartyMons[i];
+#ifdef NATIVE
+    ModsOwnedFrontierPartyBegin(gSelectedOrderFromParty, gSpecialVar_0x8005);
+#endif
     ReducePlayerPartyToSelectedMons();
+#ifdef NATIVE
+    ModsOwnedUnionPartyPrepared();
+#endif
 }
 
 static void DoSoftReset_(void)
@@ -993,15 +1000,52 @@ static void SetFrontierTrainers(void)
     gFacilityTrainers = gBattleFrontierTrainers;
 }
 
+#ifdef NATIVE
+/* Preserve the saved selection order when it describes this whole projection.
+ * The Dome keeps an outer selection while a smaller battle party is active. */
+static u32 FrontierWriteSelection(u8 selected[MAX_FRONTIER_PARTY_SIZE])
+{
+    u32 count = !gMain.inBattle ? ModsOwnedFrontierPartySelection(selected, MAX_FRONTIER_PARTY_SIZE) : 0;
+    if (!count || !gSaveBlock2Ptr)
+    {
+        ModsOwnedFrontierBeforeSaveParty();
+        return 0;
+    }
+    u32 oldMask = 0, newMask = 0; bool32 same = TRUE;
+    for (u32 i = 0; i < count; ++i)
+    {
+        u32 slot = gSaveBlock2Ptr->frontier.selectedPartyMons[i];
+        if (!slot || slot > PARTY_SIZE || (oldMask & (1u << (slot - 1)))) { same = FALSE; break; }
+        oldMask |= 1u << (slot - 1); newMask |= 1u << (selected[i] - 1);
+    }
+    for (u32 i = count; same && i < MAX_FRONTIER_PARTY_SIZE; ++i)
+        if (gSaveBlock2Ptr->frontier.selectedPartyMons[i] && gSaveBlock2Ptr->frontier.selectedPartyMons[i] <= PARTY_SIZE)
+            same = FALSE;
+    if (same && oldMask == newMask)
+        for (u32 i = 0; i < count; ++i) gSaveBlock2Ptr->frontier.selectedPartyMons[i] = selected[i];
+    return count;
+}
+#endif
+
 static void SaveSelectedParty(void)
 {
     u8 i;
+#ifdef NATIVE
+    u8 selected[MAX_FRONTIER_PARTY_SIZE] = {0};
+    bool32 projected = ModsOwnedFrontierPartyActive();
+    if (projected && !FrontierWriteSelection(selected)) return;
+#endif
 
     for (i = 0; i < MAX_FRONTIER_PARTY_SIZE; i++)
     {
-        u16 monId = gSaveBlock2Ptr->frontier.selectedPartyMons[i] - 1;
+        u16 monId =
+#ifdef NATIVE
+            (projected ? selected[i] : gSaveBlock2Ptr->frontier.selectedPartyMons[i]) - 1;
+#else
+            gSaveBlock2Ptr->frontier.selectedPartyMons[i] - 1;
+#endif
         if (monId < PARTY_SIZE)
-            SavePlayerPartyMon(gSaveBlock2Ptr->frontier.selectedPartyMons[i] - 1, &gParties[B_TRAINER_PLAYER][i]);
+            SavePlayerPartyMon(monId, &gParties[B_TRAINER_PLAYER][i]);
     }
 }
 
@@ -2292,24 +2336,34 @@ static void BufferFrontierTrainerName(void)
 static void ResetSketchedMoves(void)
 {
     u8 i, j, k;
+#ifdef NATIVE
+    u8 selected[MAX_FRONTIER_PARTY_SIZE] = {0};
+    bool32 projected = ModsOwnedFrontierPartyActive();
+    if (projected && !FrontierWriteSelection(selected)) return;
+#endif
 
     for (i = 0; i < MAX_FRONTIER_PARTY_SIZE; i++)
     {
-        u16 monId = gSaveBlock2Ptr->frontier.selectedPartyMons[i] - 1;
+        u16 monId =
+#ifdef NATIVE
+            (projected ? selected[i] : gSaveBlock2Ptr->frontier.selectedPartyMons[i]) - 1;
+#else
+            gSaveBlock2Ptr->frontier.selectedPartyMons[i] - 1;
+#endif
         if (monId < PARTY_SIZE)
         {
             for (j = 0; j < MAX_MON_MOVES; j++)
             {
                 for (k = 0; k < MAX_MON_MOVES; k++)
                 {
-                    if (GetMonData(GetSavedPlayerPartyMon(gSaveBlock2Ptr->frontier.selectedPartyMons[i] - 1), MON_DATA_MOVE1 + k)
+                    if (GetMonData(GetSavedPlayerPartyMon(monId), MON_DATA_MOVE1 + k)
                         == GetMonData(&gParties[B_TRAINER_PLAYER][i], MON_DATA_MOVE1 + j))
                         break;
                 }
                 if (k == MAX_MON_MOVES)
                     SetMonMoveSlot(&gParties[B_TRAINER_PLAYER][i], MOVE_SKETCH, j);
             }
-            SavePlayerPartyMon(gSaveBlock2Ptr->frontier.selectedPartyMons[i] - 1, &gParties[B_TRAINER_PLAYER][i]);
+            SavePlayerPartyMon(monId, &gParties[B_TRAINER_PLAYER][i]);
         }
     }
 }
@@ -2528,19 +2582,38 @@ void SaveGameFrontier(void)
 {
     s32 i;
     struct Pokemon *monsParty = AllocZeroed(sizeof(struct Pokemon) * PARTY_SIZE);
+#ifdef NATIVE
+    u8 selected[MAX_FRONTIER_PARTY_SIZE] = {0};
+    bool32 projected = ModsOwnedFrontierPartyActive();
+    bool32 rental = ModsOwnedRentalPartyActive();
+    u32 selectedCount = projected ? ModsOwnedFrontierPartySelection(selected, ARRAY_COUNT(selected)) : 0;
+#endif
 
     for (i = 0; i < PARTY_SIZE; i++)
         monsParty[i] = gParties[B_TRAINER_PLAYER][i];
+#ifdef NATIVE
+    if (projected) NativeOwnedTrackFrontierCapture(selected, selectedCount, monsParty);
+#endif
 
     i = gPartiesCount[B_TRAINER_PLAYER];
     LoadPlayerParty();
     SetContinueGameWarpStatusToDynamicWarp();
     TrySavingData(SAVE_LINK);
     ClearContinueGameWarpStatus2();
+#ifdef NATIVE
+    if (projected) {
+        ModsOwnedFrontierPartyBegin(selected, selectedCount);
+        NativeOwnedTrackFrontierResume(selected, selectedCount, monsParty);
+    }
+    if (rental) ModsOwnedRentalPartyBegin();
+#endif
     gPartiesCount[B_TRAINER_PLAYER] = i;
 
     for (i = 0; i < PARTY_SIZE; i++)
         gParties[B_TRAINER_PLAYER][i] = monsParty[i];
+#ifdef NATIVE
+    if (projected) ModsOwnedUnionPartyPrepared();
+#endif
 
     Free(monsParty);
 }

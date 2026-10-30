@@ -1,4 +1,7 @@
 #include "global.h"
+#ifdef NATIVE
+#include "mods.h"
+#endif
 #include "debug.h"
 #include "malloc.h"
 #include "battle.h"
@@ -1343,7 +1346,7 @@ void IsGrassTypeInParty(void)
         if (GetMonData(pokemon, MON_DATA_SANITY_HAS_SPECIES) && !GetMonData(pokemon, MON_DATA_IS_EGG))
         {
             species = GetMonData(pokemon, MON_DATA_SPECIES);
-            if (GetSpeciesType(species, 0) == TYPE_GRASS || GetSpeciesType(species, 1) == TYPE_GRASS)
+            if (IsSpeciesOfType(species, TYPE_GRASS))
             {
                 gSpecialVar_Result = TRUE;
                 return;
@@ -2923,12 +2926,8 @@ void SetBattleTowerLinkPlayerGfx(void)
 void ShowNatureGirlMessage(void)
 {
     u32 nature;
-    u32 personality;
-
     struct BoxPokemon *boxmon = GetSelectedBoxMonFromPcOrParty();
-
-    personality = GetBoxMonData(boxmon, MON_DATA_PERSONALITY);
-    nature = GetNatureFromPersonality(personality);
+    nature = GetBoxMonNature(boxmon);
     ShowFieldMessage(gNaturesInfo[nature].natureGirlMessage);
 }
 
@@ -3455,6 +3454,23 @@ void SetDeoxysRockPalette(void)
     LoadPalette(&sDeoxysRockPalettes[(u8)VarGet(VAR_DEOXYS_ROCK_LEVEL)], OBJ_PLTT_ID(paletteNum), PLTT_SIZEOF(4));
     // Set faded to all black, weather blending handled during fade-in
     CpuFill16(RGB_BLACK, &gPlttBufferFaded[OBJ_PLTT_ID(paletteNum)], PLTT_SIZE_4BPP);
+}
+
+u16 ScriptRestoreDeoxysRockPalette(void)
+{
+    u8 objectId;
+    if (TryGetObjectEventIdByLocalIdAndMap(LOCALID_BIRTH_ISLAND_EXTERIOR_ROCK,
+            gSaveBlock1Ptr->location.mapNum, gSaveBlock1Ptr->location.mapGroup, &objectId)) return 0;
+    u32 level = VarGet(VAR_DEOXYS_ROCK_LEVEL);
+    const struct ObjectEventGraphicsInfo *graphics = GetObjectEventGraphicsInfo(gObjectEvents[objectId].graphicsId);
+    if (!graphics || graphics->paletteTag == TAG_NONE) return 0;
+    u32 paletteNum = IndexOfSpritePaletteTag(graphics->paletteTag);
+    if (level < DEOXYS_ROCK_LEVELS && paletteNum < 16)
+    {
+        LoadPalette(&sDeoxysRockPalettes[level], OBJ_PLTT_ID(paletteNum), PLTT_SIZEOF(4));
+        UpdateSpritePaletteWithWeather(paletteNum, FALSE);
+    }
+    return 0;
 }
 
 void SetPCBoxToSendMon(u8 boxId)
@@ -4396,6 +4412,12 @@ void PreparePartyForSkyBattle(void)
     int i, participatingPokemonSlot = 0;
     u8 partyCount = CalculatePlayerPartyCount();
 
+    for (i = 0; i < partyCount; i++)
+        if (CanMonParticipateInSkyBattle(&gParties[B_TRAINER_PLAYER][i]))
+            participatingPokemonSlot += 1 << i;
+#ifdef NATIVE
+    ModsOwnedSkyPartyBegin(participatingPokemonSlot);
+#endif
     FlagSet(B_FLAG_SKY_BATTLE);
     SavePlayerParty();
 
@@ -4403,13 +4425,18 @@ void PreparePartyForSkyBattle(void)
     {
         struct Pokemon* pokemon = &gParties[B_TRAINER_PLAYER][i];
 
-        if (CanMonParticipateInSkyBattle(pokemon))
-            participatingPokemonSlot += 1 << i;
-        else
+        if (!(participatingPokemonSlot & (1 << i)))
+#ifdef NATIVE
+            ZeroMonDataWithOwnedReceipt(pokemon);
+#else
             ZeroMonData(pokemon);
+#endif
     }
     VarSet(B_VAR_SKY_BATTLE,participatingPokemonSlot);
     CompactPartySlots();
+#ifdef NATIVE
+    ModsOwnedSkyPartyPrepared();
+#endif
 }
 
 void GetObjectPosition(u16* xPointer, u16* yPointer, u32 localId, u32 useTemplate)
@@ -4668,7 +4695,7 @@ bool8 CapeBrinkGetMoveToTeachLeadPokemon(void)
         return FALSE;
     }
 
-    StringCopy(gStringVar2, gMovesInfo[moveId].name);
+    StringCopy(gStringVar2, GetMoveName(moveId));
     if (FlagGet(tutorFlag) == TRUE)
         return FALSE;
 

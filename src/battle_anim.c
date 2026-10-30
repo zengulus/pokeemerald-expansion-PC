@@ -102,6 +102,14 @@ EWRAM_DATA static u8 sBattleAnimScriptCallDepth = 0;
 EWRAM_DATA void (*gAnimScriptCallback)(void) = NULL;
 EWRAM_DATA static s8 sAnimFramesToWait = 0;
 EWRAM_DATA bool8 gAnimScriptActive = FALSE;
+#ifdef NATIVE
+u32 gNativeAnimStepCount;
+void NativeBattleAnimStep(void)
+{
+    ++gNativeAnimStepCount;
+    gAnimScriptCallback();
+}
+#endif
 EWRAM_DATA u8 gAnimVisualTaskCount = 0;
 EWRAM_DATA u8 gAnimSoundTaskCount = 0;
 EWRAM_DATA struct LinkBattleAnim *gAnimDisableStructPtr = NULL;

@@ -1,4 +1,5 @@
 #include "global.h"
+#include "battle_type_set.h"
 #include "battle_main.h"
 #include "battle_script_commands.h"
 #include "bg.h"
@@ -11,6 +12,9 @@
 #include "main.h"
 #include "malloc.h"
 #include "menu.h"
+#ifdef NATIVE
+#include "mods.h"
+#endif
 #include "m4a.h"
 #include "overworld.h"
 #include "palette.h"
@@ -686,20 +690,20 @@ static const u8 sText_UnkHeight[] = _("{CLEAR_TO 12}??'??”");
 static const u8 sText_UnkHeightMetric[] = _("???.? m");
 static const u8 sText_UnkWeight[] = _("????.? lbs.");
 static const u8 sText_UnkWeightMetric[] = _("???.? kg.");
-static const u8 sText_PokedexRegistration[] = _("POKéDEX registration completed.");
+static const u8 sText_PokedexRegistration[] = _("Pokédex registration completed.");
 static const u8 sText_HTHeight[] = _("HT");
 static const u8 sText_WTWeight[] = _("WT");
 static const u8 sText_SearchingPleaseWait[] = _("Searching…\nPlease wait.");
 static const u8 sText_SearchCompleted[] = _("Search completed.");
-static const u8 sText_NoMatchingPkmnWereFound[] = _("No matching POKéMON were found.");
-static const u8 sText_SearchForPkmnBasedOnParameters[] = _("Search for POKéMON based on\nselected parameters.");
-static const u8 sText_SwitchPokedexListings[] = _("Switch POKéDEX listings.");
-static const u8 sText_ReturnToPokedex[] = _("Return to the POKéDEX.");
-static const u8 sText_SelectPokedexMode[] = _("Select the POKéDEX mode.");
-static const u8 sText_SelectPokedexListingMode[] = _("Select the POKéDEX listing mode.");
-static const u8 sText_ListByFirstLetter[] = _("List by the first letter in the name.\nSpotted POKéMON only.");
-static const u8 sText_ListByBodyColor[] = _("List by body color.\nSpotted POKéMON only.");
-static const u8 sText_ListByType[] = _("List by type.\nOwned POKéMON only.");
+static const u8 sText_NoMatchingPkmnWereFound[] = _("No matching Pokémon were found.");
+static const u8 sText_SearchForPkmnBasedOnParameters[] = _("Search for Pokémon based on\nselected parameters.");
+static const u8 sText_SwitchPokedexListings[] = _("Switch Pokédex listings.");
+static const u8 sText_ReturnToPokedex[] = _("Return to the Pokédex.");
+static const u8 sText_SelectPokedexMode[] = _("Select the Pokédex mode.");
+static const u8 sText_SelectPokedexListingMode[] = _("Select the Pokédex listing mode.");
+static const u8 sText_ListByFirstLetter[] = _("List by the first letter in the name.\nSpotted Pokémon only.");
+static const u8 sText_ListByBodyColor[] = _("List by body color.\nSpotted Pokémon only.");
+static const u8 sText_ListByType[] = _("List by type.\nOwned Pokémon only.");
 static const u8 sText_ExecuteSearchSwitch[] = _("Execute search/switch.");
 static const u8 sText_DexEmptyString[] = _("");
 static const u8 sText_DexSearchDontSpecify[] = _("DON'T SPECIFY.");
@@ -1181,19 +1185,19 @@ static const u8 sSearchMovementMap_ShiftHoennDex[SEARCH_COUNT][4] =
 
 static const struct SearchOptionText sDexModeOptions[] =
 {
-    [DEX_MODE_HOENN]    = {COMPOUND_STRING("HOENN region's POKéDEX"),   COMPOUND_STRING("HOENN DEX")},
-    [DEX_MODE_NATIONAL] = {COMPOUND_STRING("National edition POKéDEX"), COMPOUND_STRING("NATIONAL DEX")},
+    [DEX_MODE_HOENN]    = {COMPOUND_STRING("HOENN region's Pokédex"),   COMPOUND_STRING("HOENN DEX")},
+    [DEX_MODE_NATIONAL] = {COMPOUND_STRING("National edition Pokédex"), COMPOUND_STRING("NATIONAL DEX")},
     {},
 };
 
 static const struct SearchOptionText sDexOrderOptions[] =
 {
-    [ORDER_NUMERICAL]    = {COMPOUND_STRING("POKéMON are listed according to their\nnumber."),               COMPOUND_STRING("NUMERICAL MODE")},
-    [ORDER_ALPHABETICAL] = {COMPOUND_STRING("Spotted and owned POKéMON are listed\nalphabetically."),        COMPOUND_STRING("A TO Z MODE")},
-    [ORDER_HEAVIEST]     = {COMPOUND_STRING("Owned POKéMON are listed from the\nheaviest to the lightest."), COMPOUND_STRING("HEAVIEST MODE")},
-    [ORDER_LIGHTEST]     = {COMPOUND_STRING("Owned POKéMON are listed from the\nlightest to the heaviest."), COMPOUND_STRING("LIGHTEST MODE")},
-    [ORDER_TALLEST]      = {COMPOUND_STRING("Owned POKéMON are listed from the\ntallest to the smallest."),  COMPOUND_STRING("TALLEST MODE")},
-    [ORDER_SMALLEST]     = {COMPOUND_STRING("Owned POKéMON are listed from the\nsmallest to the tallest."),  COMPOUND_STRING("SMALLEST MODE")},
+    [ORDER_NUMERICAL]    = {COMPOUND_STRING("Pokémon are listed according to their\nnumber."),               COMPOUND_STRING("NUMERICAL MODE")},
+    [ORDER_ALPHABETICAL] = {COMPOUND_STRING("Spotted and owned Pokémon are listed\nalphabetically."),        COMPOUND_STRING("A TO Z MODE")},
+    [ORDER_HEAVIEST]     = {COMPOUND_STRING("Owned Pokémon are listed from the\nheaviest to the lightest."), COMPOUND_STRING("HEAVIEST MODE")},
+    [ORDER_LIGHTEST]     = {COMPOUND_STRING("Owned Pokémon are listed from the\nlightest to the heaviest."), COMPOUND_STRING("LIGHTEST MODE")},
+    [ORDER_TALLEST]      = {COMPOUND_STRING("Owned Pokémon are listed from the\ntallest to the smallest."),  COMPOUND_STRING("TALLEST MODE")},
+    [ORDER_SMALLEST]     = {COMPOUND_STRING("Owned Pokémon are listed from the\nsmallest to the tallest."),  COMPOUND_STRING("SMALLEST MODE")},
     {},
 };
 
@@ -4489,6 +4493,8 @@ s8 GetSetPokedexFlag(enum NationalDexOrder nationalDexNo, u8 caseID)
     u32 index, bit, mask;
     s8 retVal = 0;
 
+    if ((u32)nationalDexNo == NATIONAL_DEX_NONE || (u32)nationalDexNo > NATIONAL_DEX_COUNT)
+        return 0;
     nationalDexNo--;
     index = nationalDexNo / 8;
     bit = nationalDexNo % 8;
@@ -4911,12 +4917,29 @@ u16 CreateSizeScreenTrainerPic(u16 species, s16 x, s16 y, s8 paletteSlot)
     return CreateTrainerPicSprite(species, TRUE, x, y, paletteSlot, TAG_NONE);
 }
 
+bool32 PokedexSpeciesMatchesTypes(enum Species species, enum Type type1, enum Type type2)
+{
+    struct BattleTypeList types;
+    GetSpeciesTypeList(species, &types);
+    if (type1 == TYPE_NONE)
+    {
+        type1 = type2;
+        type2 = TYPE_NONE;
+    }
+    if (type1 == TYPE_NONE)
+        return TRUE;
+    // The legacy two-slot species representation duplicates a sole type.
+    if (type1 == type2)
+        return types.count == 1 && types.types[0] == type1;
+    return BattleTypeListContains(&types, type1)
+        && (type2 == TYPE_NONE || BattleTypeListContains(&types, type2));
+}
+
 static int DoPokedexSearch(u8 dexMode, u8 order, u8 abcGroup, enum BodyColor bodyColor, enum Type type1, enum Type type2)
 {
     enum Species species;
     u16 i;
     u16 resultsCount;
-    enum Type types[2];
 
     CreatePokedexList(dexMode, order);
 
@@ -4967,45 +4990,15 @@ static int DoPokedexSearch(u8 dexMode, u8 order, u8 abcGroup, enum BodyColor bod
     // Search by type
     if (type1 != TYPE_NONE || type2 != TYPE_NONE)
     {
-        if (type1 == TYPE_NONE)
+        for (i = 0, resultsCount = 0; i < sPokedexView->pokemonListCount; i++)
         {
-            type1 = type2;
-            type2 = TYPE_NONE;
-        }
-
-        if (type2 == TYPE_NONE)
-        {
-            for (i = 0, resultsCount = 0; i < sPokedexView->pokemonListCount; i++)
+            if (sPokedexView->pokedexList[i].owned)
             {
-                if (sPokedexView->pokedexList[i].owned)
+                species = NationalPokedexNumToSpeciesForm(sPokedexView->pokedexList[i].dexNum);
+                if (PokedexSpeciesMatchesTypes(species, type1, type2))
                 {
-                    species = NationalPokedexNumToSpeciesForm(sPokedexView->pokedexList[i].dexNum);
-
-                    types[0] = GetSpeciesType(species, 0);
-                    types[1] = GetSpeciesType(species, 1);
-                    if (types[0] == type1 || types[1] == type1)
-                    {
-                        sPokedexView->pokedexList[resultsCount] = sPokedexView->pokedexList[i];
-                        resultsCount++;
-                    }
-                }
-            }
-        }
-        else
-        {
-            for (i = 0, resultsCount = 0; i < sPokedexView->pokemonListCount; i++)
-            {
-                if (sPokedexView->pokedexList[i].owned)
-                {
-                    species = NationalPokedexNumToSpeciesForm(sPokedexView->pokedexList[i].dexNum);
-
-                    types[0] = GetSpeciesType(species, 0);
-                    types[1] = GetSpeciesType(species, 1);
-                    if ((types[0] == type1 && types[1] == type2) || (types[0] == type2 && types[1] == type1))
-                    {
-                        sPokedexView->pokedexList[resultsCount] = sPokedexView->pokedexList[i];
-                        resultsCount++;
-                    }
+                    sPokedexView->pokedexList[resultsCount] = sPokedexView->pokedexList[i];
+                    resultsCount++;
                 }
             }
         }

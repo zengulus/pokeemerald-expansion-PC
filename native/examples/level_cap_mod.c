@@ -21,6 +21,6 @@ __declspec(dllexport)
 #endif
 const struct RhhModDefinition *RHH_ModEntry_v1(const struct RhhModHostV1 *host)
 {
-    return host && host->abi_version == RHH_MOD_ABI_V1 && host->struct_size >= sizeof(*host)
+    return host && host->abi_version == RHH_MOD_ABI_V1 && host->struct_size >= RHH_MOD_HOST_V1_BASE_SIZE
         ? &sDefinition : 0;
 }

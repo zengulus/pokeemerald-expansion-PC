@@ -348,6 +348,9 @@ u32 AllocSpritePalette(u16 tag);
 u32 IndexOfSpritePaletteTag(u16 tag);
 u16 GetSpritePaletteTagByPaletteNum(u8 paletteNum);
 void FreeSpritePaletteByTag(u16 tag);
+#ifdef NATIVE
+void FreeSpritePaletteSlotByTag(u8 paletteNum, u16 tag);
+#endif
 void SetSubspriteTables(struct Sprite *sprite, const struct SubspriteTable *subspriteTables);
 bool8 AddSpriteToOamBuffer(struct Sprite *sprite, u8 *oamIndex);
 bool8 AddSubspritesToOamBuffer(struct Sprite *sprite, u8 *oamIndex);

@@ -29,7 +29,7 @@ SevenIsland_SevaultCanyon_Entrance_Text_MasonDefeat::
 
 SevenIsland_SevaultCanyon_Entrance_Text_MasonPostBattle::
 	.string "Lalalah…\n"
-	.string "My POKéMON, I send them out,\l"
+	.string "My Pokémon, I send them out,\l"
 	.string "all the girls scream and shout!$"
 
 SevenIsland_SevaultCanyon_Entrance_Text_NicolasIntro::
@@ -40,21 +40,21 @@ SevenIsland_SevaultCanyon_Entrance_Text_NicolasDefeat::
 	.string "Uh-huh…$"
 
 SevenIsland_SevaultCanyon_Entrance_Text_NicolasPostBattle::
-	.string "TRAINERS like you from cities,\n"
+	.string "Trainers like you from cities,\n"
 	.string "they sure are tough.\p"
-	.string "You'll be headed for the TOWER,\n"
+	.string "You'll be headed for the Tower,\n"
 	.string "won't you?$"
 
 SevenIsland_SevaultCanyon_Entrance_Text_MadelineIntro::
 	.string "I punish people who abuse\n"
-	.string "POKéMON!$"
+	.string "Pokémon!$"
 
 SevenIsland_SevaultCanyon_Entrance_Text_MadelineDefeat::
 	.string "You don't seem to be a problem\n"
-	.string "TRAINER.$"
+	.string "Trainer.$"
 
 SevenIsland_SevaultCanyon_Entrance_Text_MadelinePostBattle::
-	.string "If you treat your POKéMON with\n"
+	.string "If you treat your Pokémon with\n"
 	.string "kindness, they'll understand.$"
 
 SevenIsland_SevaultCanyon_Entrance_Text_EveIntro::
@@ -72,7 +72,7 @@ SevenIsland_SevaultCanyon_Entrance_Text_EvePostBattle::
 SevenIsland_SevaultCanyon_Entrance_Text_EveNotEnoughMons::
 	.string "EVE: I want to team up with JON\n"
 	.string "when I battle you.\p"
-	.string "Come back with two POKéMON, okay?$"
+	.string "Come back with two Pokémon, okay?$"
 
 SevenIsland_SevaultCanyon_Entrance_Text_JonIntro::
 	.string "JON: When I'm with EVE, it feels\n"
@@ -95,6 +95,6 @@ SevenIsland_SevaultCanyon_Entrance_Text_JonNotEnoughMons::
 
 SevenIsland_SevaultCanyon_Entrance_Text_RouteSign::
 	.string "SEVAULT CANYON ENTRANCE\p"
-	.string "TRAINERS are asked to refrain from\n"
+	.string "Trainers are asked to refrain from\n"
 	.string "damaging plants in the CANYON.$"
 

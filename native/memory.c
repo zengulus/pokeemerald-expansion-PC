@@ -13,6 +13,10 @@ ALIGNED(16) unsigned char gNativeFlash[131072];
 struct SoundInfo *SOUND_INFO_PTR;
 unsigned short INTR_CHECK;
 void *INTR_VECTOR;
+static void (*sWriteObserver)(void *, size_t);
+void NativeMemorySetWriteObserver(void (*observer)(void *, size_t)) { sWriteObserver = observer; }
+static void ObserveWrite(void *destination, size_t size)
+{ if (sWriteObserver && size) sWriteObserver(destination, size); }
 
 // Keep host pointers out of packed register storage. Only control bits are
 // reflected there so existing DmaStop calls continue to work.
@@ -36,6 +40,17 @@ void NativeRunDma(unsigned timing)
         if (!(dma->control & DMA_ENABLE) || ((dma->control >> 12) & 3) != timing)
             continue;
         unsigned width = (dma->control & DMA_32BIT) ? 4 : 2;
+        unsigned sourceMode = dma->control & DMA_SRC_MASK, destinationMode = dma->control & DMA_DEST_MASK;
+        bool32 identity = dma->src == dma->dst && (dma->count == 1
+            || (sourceMode == DMA_SRC_INC && (destinationMode == DMA_DEST_INC || destinationMode == DMA_DEST_RELOAD))
+            || (sourceMode == DMA_SRC_DEC && destinationMode == DMA_DEST_DEC)
+            || (sourceMode == DMA_SRC_FIXED && destinationMode == DMA_DEST_FIXED));
+        if (!identity) {
+            uintptr_t first = (uintptr_t)dma->dst;
+            if (destinationMode == DMA_DEST_DEC) first -= (size_t)(dma->count - 1) * width;
+            size_t length = destinationMode == DMA_DEST_FIXED ? width : (size_t)dma->count * width;
+            ObserveWrite((void *)first, length);
+        }
         for (u32 i = 0; i < dma->count; ++i)
         {
             memcpy(dma->dst, dma->src, width);
@@ -86,6 +101,7 @@ void CpuSet(const void *src, void *dst, u32 control)
     u8 *out = dst;
     u32 count = control & 0x1fffff;
     if (!count) return;
+    if (src != dst || ((control & CPU_SET_SRC_FIXED) && count > 1)) ObserveWrite(dst, (size_t)count * width);
     memcpy(value, in, width);
     for (u32 i = 0; i < count; ++i, out += width)
     {
@@ -115,6 +131,7 @@ void LZ77UnCompWram(const u32 *input, void *output)
     const u8 *src = (const u8 *)input;
     u8 *dst = output;
     u32 length = ReadHeader(src), written = 0;
+    ObserveWrite(output, length);
     src += 4;
     while (written < length)
     {
@@ -145,6 +162,7 @@ void RLUnCompWram(const u32 *input, void *output)
     const u8 *src = (const u8 *)input;
     u8 *dst = output;
     u32 length = ReadHeader(src), written = 0;
+    ObserveWrite(output, length);
     src += 4;
     while (written < length)
     {

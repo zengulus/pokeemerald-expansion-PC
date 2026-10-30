@@ -29,6 +29,10 @@
 #include "constants/moves.h"
 #include "constants/party_menu.h"
 #include "constants/region_map_sections.h"
+#ifdef NATIVE
+#include "mods.h"
+#include "owned_identity_ledger.h"
+#endif
 
 #define IS_DITTO(species) (gSpeciesInfo[species].eggGroups[0] == EGG_GROUP_DITTO || gSpeciesInfo[species].eggGroups[1] == EGG_GROUP_DITTO)
 
@@ -107,12 +111,23 @@ static const u8 *const sCompatibilityMessages[] =
     gDaycareText_PlayOther
 };
 
-static const u8 sJapaneseEggNickname[] = _("タマゴ"); // "tamago" ("egg" in Japanese)
+// SetMonData reads the complete fixed-width nickname, including after EOS.
+static const u8 sJapaneseEggNickname[POKEMON_NAME_LENGTH] = _("タマゴ"); // "tamago" ("egg" in Japanese)
 
+#ifdef NATIVE
+static void DaycareGuardOutput(const void *dest, size_t size)
+{
+    ModsOwnedBattlePartySummaryBeforeBytes(dest, size);
+    NativeOwnedTrackUnreportedCopy(dest, NULL, size);
+}
+#endif
 u8 *GetMonNicknameVanilla(struct Pokemon *mon, u8 *dest)
 {
     u8 nickname[POKEMON_NAME_BUFFER_SIZE];
     GetMonData(mon, MON_DATA_NICKNAME, nickname);
+#ifdef NATIVE
+    DaycareGuardOutput(dest, VANILLA_POKEMON_NAME_LENGTH);
+#endif
     return StringCopyN(dest, nickname, VANILLA_POKEMON_NAME_LENGTH);
 }
 
@@ -120,6 +135,10 @@ u8 *GetBoxMonNickname(struct BoxPokemon *mon, u8 *dest)
 {
     u8 nickname[POKEMON_NAME_BUFFER_SIZE];
     GetBoxMonData(mon, MON_DATA_NICKNAME, nickname);
+#ifdef NATIVE
+    size_t length = min(StringLength(nickname), POKEMON_NAME_LENGTH) + 1;
+    DaycareGuardOutput(dest, length);
+#endif
     return StringCopy_Nickname(dest, nickname);
 }
 
@@ -217,8 +236,40 @@ static void TransferEggMoves(struct DayCare *daycare)
     TransferEggMovesFromBoxmonToBoxmon(&daycare->mons[1].mon, &daycare->mons[0].mon);
 }
 
-void StorePokemonInDaycare(struct Pokemon *mon, struct DaycareMon *daycareMon)
+#ifdef NATIVE
+static bool32 DaycareTransferLocation(struct DaycareMon *mon, u32 *daycare, u32 *slot)
 {
+    for (u32 i = 0; i < DAYCARE_MON_COUNT; ++i)
+        if (mon == &gSaveBlock1Ptr->daycare.mons[i]) { *daycare = 0; *slot = i; return TRUE; }
+#if IS_FRLG
+    if (mon == &gSaveBlock1Ptr->route5DayCareMon) { *daycare = 1; *slot = 0; return TRUE; }
+#endif
+    return FALSE;
+}
+static bool32 DaycarePartySlot(struct Pokemon *mon, u32 *slot)
+{
+    for (u32 i = 0; i < PARTY_SIZE; ++i)
+        if (mon == &gParties[B_TRAINER_PLAYER][i]) { *slot = i; return TRUE; }
+    return FALSE;
+}
+#endif
+
+static void StorePokemonInDaycareInternal(struct Pokemon *mon, struct DaycareMon *daycareMon, bool32 fromPc)
+{
+    (void)fromPc;
+#ifdef NATIVE
+    struct RhhDaycareTransfer transfer;
+    u32 daycare = 0, slot = 0, sourceSlot = 0, sourceLocation = RHH_MON_PARTY, sourceBox = 0;
+    bool32 sourceKnown = DaycarePartySlot(mon, &sourceSlot);
+    if (!sourceKnown && fromPc)
+    {
+        sourceLocation = RHH_MON_BOX; sourceBox = gSpecialVar_MonBoxId; sourceSlot = gSpecialVar_MonBoxPos;
+        sourceKnown = TRUE;
+    }
+    bool32 notify = sourceKnown && !daycareMon->mon.hasSpecies && DaycareTransferLocation(daycareMon, &daycare, &slot)
+        && ModsDaycareTransferCapture(&mon->box, RHH_DAYCARE_DEPOSIT, sourceLocation, sourceBox, sourceSlot,
+                                      RHH_MON_DAYCARE, daycare, slot, &transfer);
+#endif
     if (MonHasMail(mon))
     {
         u8 mailId;
@@ -237,19 +288,32 @@ void StorePokemonInDaycare(struct Pokemon *mon, struct DaycareMon *daycareMon)
 
     daycareMon->mon = mon->box;
     daycareMon->steps = 0;
+#ifdef NATIVE
+    if (notify) ZeroMonDataWithOwnedReceipt(mon);
+    else
+#endif
     ZeroMonData(mon);
+#ifdef NATIVE
+    if (notify) ModsDaycareTransferCommitted(&daycareMon->mon, &transfer);
+    else NativeOwnedTrackerUnsupported();
+#endif
     CompactPartySlots();
     CalculatePlayerPartyCount();
 }
 
-static void StorePokemonInEmptyDaycareSlot(struct Pokemon *mon, struct DayCare *daycare)
+void StorePokemonInDaycare(struct Pokemon *mon, struct DaycareMon *daycareMon)
+{
+    StorePokemonInDaycareInternal(mon, daycareMon, FALSE);
+}
+
+static void StorePokemonInEmptyDaycareSlot(struct Pokemon *mon, struct DayCare *daycare, bool32 fromPc)
 {
     s8 slotId = Daycare_FindEmptySpot(daycare);
     assertf(slotId >= 0, "Trying to store pokemon in already full daycare")
     {
         return;
     }
-    StorePokemonInDaycare(mon, &daycare->mons[slotId]);
+    StorePokemonInDaycareInternal(mon, &daycare->mons[slotId], fromPc);
     // Transfer egg moves if there are at least 2 pokemon in the daycare
     if (GetConfig(EGG_MOVE_TRANSFER) >= GEN_8 && slotId >= 1)
         TransferEggMoves(daycare);
@@ -261,13 +325,17 @@ void StoreSelectedPokemonInDaycare(void)
     if (gSpecialVar_0x8004 == PC_MON_CHOSEN)
     {
         mon = Alloc(sizeof(struct Pokemon));
+#ifdef NATIVE
+        if (Daycare_FindEmptySpot(&gSaveBlock1Ptr->daycare) >= 0) RemoveSelectedPcMonWithOwnedReceipt(mon);
+        else
+#endif
         RemoveSelectedPcMon(mon);
     }
     else
     {
         mon = &gParties[B_TRAINER_PLAYER][gSpecialVar_0x8004];
     }
-    StorePokemonInEmptyDaycareSlot(mon, &gSaveBlock1Ptr->daycare);
+    StorePokemonInEmptyDaycareSlot(mon, &gSaveBlock1Ptr->daycare, gSpecialVar_0x8004 == PC_MON_CHOSEN);
     if (gSpecialVar_0x8004 == PC_MON_CHOSEN)
         Free(mon);
 }
@@ -279,13 +347,28 @@ static void ShiftDaycareSlots(struct DayCare *daycare)
     if (GetBoxMonData(&daycare->mons[1].mon, MON_DATA_SPECIES) != SPECIES_NONE
         && GetBoxMonData(&daycare->mons[0].mon, MON_DATA_SPECIES) == SPECIES_NONE)
     {
+#ifdef NATIVE
+        struct RhhDaycareTransfer transfer;
+        u32 daycareId, sourceSlot;
+        bool32 notify = DaycareTransferLocation(&daycare->mons[1], &daycareId, &sourceSlot)
+            && ModsDaycareTransferCapture(&daycare->mons[1].mon, RHH_DAYCARE_SHIFT, RHH_MON_DAYCARE,
+                                          daycareId, sourceSlot, RHH_MON_DAYCARE, daycareId, 0, &transfer);
+#endif
         daycare->mons[0].mon = daycare->mons[1].mon;
+#ifdef NATIVE
+        if (notify) ZeroBoxMonDataWithOwnedReceipt(&daycare->mons[1].mon);
+        else
+#endif
         ZeroBoxMonData(&daycare->mons[1].mon);
 
         daycare->mons[0].mail = daycare->mons[1].mail;
         daycare->mons[0].steps = daycare->mons[1].steps;
         daycare->mons[1].steps = 0;
         ClearDaycareMonMail(&daycare->mons[1].mail);
+#ifdef NATIVE
+        if (notify) ModsDaycareTransferCommitted(&daycare->mons[0].mon, &transfer);
+        else NativeOwnedTrackerUnsupported();
+#endif
     }
 }
 
@@ -328,6 +411,14 @@ static u16 TakeSelectedPokemonFromDaycare(struct DaycareMon *daycareMon)
 {
     u32 experience;
     struct Pokemon pokemon;
+#ifdef NATIVE
+    struct RhhDaycareTransfer transfer;
+    u32 daycare, slot;
+    bool32 notify = !gParties[B_TRAINER_PLAYER][PARTY_SIZE - 1].box.hasSpecies
+        && DaycareTransferLocation(daycareMon, &daycare, &slot)
+        && ModsDaycareTransferCapture(&daycareMon->mon, RHH_DAYCARE_WITHDRAW, RHH_MON_DAYCARE, daycare, slot,
+                                      RHH_MON_PARTY, 0, PARTY_SIZE - 1, &transfer);
+#endif
 
     GetBoxMonNickname(&daycareMon->mon, gStringVar1);
     BoxMonToMon(&daycareMon->mon, &pokemon);
@@ -351,8 +442,16 @@ static u16 TakeSelectedPokemonFromDaycare(struct DaycareMon *daycareMon)
         ClearDaycareMonMail(&daycareMon->mail);
     }
 
+#ifdef NATIVE
+    if (notify) ZeroBoxMonDataWithOwnedReceipt(&daycareMon->mon);
+    else
+#endif
     ZeroBoxMonData(&daycareMon->mon);
     daycareMon->steps = 0;
+#ifdef NATIVE
+    if (notify) ModsDaycareTransferCommitted(&gParties[B_TRAINER_PLAYER][PARTY_SIZE - 1].box, &transfer);
+    else NativeOwnedTrackerUnsupported();
+#endif
     CompactPartySlots();
     CalculatePlayerPartyCount();
     return GetMonData(&pokemon, MON_DATA_SPECIES);
@@ -599,17 +698,112 @@ u32 GetChildNature(struct DayCare *daycare)
     if (slot == DAYCARE_MON_COUNT)
         return NATURE_RANDOM;
 
-    return GetNatureFromPersonality(GetBoxMonData(&daycare->mons[slot].mon, MON_DATA_PERSONALITY));
+    return GetBoxMonNature(&daycare->mons[slot].mon);
 }
+
+#ifdef NATIVE
+void GetDaycareNatureSourceWeights(const struct DayCare *daycare, u32 generation, u8 weights[3])
+{
+    struct DayCare copy = *daycare;
+    bool32 eligible[DAYCARE_MON_COUNT] = {FALSE, FALSE};
+    DaycareGuardOutput(weights, 3 * sizeof(*weights));
+    weights[0] = weights[1] = 0; weights[2] = 4;
+    if (generation < GEN_3) return;
+    if (generation == GEN_3)
+    {
+        u32 slot = DAYCARE_MON_COUNT, dittoCount = 0;
+        for (u32 i = 0; i < DAYCARE_MON_COUNT; ++i)
+            if (GetBoxMonGender(&copy.mons[i].mon) == MON_FEMALE) slot = i;
+        for (u32 i = 0; i < DAYCARE_MON_COUNT; ++i)
+            if (IS_DITTO(GetBoxMonData(&copy.mons[i].mon, MON_DATA_SPECIES))) { slot = i; ++dittoCount; }
+        if (dittoCount == DAYCARE_MON_COUNT)
+        {
+            for (u32 i = 0; i < DAYCARE_MON_COUNT; ++i)
+                if (GetBoxMonData(&copy.mons[i].mon, MON_DATA_HELD_ITEM) == ITEM_EVERSTONE) weights[i] = 1;
+        }
+        else if (slot < DAYCARE_MON_COUNT && GetBoxMonData(&copy.mons[slot].mon, MON_DATA_HELD_ITEM) == ITEM_EVERSTONE)
+            weights[slot] = 2;
+    }
+    else
+    {
+        for (u32 i = 0; i < DAYCARE_MON_COUNT; ++i)
+            eligible[i] = GetItemHoldEffect(GetBoxMonData(&copy.mons[i].mon, MON_DATA_HELD_ITEM)) == HOLD_EFFECT_PREVENT_EVOLVE;
+        if (generation == GEN_4)
+        {
+            if (eligible[0]) weights[0] = 2;
+            if (eligible[1]) weights[1] = eligible[0] ? 1 : 2;
+        }
+        else if (eligible[0] && eligible[1]) weights[0] = weights[1] = 2;
+        else if (eligible[0]) weights[0] = 4;
+        else if (eligible[1]) weights[1] = 4;
+    }
+    weights[2] = 4 - weights[0] - weights[1];
+}
+#endif
+
+static enum Species DetermineFinalEggSpecies(struct DayCare *daycare, u8 *parentSlots);
 
 static void _TriggerPendingDaycareEgg(struct DayCare *daycare)
 {
+    if (!FlagGet(FLAG_PENDING_DAYCARE_EGG))
+    {
+        /* The variant is fixed when the egg becomes pending, so previews and
+         * acceptance see the same species. Ordinary pairs consume no extra
+         * RNG, and an already pending egg is never rerolled. */
+        struct DayCare copy = *daycare;
+        if (GetBoxMonData(&copy.mons[0].mon, MON_DATA_SANITY_HAS_SPECIES)
+            && GetBoxMonData(&copy.mons[1].mon, MON_DATA_SANITY_HAS_SPECIES))
+        {
+            u8 slots[2] = {0, 1};
+            copy.offspringPersonality &= ~EGG_GENDER_MALE;
+            enum Species first = DetermineFinalEggSpecies(&copy, slots);
+            slots[0] = 0; slots[1] = 1;
+            copy.offspringPersonality |= EGG_GENDER_MALE;
+            enum Species second = DetermineFinalEggSpecies(&copy, slots);
+            if (first != second)
+                daycare->offspringPersonality = (daycare->offspringPersonality & ~EGG_GENDER_MALE)
+                    | (Random() & EGG_GENDER_MALE);
+        }
+    }
     FlagSet(FLAG_PENDING_DAYCARE_EGG);
 }
 
 void TriggerPendingDaycareEgg(void)
 {
+#ifdef NATIVE
+    bool32 before = FlagGet(FLAG_PENDING_DAYCARE_EGG);
+#endif
     _TriggerPendingDaycareEgg(&gSaveBlock1Ptr->daycare);
+#ifdef NATIVE
+    if (!before) ModsBreedingPendingChanged(&gSaveBlock1Ptr->daycare, RHH_DAYCARE_PENDING_MANUAL, FALSE, TRUE);
+#endif
+}
+
+#ifdef NATIVE
+void TriggerPendingDaycareEggForMod(void)
+{
+    bool32 before = FlagGet(FLAG_PENDING_DAYCARE_EGG);
+    _TriggerPendingDaycareEgg(&gSaveBlock1Ptr->daycare);
+    if (!before) ModsBreedingPendingChanged(&gSaveBlock1Ptr->daycare, RHH_DAYCARE_PENDING_REQUEST, FALSE, TRUE);
+}
+#endif
+
+void GetDaycareIVRules(struct DayCare *daycare, struct DaycareIVRules *out)
+{
+#ifdef NATIVE
+    DaycareGuardOutput(out, sizeof(*out));
+#endif
+    *out = (struct DaycareIVRules){.inheritedCount = 3, .powerStats = {NUM_STATS, NUM_STATS}};
+    for (u32 i = 0; i < DAYCARE_MON_COUNT; ++i)
+    {
+        enum Item item = GetBoxMonData(&daycare->mons[i].mon, MON_DATA_HELD_ITEM);
+        if (item == ITEM_DESTINY_KNOT) out->inheritedCount = 5;
+        if (GetItemHoldEffect(item) == HOLD_EFFECT_POWER_ITEM)
+        {
+            out->powerStats[i] = GetItemSecondaryId(item);
+            ++out->powerItemCount;
+        }
+    }
 }
 
 void InheritIVs(struct Pokemon *egg, struct DayCare *daycare)
@@ -617,11 +811,15 @@ void InheritIVs(struct Pokemon *egg, struct DayCare *daycare)
     u32 i, iv, slot;
     enum Stat powerStat;
     u32 start = 0;
-    u32 powerItemCount = 0;
-    u8 selectedIvs[5] = {0};
+    struct DaycareIVRules rules;
+    u8 selectedIvs[NUM_STATS] = {0};
     u8 availableIVs[NUM_STATS];
-
-    u32 randParents = RandomUniform(RNG_DAYCARE_PICK_IVS_PARENT, 0, 31); // 2^5 1 parent/bit for each selected stat, -1 because 0 is included
+    GetDaycareIVRules(daycare, &rules);
+    u32 howManyIVs = rules.inheritedCount;
+#ifdef NATIVE
+    howManyIVs = ModsBreedingIvCount(daycare, howManyIVs);
+#endif
+    u32 randParents = RandomUniform(RNG_DAYCARE_PICK_IVS_PARENT, 0, howManyIVs == NUM_STATS ? 63 : 31);
     u32 randIv = RandomUniform(RNG_DAYCARE_INHERITED_STATS, 0, 719); // 6! is the maximum number of stat combination, -1 because 0 is included
 
     for (i = 0; i < NUM_STATS; i++)
@@ -629,27 +827,15 @@ void InheritIVs(struct Pokemon *egg, struct DayCare *daycare)
         availableIVs[i] = i;
     }
 
-    u32 howManyIVs = 3;
-    for (i = 0; i < DAYCARE_MON_COUNT; i++)
+    if (howManyIVs && rules.powerItemCount > 0)
     {
-        enum Item item = GetBoxMonData(&daycare->mons[i].mon, MON_DATA_HELD_ITEM);
-        if (item == ITEM_DESTINY_KNOT)
-            howManyIVs = 5;
-        if (GetItemHoldEffect(item) == HOLD_EFFECT_POWER_ITEM)
-        {
-            slot = i;
-            powerStat = GetItemSecondaryId(item);
-            powerItemCount++;
-        }
-    }
-    if (powerItemCount > 0)
-    {
-        if (powerItemCount == 2)
+        slot = rules.powerStats[1] < NUM_STATS ? 1 : 0;
+        if (rules.powerItemCount == 2)
         {
             slot = randParents & 1;
             randParents >>= 1;
-            powerStat = GetItemSecondaryId(GetBoxMonData(&daycare->mons[slot].mon, MON_DATA_HELD_ITEM));
         }
+        powerStat = rules.powerStats[slot];
         iv = GetBoxMonData(&daycare->mons[slot].mon, MON_DATA_HP_IV + powerStat);
         SetMonData(egg, MON_DATA_HP_IV + powerStat, &iv);
         RemoveIVIndexFromList(availableIVs, powerStat);
@@ -674,81 +860,104 @@ void InheritIVs(struct Pokemon *egg, struct DayCare *daycare)
 
 }
 
-static void InheritPokeball(struct Pokemon *egg, struct DayCare *daycare)
+/* Two equally weighted units: parent 0, parent 1, or the default Poké Ball.
+ * Shared with the native breeding preview so generation and odds agree. */
+void GetDaycareBallSourceWeights(const struct DayCare *daycare, u32 generation, u8 weights[3])
 {
-    enum PokeBall inheritBall = BALL_POKE;
-
-    if (GetConfig(BALL_INHERITANCE) >= GEN_7)
+    struct DayCare copy = *daycare;
+#ifdef NATIVE
+    DaycareGuardOutput(weights, 3 * sizeof(*weights));
+#endif
+    weights[0] = weights[1] = 0; weights[2] = 2;
+    if (generation >= GEN_7)
     {
         s32 ballSlot = -1;
         for (u32 i = 0; i < DAYCARE_MON_COUNT; i++)
         {
-            if (GetBoxMonGender(&daycare->mons[i].mon) == MON_FEMALE)
+            if (GetBoxMonGender(&copy.mons[i].mon) == MON_FEMALE)
                 ballSlot = i;
-            enum Species species = GetBoxMonData(&daycare->mons[i].mon, MON_DATA_SPECIES);
+            enum Species species = GetBoxMonData(&copy.mons[i].mon, MON_DATA_SPECIES);
             if (ballSlot < 0 && !IS_DITTO(species))
                 ballSlot = i;
         }
-
-        enum Species species0 = GetBoxMonData(&daycare->mons[0].mon, MON_DATA_SPECIES);
-        enum Species species1 = GetBoxMonData(&daycare->mons[1].mon, MON_DATA_SPECIES);
-
+        enum Species species0 = GetBoxMonData(&copy.mons[0].mon, MON_DATA_SPECIES);
+        enum Species species1 = GetBoxMonData(&copy.mons[1].mon, MON_DATA_SPECIES);
+        if (ballSlot < 0)
+            ballSlot = 0;
         if (GET_BASE_SPECIES_ID(species0) == GET_BASE_SPECIES_ID(species1))
-            ballSlot = RandomPercentage(RNG_DAYCARE_PICK_BALL_PARENT, 50);
-        inheritBall = GetBoxMonData(&daycare->mons[ballSlot].mon, MON_DATA_POKEBALL);
+        { weights[0] = weights[1] = 1; weights[2] = 0; }
+        else { weights[ballSlot] = 2; weights[2] = 0; }
     }
-    else if (GetConfig(BALL_INHERITANCE) == GEN_6)
+    else if (generation == GEN_6)
     {
         for (u32 i = 0; i < DAYCARE_MON_COUNT; i++)
-        {
-            if (GetBoxMonGender(&daycare->mons[i].mon) == MON_FEMALE)
-                inheritBall = GetBoxMonData(&daycare->mons[i].mon, MON_DATA_POKEBALL);
-        }
+            if (GetBoxMonGender(&copy.mons[i].mon) == MON_FEMALE)
+            { weights[0] = weights[1] = 0; weights[i] = 2; weights[2] = 0; }
     }
+}
+
+static void InheritPokeball(struct Pokemon *egg, struct DayCare *daycare)
+{
+    u8 weights[3]; GetDaycareBallSourceWeights(daycare, GetConfig(BALL_INHERITANCE), weights);
+    enum PokeBall inheritBall = BALL_POKE;
+    if (weights[0] && weights[1])
+        inheritBall = GetBoxMonData(&daycare->mons[RandomPercentage(RNG_DAYCARE_PICK_BALL_PARENT, 50)].mon, MON_DATA_POKEBALL);
+    else if (weights[0] || weights[1])
+        inheritBall = GetBoxMonData(&daycare->mons[weights[1] ? 1 : 0].mon, MON_DATA_POKEBALL);
     if (inheritBall == BALL_MASTER || inheritBall == BALL_CHERISH || inheritBall == BALL_STRANGE)
         inheritBall = BALL_POKE;
     SetMonData(egg, MON_DATA_POKEBALL, &inheritBall);
 }
 
-void InheritAbility(struct Pokemon *egg, struct DayCare *daycare)
+void GetDaycareAbilityInheritance(const struct DayCare *daycare, u32 generation, s32 *parent, u32 *ability, u32 *percent)
 {
-    s32 inheritAbility = -1;
-
-    if (GetConfig(ABILITY_INHERITANCE) < GEN_5)
+    struct DayCare copy = *daycare;
+#ifdef NATIVE
+    DaycareGuardOutput(parent, sizeof(*parent));
+    DaycareGuardOutput(ability, sizeof(*ability));
+    DaycareGuardOutput(percent, sizeof(*percent));
+#endif
+    *parent = -1; *ability = 0; *percent = 0;
+    if (generation < GEN_5)
         return;
-
-    if (GetConfig(ABILITY_INHERITANCE) == GEN_5)
+    if (generation == GEN_5)
     {
-        u32 gender0 = GetBoxMonGender(&daycare->mons[0].mon);
-        u32 gender1 = GetBoxMonGender(&daycare->mons[1].mon);
+        u32 gender0 = GetBoxMonGender(&copy.mons[0].mon);
+        u32 gender1 = GetBoxMonGender(&copy.mons[1].mon);
         if (gender0 == MON_FEMALE && gender1 == MON_MALE)
-            inheritAbility = GetBoxMonData(&daycare->mons[0].mon, MON_DATA_ABILITY_NUM);
+            *parent = 0;
         else if (gender1 == MON_FEMALE && gender0 == MON_MALE)
-            inheritAbility = GetBoxMonData(&daycare->mons[1].mon, MON_DATA_ABILITY_NUM);
+            *parent = 1;
     }
-    else // GetConfig(ABILITY_INHERITANCE) > GEN_5
+    else
     {
         s32 abilitySlot = -1;
         for (u32 i = 0; i < DAYCARE_MON_COUNT; i++)
         {
-            if (GetBoxMonGender(&daycare->mons[i].mon) == MON_FEMALE)
+            if (GetBoxMonGender(&copy.mons[i].mon) == MON_FEMALE)
                 abilitySlot = i;
-            enum Species species = GetBoxMonData(&daycare->mons[i].mon, MON_DATA_SPECIES);
+            enum Species species = GetBoxMonData(&copy.mons[i].mon, MON_DATA_SPECIES);
             if (abilitySlot < 0 && !IS_DITTO(species))
                 abilitySlot = i;
         }
-        inheritAbility = GetBoxMonData(&daycare->mons[abilitySlot].mon, MON_DATA_ABILITY_NUM);
+        if (abilitySlot < 0)
+            abilitySlot = 0;
+        *parent = abilitySlot;
     }
+    if (*parent < 0)
+        return;
+    *ability = GetBoxMonData(&copy.mons[*parent].mon, MON_DATA_ABILITY_NUM);
+    *percent = *ability == 2 ? (generation == GEN_5 ? 80 : 60) : *ability < 2 ? 80 : 100;
+}
 
-    if (inheritAbility < 0)
-        return;
-
-    u32 hiddenAbilityPercentChance = (GetConfig(ABILITY_INHERITANCE) == GEN_5) ? 80 : 60;
-    if (inheritAbility == 2 && !RandomPercentage(RNG_DAYCARE_ABILITY_INHERITANCE, hiddenAbilityPercentChance))
-        return;
-    if (inheritAbility < 2 && !RandomPercentage(RNG_DAYCARE_ABILITY_INHERITANCE, 80))
-        return;
-    SetMonData(egg, MON_DATA_ABILITY_NUM, &inheritAbility);
+void InheritAbility(struct Pokemon *egg, struct DayCare *daycare)
+{
+    s32 parent; u32 ability, percent;
+    GetDaycareAbilityInheritance(daycare, GetConfig(ABILITY_INHERITANCE), &parent, &ability, &percent);
+    if (parent < 0) return;
+    /* Preserve the engine's no-draw behavior for an out-of-range parent slot. */
+    if (ability < 3 && !RandomPercentage(RNG_DAYCARE_ABILITY_INHERITANCE, percent)) return;
+    SetMonData(egg, MON_DATA_ABILITY_NUM, &ability);
 }
 
 #define ADD_OR_REPLACE_MOVE(move) if (GiveMoveToMon(egg, move) == MON_HAS_MAX_MOVES) {DeleteFirstMoveAndGiveMoveToMon(egg, move);}
@@ -884,6 +1093,26 @@ static void BuildEggMoveset(struct Pokemon *egg, struct BoxPokemon *father, stru
     }
 }
 
+#ifdef NATIVE
+bool32 GetDaycareMovePreview(const struct DayCare *daycare, enum Species species, const u8 *parentSlots, u16 moves[4])
+{
+    if (!daycare || !parentSlots || !moves || !species || species >= NUM_SPECIES
+        || parentSlots[0] >= DAYCARE_MON_COUNT || parentSlots[1] >= DAYCARE_MON_COUNT
+        || parentSlots[0] == parentSlots[1]) return FALSE;
+    struct DayCare copy = *daycare;
+    struct Pokemon egg = {0};
+    /* A fixed identity and box-only construction avoid all egg RNG and stat
+     * side effects. BuildEggMoveset reads species, level and copied parents. */
+    CreateBoxMon(&egg.box, species, EGG_HATCH_LEVEL, 0, OTID_STRUCT_PRESET(1));
+    BuildEggMoveset(&egg, &copy.mons[parentSlots[1]].mon, &copy.mons[parentSlots[0]].mon);
+    u16 result[MAX_MON_MOVES];
+    for (u32 i = 0; i < MAX_MON_MOVES; ++i) result[i] = GetMonData(&egg, MON_DATA_MOVE1 + i);
+    DaycareGuardOutput(moves, sizeof(result));
+    memcpy(moves, result, sizeof(result));
+    return TRUE;
+}
+#endif
+
 static void RemoveEggFromDayCare(struct DayCare *daycare)
 {
     FlagClear(FLAG_PENDING_DAYCARE_EGG);
@@ -892,7 +1121,13 @@ static void RemoveEggFromDayCare(struct DayCare *daycare)
 
 void RejectEggFromDayCare(void)
 {
+#ifdef NATIVE
+    bool32 before = FlagGet(FLAG_PENDING_DAYCARE_EGG);
+#endif
     RemoveEggFromDayCare(&gSaveBlock1Ptr->daycare);
+#ifdef NATIVE
+    if (before) ModsBreedingPendingChanged(&gSaveBlock1Ptr->daycare, RHH_DAYCARE_PENDING_REJECTED, TRUE, FALSE);
+#endif
 }
 
 static void AlterEggSpeciesWithIncenseItem(enum Species *species, struct DayCare *daycare)
@@ -991,31 +1226,129 @@ static enum Species DetermineEggSpeciesAndParentSlots(struct DayCare *daycare, u
     return eggSpecies;
 }
 
-static void _GiveEggFromDaycare(struct DayCare *daycare)
+static enum Species DetermineFinalEggSpecies(struct DayCare *daycare, u8 *parentSlots)
 {
-    struct Pokemon egg;
-    enum Species species;
-    u8 parentSlots[DAYCARE_MON_COUNT] = {0};
-    bool8 isEgg;
-
-    if (GetDaycareCompatibilityScore(daycare) == PARENTS_INCOMPATIBLE)
-        return;
-
-    species = DetermineEggSpeciesAndParentSlots(daycare, parentSlots);
+    enum Species species = DetermineEggSpeciesAndParentSlots(daycare, parentSlots);
     if (P_INCENSE_BREEDING < GEN_9)
         AlterEggSpeciesWithIncenseItem(&species, daycare);
-    SetInitialEggData(&egg, species, daycare);
-    InheritIVs(&egg, daycare);
-    InheritPokeball(&egg, daycare);
-    BuildEggMoveset(&egg, &daycare->mons[parentSlots[1]].mon, &daycare->mons[parentSlots[0]].mon);
-    InheritAbility(&egg, daycare);
+    return species;
+}
+
+#ifdef NATIVE
+enum Species GetDaycareOffspringCandidate(struct DayCare *daycare, bool32 maleVariant, u8 *parentSlots)
+{
+    struct DayCare copy = *daycare;
+    if (maleVariant) copy.offspringPersonality |= EGG_GENDER_MALE;
+    else copy.offspringPersonality &= ~EGG_GENDER_MALE;
+    DaycareGuardOutput(parentSlots, DAYCARE_MON_COUNT * sizeof(*parentSlots));
+    parentSlots[0] = 0; parentSlots[1] = 1;
+    return DetermineFinalEggSpecies(&copy, parentSlots);
+}
+#endif
+
+static void ConstructDaycareEgg(struct DayCare *daycare, struct Pokemon *egg, u32 compatibility,
+                                u32 *originalSpecies, u8 parentSlots[DAYCARE_MON_COUNT])
+{
+    enum Species species = DetermineFinalEggSpecies(daycare, parentSlots);
+    *originalSpecies = species;
+#ifdef NATIVE
+    species = ModsBreedingOffspring(daycare, species, compatibility, parentSlots);
+#else
+    (void)compatibility;
+#endif
+    SetInitialEggData(egg, species, daycare);
+#ifdef NATIVE
+    u8 initialIVs[NUM_STATS];
+    for (u32 i = 0; i < NUM_STATS; ++i) initialIVs[i] = GetMonData(egg, MON_DATA_HP_IV + i);
+#endif
+    InheritIVs(egg, daycare);
+#ifdef NATIVE
+    ModsBreedingInheritIVs(daycare, egg, *originalSpecies, compatibility, parentSlots, initialIVs);
+#endif
+    InheritPokeball(egg, daycare);
+    BuildEggMoveset(egg, &daycare->mons[parentSlots[1]].mon, &daycare->mons[parentSlots[0]].mon);
+#ifdef NATIVE
+    ModsBreedingInheritMoves(daycare, egg, *originalSpecies, compatibility, parentSlots);
+#endif
+    InheritAbility(egg, daycare);
+#ifdef NATIVE
+    ModsBreedingEggTraits(daycare, egg, *originalSpecies, compatibility, parentSlots);
+#endif
+}
+
+#ifdef NATIVE
+bool32 GetDaycareExactEggPreview(struct Pokemon *egg, u32 *originalSpecies, u8 parentSlots[DAYCARE_MON_COUNT])
+{
+    if (!egg || !originalSpecies || !parentSlots || !gSaveBlock1Ptr || !IsEggPending(&gSaveBlock1Ptr->daycare)) return FALSE;
+    struct DayCare *daycare = &gSaveBlock1Ptr->daycare;
+    u32 compatibility = GetDaycareCompatibilityScore(daycare);
+    if (compatibility == PARENTS_INCOMPATIBLE) return FALSE;
+    DaycareGuardOutput(egg, sizeof(*egg));
+    DaycareGuardOutput(originalSpecies, sizeof(*originalSpecies));
+    DaycareGuardOutput(parentSlots, DAYCARE_MON_COUNT * sizeof(*parentSlots));
+    parentSlots[0] = 0; parentSlots[1] = 1;
+    ConstructDaycareEgg(daycare, egg, compatibility, originalSpecies, parentSlots);
+    bool8 isEgg = TRUE; SetMonData(egg, MON_DATA_IS_EGG, &isEgg);
+    return TRUE;
+}
+#endif
+
+static bool32 _GiveEggFromDaycare(struct DayCare *daycare, u32 *receivedSlot
+#ifdef NATIVE
+    , bool32 (*validate)(struct Pokemon *, u32, const u8 *, void *), void *context
+#endif
+    )
+{
+    struct Pokemon egg;
+    u32 originalSpecies;
+    u8 parentSlots[DAYCARE_MON_COUNT] = {0, 1};
+    bool8 isEgg;
+    u8 compatibility = GetDaycareCompatibilityScore(daycare);
+
+    if (compatibility == PARENTS_INCOMPATIBLE)
+        return FALSE;
+
+    u32 partyCount = 0;
+    for (u32 slot = 0; slot < PARTY_SIZE; ++slot)
+        if (GetMonData(&gParties[B_TRAINER_PLAYER][slot], MON_DATA_SANITY_HAS_SPECIES)) ++partyCount;
+    if (partyCount == PARTY_SIZE) return FALSE;
+
+#ifdef NATIVE
+    struct ModsBreedingRngScope rngScope;
+    ModsBreedingRngBegin(daycare, &rngScope);
+#endif
+    ConstructDaycareEgg(daycare, &egg, compatibility, &originalSpecies, parentSlots);
+#ifdef NATIVE
+    ModsBreedingRngEnd(&rngScope);
+#endif
 
     isEgg = TRUE;
     SetMonData(&egg, MON_DATA_IS_EGG, &isEgg);
-    gParties[B_TRAINER_PLAYER][PARTY_SIZE - 1] = egg;
+#ifdef NATIVE
+    if (validate && !validate(&egg, originalSpecies, parentSlots, context)) return FALSE;
+#endif
     CompactPartySlots();
+    gParties[B_TRAINER_PLAYER][partyCount] = egg;
     CalculatePlayerPartyCount();
+#ifdef NATIVE
+    bool32 wasPending = FlagGet(FLAG_PENDING_DAYCARE_EGG);
+#endif
     RemoveEggFromDayCare(daycare);
+#ifdef NATIVE
+    NativeOwnedTrackEggCreated(partyCount);
+    ModsBreedingEggCreated(daycare, &gParties[B_TRAINER_PLAYER][partyCount], originalSpecies,
+                           compatibility, parentSlots, partyCount, wasPending,
+                           gSaveBlock1Ptr && daycare == &gSaveBlock1Ptr->daycare ? ModsCommitDaycareOrdinal() : 0);
+    if (wasPending) ModsBreedingPendingChanged(daycare, RHH_DAYCARE_PENDING_ACCEPTED, TRUE, FALSE);
+#endif
+    if (receivedSlot)
+    {
+#ifdef NATIVE
+        DaycareGuardOutput(receivedSlot, sizeof(*receivedSlot));
+#endif
+        *receivedSlot = partyCount;
+    }
+    return TRUE;
 }
 
 void CreateEgg(struct Pokemon *mon, enum Species species, bool8 setHotSpringsLocation)
@@ -1051,7 +1384,11 @@ static void SetInitialEggData(struct Pokemon *mon, enum Species species, struct 
     u8 metLevel;
     u8 language;
 
-    personality = GetMonPersonality(species, MON_GENDER_RANDOM, GetChildNature(daycare), RANDOM_UNOWN_LETTER);
+    u32 nature = GetChildNature(daycare);
+#ifdef NATIVE
+    nature = ModsBreedingNature(daycare, nature);
+#endif
+    personality = GetMonPersonality(species, MON_GENDER_RANDOM, nature, RANDOM_UNOWN_LETTER);
     CreateMonWithIVs(mon, species, EGG_HATCH_LEVEL, personality, OTID_STRUCT_PLAYER_ID, USE_RANDOM_IVS);
     metLevel = 0;
     language = LANGUAGE_JAPANESE;
@@ -1063,8 +1400,26 @@ static void SetInitialEggData(struct Pokemon *mon, enum Species species, struct 
 
 void GiveEggFromDaycare(void)
 {
-    _GiveEggFromDaycare(&gSaveBlock1Ptr->daycare);
+    _GiveEggFromDaycare(&gSaveBlock1Ptr->daycare, NULL
+#ifdef NATIVE
+        , NULL, NULL
+#endif
+        );
 }
+
+#ifdef NATIVE
+bool32 GiveEggFromDaycareChecked(u32 *partySlot)
+{
+    if (!gSaveBlock1Ptr || !partySlot || !IsEggPending(&gSaveBlock1Ptr->daycare)) return FALSE;
+    return _GiveEggFromDaycare(&gSaveBlock1Ptr->daycare, partySlot, NULL, NULL);
+}
+bool32 GiveEggFromDaycareValidated(u32 *partySlot,
+    bool32 (*validate)(struct Pokemon *, u32, const u8 *, void *), void *context)
+{
+    if (!gSaveBlock1Ptr || !partySlot || !validate || !IsEggPending(&gSaveBlock1Ptr->daycare)) return FALSE;
+    return _GiveEggFromDaycare(&gSaveBlock1Ptr->daycare, partySlot, validate, context);
+}
+#endif
 
 static void _IncrementDaycareSteps(struct DayCare *daycare)
 {
@@ -1085,7 +1440,12 @@ static void _IncrementDaycareSteps(struct DayCare *daycare)
     {
         u8 compatibility = ModifyBreedingScoreForOvalCharm(GetDaycareCompatibilityScore(daycare));
         if (RandomPercentage(RNG_DAYCARE_MAKE_EGG, compatibility))
+        {
             _TriggerPendingDaycareEgg(daycare);
+#ifdef NATIVE
+            ModsBreedingPendingChanged(daycare, RHH_DAYCARE_PENDING_WALK, FALSE, TRUE);
+#endif
+        }
     }
 }
 
@@ -1126,6 +1486,10 @@ static u32 GetEggCyclesToSubtract(void)
         result += 1;
     return result;
 }
+#ifdef NATIVE
+u32 NativeDaycareHatchCycleLength(void) { return GetEggCycleLength(); }
+u32 NativeDaycareHatchCycleDecrement(void) { return GetEggCyclesToSubtract(); }
+#endif
 
 static bool32 TryToHatchEgg(struct DayCare *daycare)
 {
@@ -1147,15 +1511,31 @@ static bool32 TryToHatchEgg(struct DayCare *daycare)
         eggCycles = GetMonData(&gParties[B_TRAINER_PLAYER][i], MON_DATA_FRIENDSHIP);
         if (eggCycles != 0)
         {
+#ifdef NATIVE
+            u32 remaining;
+            if (!ModsAdjustEggCycles(i, eggCycles, toSub, &remaining))
+                continue;
+            struct ModsEggCycleCapture cycleCapture;
+            ModsCaptureEggCycle(i, eggCycles, toSub, remaining, &cycleCapture);
+            eggCycles = remaining;
+#else
             if (eggCycles >= toSub)
                 eggCycles -= toSub;
             else
                 eggCycles -= 1;
+#endif
 
             SetMonData(&gParties[B_TRAINER_PLAYER][i], MON_DATA_FRIENDSHIP, &eggCycles);
+#ifdef NATIVE
+            ModsEggCycleCommitted(&cycleCapture);
+#endif
         }
         else
         {
+#ifdef NATIVE
+            if (!ModsCanHatchEgg(i))
+                continue;
+#endif
             gSpecialVar_0x8004 = i;
             return TRUE;
         }
@@ -1239,7 +1619,11 @@ static bool8 EggGroupsOverlap(u16 *eggGroups1, u16 *eggGroups2)
     return FALSE;
 }
 
+#ifdef NATIVE
+u8 GetDaycareCompatibilityScoreBase(struct DayCare *daycare)
+#else
 u8 GetDaycareCompatibilityScore(struct DayCare *daycare)
+#endif
 {
     u32 i;
     u16 eggGroups[DAYCARE_MON_COUNT][EGG_GROUPS_PER_MON];
@@ -1300,6 +1684,14 @@ u8 GetDaycareCompatibilityScore(struct DayCare *daycare)
         }
     }
 }
+
+#ifdef NATIVE
+u8 GetDaycareCompatibilityScore(struct DayCare *daycare)
+{
+    u8 base = GetDaycareCompatibilityScoreBase(daycare);
+    return ModsBreedingCompatibility(daycare, base);
+}
+#endif
 
 static u8 GetDaycareCompatibilityScoreFromSave(void)
 {
@@ -1508,6 +1900,9 @@ static u8 ModifyBreedingScoreForOvalCharm(u8 score)
 
     return score;
 }
+#ifdef NATIVE
+u32 NativeDaycareEggChance(u32 score) { return ModifyBreedingScoreForOvalCharm(score); }
+#endif
 
 // Route 5 Daycare
 

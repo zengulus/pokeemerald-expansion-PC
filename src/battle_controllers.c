@@ -1,4 +1,8 @@
 #include "global.h"
+#ifdef NATIVE
+#include "owned_identity_ledger.h"
+#include "mods.h"
+#endif
 #include "battle.h"
 #include "battle_ai_main.h"
 #include "battle_ai_util.h"
@@ -1458,7 +1462,7 @@ void BtlController_Complete(enum BattlerId battler)
 
 static u32 GetBattlerMonData(enum BattlerId battler, struct Pokemon *party, u32 monId, u8 *dst)
 {
-    struct BattlePokemon battleMon;
+    struct BattlePokemon battleMon = {0};
     struct MovePPInfo moveData;
     u8 nickname[POKEMON_NAME_LENGTH * 2];
     u8 *src;
@@ -1504,7 +1508,7 @@ static u32 GetBattlerMonData(enum BattlerId battler, struct Pokemon *party, u32 
         StringCopy_Nickname(battleMon.nickname, nickname);
         GetMonData(&party[monId], MON_DATA_OT_NAME, battleMon.otName);
         src = (u8 *)&battleMon;
-        for (size = 0; size < sizeof(battleMon); size++)
+        for (size = 0; size < BATTLE_POKEMON_TRANSFER_SIZE; size++)
             dst[size] = src[size];
         #if TESTING
         if (gTestRunnerEnabled)
@@ -2141,7 +2145,7 @@ static void Controller_DoMoveAnimation(enum BattlerId battler)
         }
         break;
     case 2:
-        gAnimScriptCallback();
+        BATTLE_ANIM_STEP();
         if (!gAnimScriptActive)
         {
             u8 multihit = gBattleResources->bufferA[battler][11];
@@ -2328,6 +2332,9 @@ void BtlController_HandleSetMonData(enum BattlerId battler)
     struct Pokemon *party = GetBattlerParty(battler);
     u32 i, monToCheck;
 
+#ifdef NATIVE
+    ModsPartyCureControllerBefore(battler);
+#endif
     if (gBattleResources->bufferA[battler][2] == 0)
     {
         SetBattlerMonData(battler, party, gBattlerPartyIndexes[battler]);
@@ -2342,15 +2349,27 @@ void BtlController_HandleSetMonData(enum BattlerId battler)
             monToCheck >>= 1;
         }
     }
+#ifdef NATIVE
+    ModsPartyCureControllerAfter(battler);
+#endif
     BtlController_Complete(battler);
 }
 
 void BtlController_HandleSetRawMonData(enum BattlerId battler)
 {
-    u32 i;
-    u8 *dst = (u8 *)GetBattlerMon(battler) + gBattleResources->bufferA[battler][1];
+    u32 i, offset = gBattleResources->bufferA[battler][1], size = gBattleResources->bufferA[battler][2];
+    struct Pokemon *mon = GetBattlerMon(battler);
+    if (offset > sizeof(*mon) || size > sizeof(*mon) - offset)
+    {
+        BtlController_Complete(battler);
+        return;
+    }
+    u8 *dst = (u8 *)mon + offset;
 
-    for (i = 0; i < gBattleResources->bufferA[battler][2]; i++)
+#ifdef NATIVE
+    NativeOwnedTrackUnreportedCopy(dst, &gBattleResources->bufferA[battler][3], size);
+#endif
+    for (i = 0; i < size; i++)
         dst[i] = gBattleResources->bufferA[battler][3 + i];
 
     BtlController_Complete(battler);

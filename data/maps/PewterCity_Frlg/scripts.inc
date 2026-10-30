@@ -850,14 +850,14 @@ Text_DreamEaterTeach::
 	.string "And…\n"
 	.string "I learned how to eat dreams…\p"
 	.string "Oogh, this is too spooky!\p"
-	.string "Let me teach it to a POKéMON so\n"
+	.string "Let me teach it to a Pokémon so\n"
 	.string "I can forget about it!$"
 
 Text_DreamEaterDeclined::
 	.string "…Snore…$"
 
 Text_DreamEaterWhichMon::
-	.string "Which POKéMON wants to learn\n"
+	.string "Which Pokémon wants to learn\n"
 	.string "DREAM EATER?$"
 
 Text_DreamEaterTaught::
@@ -871,11 +871,11 @@ PewterCity_Text_ClefairyCameFromMoon::
 	.string "fell on MT. MOON.$"
 
 PewterCity_Text_BrockOnlySeriousTrainerHere::
-	.string "There aren't many serious POKéMON\n"
-	.string "TRAINERS here.\p"
+	.string "There aren't many serious Pokémon\n"
+	.string "Trainers here.\p"
 	.string "They're all like BUG CATCHERS,\n"
 	.string "you know, just hobbyists.\p"
-	.string "But PEWTER GYM's BROCK isn't like\n"
+	.string "But PEWTER Gym's BROCK isn't like\n"
 	.string "that, not one bit.$"
 
 PewterCity_Text_DidYouCheckOutMuseum::
@@ -904,10 +904,10 @@ PewterCity_Text_ThatsRightItsHardWork::
 
 PewterCity_Text_SprayingRepelToKeepWildMonsOut::
 	.string "I'm spraying REPEL to keep wild\n"
-	.string "POKéMON out of my garden!$"
+	.string "Pokémon out of my garden!$"
 
 PewterCity_Text_BrocksLookingForChallengersFollowMe::
-	.string "You're a TRAINER, right?\p"
+	.string "You're a Trainer, right?\p"
 	.string "BROCK's looking for new\n"
 	.string "challengers. Follow me!$"
 
@@ -916,13 +916,13 @@ PewterCity_Text_GoTakeOnBrock::
 	.string "go take on BROCK!$"
 
 PewterCity_Text_TrainerTipsEarningEXP::
-	.string "TRAINER TIPS\p"
-	.string "All POKéMON that appear in battle,\n"
+	.string "Trainer TIPS\p"
+	.string "All Pokémon that appear in battle,\n"
 	.string "however briefly, earn EXP Points.$"
 
 PewterCity_Text_CallPoliceIfInfoOnThieves::
 	.string "NOTICE!\p"
-	.string "Thieves have been stealing POKéMON\n"
+	.string "Thieves have been stealing Pokémon\n"
 	.string "fossils from MT. MOON.\p"
 	.string "Please call the PEWTER POLICE if\n"
 	.string "you have any information.$"
@@ -931,12 +931,12 @@ PewterCity_Text_MuseumOfScience::
 	.string "PEWTER MUSEUM OF SCIENCE$"
 
 PewterCity_Text_GymSign::
-	.string "PEWTER CITY POKéMON GYM\n"
-	.string "LEADER: BROCK\l"
-	.string "The Rock-Solid POKéMON TRAINER!$"
+	.string "PEWTER City Pokémon Gym\n"
+	.string "Leader: BROCK\l"
+	.string "The Rock-Solid Pokémon Trainer!$"
 
 PewterCity_Text_CitySign::
-	.string "PEWTER CITY\n"
+	.string "PEWTER City\n"
 	.string "A Stone Gray City$"
 
 PewterCity_Text_OhPlayer::
@@ -944,17 +944,17 @@ PewterCity_Text_OhPlayer::
 
 PewterCity_Text_AskedToDeliverThis::
 	.string "I'm glad I caught up to you.\n"
-	.string "I'm PROF. OAK's AIDE.\p"
+	.string "I'm PROF. Oak's AIDE.\p"
 	.string "I've been asked to deliver this,\n"
 	.string "so here you go.$"
 
 PewterCity_Text_ReceivedRunningShoesFromAide::
 	.string "{PLAYER} received the\n"
-	.string "RUNNING SHOES from the AIDE.$"
+	.string "Running Shoes from the AIDE.$"
 
 PewterCity_Text_SwitchedShoesWithRunningShoes::
 	.string "{PLAYER} switched shoes with the\n"
-	.string "RUNNING SHOES.$"
+	.string "Running Shoes.$"
 
 PewterCity_Text_ExplainRunningShoes::
 	.string "Press the B Button to run.\n"
@@ -968,7 +968,7 @@ PewterCity_Text_MustBeGoingBackToLab::
 PewterCity_Text_RunningShoesLetterFromMom::
 	.string "There's a letter attached…\p"
 	.string "Dear {PLAYER},\p"
-	.string "Here is a pair of RUNNING SHOES\n"
+	.string "Here is a pair of Running Shoes\n"
 	.string "for my beloved challenger.\p"
 	.string "Remember, I'll always cheer for\n"
 	.string "you! Don't ever give up!\p"

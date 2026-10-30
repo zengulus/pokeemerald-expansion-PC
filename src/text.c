@@ -296,6 +296,9 @@ static const u8 sTextSpeedFrameDelays[] =
     [OPTIONS_TEXT_SPEED_MID]     = 4,
     [OPTIONS_TEXT_SPEED_FAST]    = 1,
     [OPTIONS_TEXT_SPEED_INSTANT] = 1,
+#ifdef NATIVE
+    [OPTIONS_TEXT_SPEED_VERY_FAST] = 1,
+#endif
 };
 
 static const u8 sTextSpeedModifiers[] =
@@ -304,6 +307,9 @@ static const u8 sTextSpeedModifiers[] =
     [OPTIONS_TEXT_SPEED_MID]     = TEXT_SPEED_MEDIUM_MODIFIER,
     [OPTIONS_TEXT_SPEED_FAST]    = TEXT_SPEED_FAST_MODIFIER,
     [OPTIONS_TEXT_SPEED_INSTANT] = TEXT_SPEED_INSTANT_MODIFIER,
+#ifdef NATIVE
+    [OPTIONS_TEXT_SPEED_VERY_FAST] = 2,
+#endif
 };
 
 static const u8 sTextScrollSpeeds[] =
@@ -312,6 +318,9 @@ static const u8 sTextScrollSpeeds[] =
     [OPTIONS_TEXT_SPEED_MID]     = 2,
     [OPTIONS_TEXT_SPEED_FAST]    = 4,
     [OPTIONS_TEXT_SPEED_INSTANT] = 6,
+#ifdef NATIVE
+    [OPTIONS_TEXT_SPEED_VERY_FAST] = 5,
+#endif
 };
 
 static const u16 sFontBoldJapaneseGlyphs[] = INCGFX_U16("graphics/fonts/japanese_bold.png", ".hwjpnfont");
@@ -326,7 +335,13 @@ u32 GetPlayerTextSpeed(void)
     if (gTextFlags.forceMidTextSpeed)
         return OPTIONS_TEXT_SPEED_MID;
 
-    if (gSaveBlock2Ptr->optionsTextSpeed > OPTIONS_TEXT_SPEED_INSTANT)
+    if (gSaveBlock2Ptr->optionsTextSpeed >
+#ifdef NATIVE
+        OPTIONS_TEXT_SPEED_VERY_FAST
+#else
+        OPTIONS_TEXT_SPEED_INSTANT
+#endif
+    )
         gSaveBlock2Ptr->optionsTextSpeed = OPTIONS_TEXT_SPEED_FAST;
 
     if (FlagGet(FLAG_TEXT_SPEED_INSTANT) || TEXT_SPEED_INSTANT)

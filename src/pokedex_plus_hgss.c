@@ -1,4 +1,5 @@
 #include "global.h"
+#include "battle_type_set.h"
 #include "battle_main.h"
 #include "battle_util.h"
 #include "bg.h"
@@ -18,6 +19,9 @@
 #include "main.h"
 #include "malloc.h"
 #include "menu.h"
+#ifdef NATIVE
+#include "mods.h"
+#endif
 #include "m4a.h"
 #include "overworld.h"
 #include "palette.h"
@@ -1332,8 +1336,7 @@ bool32 Task_TryLoadInfoScreen_HGSS(u8 taskId)
         gMain.state++;
         break;
     case 3:
-        sPokedexView->typeIconSpriteIds[0] = 0xFF;
-        sPokedexView->typeIconSpriteIds[1] = 0xFF;
+        memset(sPokedexView->typeIconSpriteIds, 0xFF, sizeof(sPokedexView->typeIconSpriteIds));
         CreateTypeIconSprites();
         gMain.state++;
         break;
@@ -1568,8 +1571,7 @@ void Task_DisplayCaughtMonDexPageHGSS(u8 taskId)
         gTasks[taskId].tState++;
         break;
     case 2:
-        sPokedexView->typeIconSpriteIds[0] = 0xFF;
-        sPokedexView->typeIconSpriteIds[1] = 0xFF;
+        memset(sPokedexView->typeIconSpriteIds, 0xFF, sizeof(sPokedexView->typeIconSpriteIds));
         CreateTypeIconSprites();
         gTasks[taskId].tState++;
         break;
@@ -1678,14 +1680,29 @@ static void PrintStatsScreenTextSmallWhite(u8 windowId, const u8* str, u8 left, 
 //Type Icon
 void SetSpriteInvisibility(u8 spriteArrayId, bool8 invisible)
 {
-    gSprites[sPokedexView->typeIconSpriteIds[spriteArrayId]].invisible = invisible;
+    if (sPokedexView->typeIconSpriteIds[spriteArrayId] < MAX_SPRITES)
+        gSprites[sPokedexView->typeIconSpriteIds[spriteArrayId]].invisible = invisible;
 }
 
 static void SetTypeIconPosAndPal(u8 typeId, u8 x, u8 y, u8 spriteArrayId)
 {
     struct Sprite *sprite;
 
+    if (sPokedexView->typeIconSpriteIds[spriteArrayId] >= MAX_SPRITES)
+        return;
     sprite = &gSprites[sPokedexView->typeIconSpriteIds[spriteArrayId]];
+#ifdef NATIVE
+    if (typeId >= NUMBER_OF_MON_TYPES + CONTEST_CATEGORIES_COUNT)
+    {
+        if (ModsSetCustomTypeIcon(sprite, typeId, FALSE))
+        {
+            sprite->x = x + 16; sprite->y = y + 8;
+            SetSpriteInvisibility(spriteArrayId, FALSE); return;
+        }
+        typeId = TYPE_MYSTERY;
+    }
+    ModsClearCustomTypeIcon(sprite);
+#endif
     StartSpriteAnim(sprite, typeId);
     if (typeId < NUMBER_OF_MON_TYPES)
         sprite->oam.paletteNum = gTypesInfo[typeId].palette + TYPE_INFO_PALETTE_NUM_OFFSET;
@@ -1695,6 +1712,25 @@ static void SetTypeIconPosAndPal(u8 typeId, u8 x, u8 y, u8 spriteArrayId)
     sprite->y = y + 8;
     SetSpriteInvisibility(spriteArrayId, FALSE);
 }
+#ifdef NATIVE
+static void SpriteCB_PokedexTypeOverflow(struct Sprite *sprite)
+{
+    if (!sPokedexView || sprite->invisible || sPokedexView->typeIconSpriteIds[2] >= MAX_SPRITES
+        || &gSprites[sPokedexView->typeIconSpriteIds[2]] != sprite)
+    {
+        sprite->callback = SpriteCallbackDummy;
+        return;
+    }
+    if (++sprite->data[2] < 90) return;
+    sprite->data[2] = 0;
+    struct BattleTypeList types;
+    GetSpeciesTypeList(sprite->data[0], &types);
+    if (types.count <= 3) { sprite->callback = SpriteCallbackDummy; return; }
+    u32 index = 2 + ((sprite->data[1] - 2 + 1) % (types.count - 2));
+    sprite->data[1] = index;
+    SetTypeIconPosAndPal(types.types[index], 201, 48, 2);
+}
+#endif
 static void PrintCurrentSpeciesTypeInfo(u8 newEntry, enum Species species)
 {
     enum Type type1, type2;
@@ -1711,6 +1747,29 @@ static void PrintCurrentSpeciesTypeInfo(u8 newEntry, enum Species species)
         type1 = GetSpeciesType(species, 0);
         type2 = GetSpeciesType(species, 1);
     #endif
+#ifdef NATIVE
+    struct BattleTypeList types = {0};
+    if (sPokedexView->typeIconSpriteIds[2] < MAX_SPRITES)
+        gSprites[sPokedexView->typeIconSpriteIds[2]].callback = SpriteCallbackDummy;
+    if (species != SPECIES_NONE)
+        GetSpeciesTypeList(species, &types);
+    type1 = types.count ? types.types[0] : TYPE_MYSTERY;
+    type2 = types.count > 1 ? types.types[1] : type1;
+    if (types.count >= 3)
+    {
+        SetTypeIconPosAndPal(type1, 135, 48, 0);
+        SetTypeIconPosAndPal(type2, 168, 48, 1);
+        SetTypeIconPosAndPal(types.types[2], 201, 48, 2);
+        if (types.count > 3 && sPokedexView->typeIconSpriteIds[2] < MAX_SPRITES)
+        {
+            struct Sprite *sprite = &gSprites[sPokedexView->typeIconSpriteIds[2]];
+            sprite->data[0] = species; sprite->data[1] = 2; sprite->data[2] = 0;
+            sprite->callback = SpriteCB_PokedexTypeOverflow;
+        }
+        return;
+    }
+    SetSpriteInvisibility(2, TRUE);
+#endif
     if (species == SPECIES_NONE)
         type1 = type2 = TYPE_MYSTERY;
 
@@ -1733,14 +1792,25 @@ static void CreateTypeIconSprites(void)
     LoadCompressedSpriteSheet(&gSpriteSheet_MoveTypes);
     u32 paletteNum = gTypesInfo[TYPE_NORMAL].palette + TYPE_INFO_PALETTE_NUM_OFFSET;
     LoadPalette(gMoveTypes_Pal, OBJ_PLTT_ID(paletteNum), 3 * PLTT_SIZE_4BPP);
-    for (i = 0; i < 2; i++)
+    for (i = 0; i < ARRAY_COUNT(sPokedexView->typeIconSpriteIds); i++)
     {
         if (sPokedexView->typeIconSpriteIds[i] == 0xFF)
-            sPokedexView->typeIconSpriteIds[i] = CreateSprite(&gSpriteTemplate_MoveTypes, 10, 10, 2);
+            sPokedexView->typeIconSpriteIds[i] = CreateSpriteUnchecked(&gSpriteTemplate_MoveTypes, 10, 10, 2);
 
         SetSpriteInvisibility(i, TRUE);
     }
 }
+
+#if defined(NATIVE) && defined(RHH_POKEDEX_TYPE_TEST_FIXTURE)
+void RhhTestPokedexShowSpeciesTypes(enum Species species)
+{
+    PrintCurrentSpeciesTypeInfo(TRUE, species);
+}
+void RhhTestPokedexShowTypeIcon(u8 type)
+{
+    SetTypeIconPosAndPal(type, 135, 48, 0);
+}
+#endif
 
 // u32 value is re-used, but passed as a bool that's TRUE if national dex is enabled
 static void PrintMonInfo(u32 num, u32 value, u32 owned, u32 newEntry)
@@ -1989,8 +2059,7 @@ static void Task_LoadStatsScreen(u8 taskId)
         gMain.state++;
         break;
     case 3:
-        sPokedexView->typeIconSpriteIds[0] = 0xFF;
-        sPokedexView->typeIconSpriteIds[1] = 0xFF;
+        memset(sPokedexView->typeIconSpriteIds, 0xFF, sizeof(sPokedexView->typeIconSpriteIds));
         CreateTypeIconSprites();
         sPokedexView->categoryIconSpriteId = 0xFF;
         LoadCompressedSpriteSheet(&gSpriteSheet_CategoryIcons);
@@ -4748,6 +4817,9 @@ void HandleCaughtMonPageTypeIcons_HGSS(void)
 
     SetSpriteInvisibility(0, TRUE);
     SetSpriteInvisibility(1, TRUE);
+#ifdef NATIVE
+    SetSpriteInvisibility(2, TRUE);
+#endif
 }
 
 bool32 TryHandleCaughtMonPageFlicker_HGSS(u8 taskId)

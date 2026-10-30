@@ -1,6 +1,14 @@
 #include "global.h"
+#ifdef NATIVE
+#include "mods.h"
+#include "mod_host.h"
+#include "debug.h"
+#endif
 #include "main.h"
 #include "battle.h"
+#ifdef NATIVE
+#include "battle_controllers.h"
+#endif
 #include "battle_anim.h"
 #include "frontier_util.h"
 #include "battle_message.h"
@@ -45,6 +53,9 @@
 #include "tv.h"
 #include "window.h"
 #include "constants/battle_move_effects.h"
+#ifdef NATIVE
+#include "constants/characters.h"
+#endif
 #include "constants/items.h"
 #include "constants/moves.h"
 #include "constants/party_menu.h"
@@ -90,6 +101,9 @@
 #define PSS_DATA_WINDOW_INFO_ID 1
 #define PSS_DATA_WINDOW_INFO_ABILITY 2
 #define PSS_DATA_WINDOW_INFO_MEMO 3
+#ifdef NATIVE
+#define PSS_DATA_WINDOW_INFO_INNATE_HEADING 4
+#endif
 
 // Dynamic fields for the Pokémon Skills page
 #define PSS_DATA_WINDOW_SKILLS_HELD_ITEM 0
@@ -188,6 +202,13 @@ static EWRAM_DATA struct PokemonSummaryScreenData
     s16 switchCounter; // Used for various switch statement cases that decompress/load graphics or Pokémon data
     u8 unk_filler4[6];
     u8 categoryIconSpriteId;
+#ifdef NATIVE
+    enum Species typePageSpecies;
+    u16 typePageTimer, typePage;
+    bool8 typePageActive;
+    bool8 innatePageActive;
+    struct RhhInnateList innateList;
+#endif
 } *sMonSummaryScreen = NULL;
 
 EWRAM_DATA u8 gLastViewedMonIndex = 0;
@@ -260,6 +281,11 @@ static void PrintMonOTName(void);
 static void PrintMonOTID(void);
 static void PrintMonAbilityName(void);
 static void PrintMonAbilityDescription(void);
+#ifdef NATIVE
+static void ToggleInnateSummary(void);
+static void FitInnateName(u8 *name, u32 capacity, u32 width);
+static void PersonalizeSummaryInnates(struct RhhInnateList *list);
+#endif
 static void BufferMonTrainerMemo(void);
 static void PrintMonTrainerMemo(void);
 static void BufferNatureString(void);
@@ -650,6 +676,17 @@ static const struct WindowTemplate sPageInfoTemplate[] =
         .paletteNum = 6,
         .baseBlock = 575,
     },
+#ifdef NATIVE
+    [PSS_DATA_WINDOW_INFO_INNATE_HEADING] = {
+        .bg = 0,
+        .tilemapLeft = 11,
+        .tilemapTop = 13,
+        .width = 18,
+        .height = 1,
+        .paletteNum = 6,
+        .baseBlock = 683,
+    },
+#endif
 };
 static const struct WindowTemplate sPageSkillsTemplate[] =
 {
@@ -822,7 +859,8 @@ static const union AnimCmd sSpriteAnim_CategoryIcon2[] =
 
 static const union AnimCmd *const sSpriteAnimTable_CategoryIcons[] =
 {
-    NULL,
+    /* Sprite creation reads animation zero before callers select a category. */
+    sSpriteAnim_CategoryIcon0,
     sSpriteAnim_CategoryIcon0,
     sSpriteAnim_CategoryIcon1,
     sSpriteAnim_CategoryIcon2,
@@ -1262,9 +1300,25 @@ void ShowSelectMovePokemonSummaryScreen(struct Pokemon *mons, u8 monIndex, void 
     sMonSummaryScreen->newMove = newMove;
 }
 
+#ifdef NATIVE
+static void AdvanceSummaryTypePage(void)
+{
+    if (sMonSummaryScreen && sMonSummaryScreen->currPageIndex == PSS_PAGE_INFO
+        && sMonSummaryScreen->typePageActive && ++sMonSummaryScreen->typePageTimer >= 90)
+    {
+        sMonSummaryScreen->typePageTimer = 0;
+        ++sMonSummaryScreen->typePage;
+        SetMonTypeIcons();
+    }
+}
+#endif
+
 static void CB2_UpdateSummaryScreen(void)
 {
     RunTasks();
+#ifdef NATIVE
+    AdvanceSummaryTypePage();
+#endif
     AnimateSprites();
     BuildOamBuffer();
     DoScheduledBgTilemapCopiesToVram();
@@ -1634,7 +1688,24 @@ static void FreeSummaryScreen(void)
 {
     FreeAllWindowBuffers();
     Free(sMonSummaryScreen);
+    sMonSummaryScreen = NULL;
 }
+
+#if defined(NATIVE) && defined(RHH_BATTLE_TYPE_ICON_TEST)
+bool32 RhhTestSummaryTypeCleanup(void)
+{
+    struct PokemonSummaryScreenData *saved = sMonSummaryScreen;
+    sMonSummaryScreen = AllocZeroed(sizeof(*sMonSummaryScreen));
+    if (!sMonSummaryScreen) { sMonSummaryScreen = saved; return FALSE; }
+    sMonSummaryScreen->currPageIndex = PSS_PAGE_INFO;
+    sMonSummaryScreen->typePageActive = TRUE;
+    FreeSummaryScreen();
+    bool32 cleared = sMonSummaryScreen == NULL;
+    AdvanceSummaryTypePage();
+    sMonSummaryScreen = saved;
+    return cleared;
+}
+#endif
 
 static void BeginCloseSummaryScreen(u8 taskId)
 {
@@ -1802,6 +1873,14 @@ static void Task_HandleInput(u8 taskId)
             PlaySE(SE_SELECT);
             BeginCloseSummaryScreen(taskId);
         }
+#ifdef NATIVE
+        else if (JOY_NEW(SELECT_BUTTON) && sMonSummaryScreen->currPageIndex == PSS_PAGE_INFO
+                 && !sMonSummaryScreen->summary.isEgg && sMonSummaryScreen->innateList.count)
+        {
+            ToggleInnateSummary();
+            PlaySE(SE_SELECT);
+        }
+#endif
         else if (DEBUG_POKEMON_SPRITE_VISUALIZER && JOY_NEW(SELECT_BUTTON) && !gMain.inBattle)
         {
             sMonSummaryScreen->callback = CB2_Pokemon_Sprite_Visualizer;
@@ -3527,12 +3606,38 @@ static void PrintMonOTID(void)
 static void PrintMonAbilityName(void)
 {
     enum Ability ability = GetAbilityBySpecies(sMonSummaryScreen->summary.species, sMonSummaryScreen->summary.abilityNum);
-    PrintTextOnWindow(AddWindowFromTemplateList(sPageInfoTemplate, PSS_DATA_WINDOW_INFO_ABILITY), gAbilitiesInfo[ability].name, 0, 1, 0, 1);
+    u8 windowId = AddWindowFromTemplateList(sPageInfoTemplate, PSS_DATA_WINDOW_INFO_ABILITY);
+#ifdef NATIVE
+    struct RhhInnateList list = {.struct_size = sizeof(list)};
+    RhhContentKey species = RhhContentKeyForId(RHH_SPECIES, sMonSummaryScreen->summary.species);
+    if (!species || RhhModsSpeciesInnates(species, sMonSummaryScreen->summary.level, &list)) list.count = 0;
+    else PersonalizeSummaryInnates(&list);
+    sMonSummaryScreen->innateList = list;
+    if (list.count)
+    {
+        u8 name[33];
+        StringCopy(name, gAbilitiesInfo[ability].name);
+        FitInnateName(name, sizeof(name), 77);
+        PrintTextOnWindowToFitPx(windowId, name, 0, 1, 0, 1, 77);
+        PrintTextOnWindowWithFont(windowId, COMPOUND_STRING("Sel: Innates"), 80, 2, 0, 0, FONT_SMALL);
+        return;
+    }
+    sMonSummaryScreen->innatePageActive = FALSE;
+#endif
+    PrintTextOnWindow(windowId, gAbilitiesInfo[ability].name, 0, 1, 0, 1);
 }
 
 static void PrintMonAbilityDescription(void)
 {
     enum Ability ability = GetAbilityBySpecies(sMonSummaryScreen->summary.species, sMonSummaryScreen->summary.abilityNum);
+#ifdef NATIVE
+    if (sMonSummaryScreen->innatePageActive)
+    {
+        PrintTextOnWindow(AddWindowFromTemplateList(sPageInfoTemplate, PSS_DATA_WINDOW_INFO_ABILITY),
+                          COMPOUND_STRING("Innate abilities"), 0, 17, 0, 0);
+        return;
+    }
+#endif
     PrintTextOnWindowToFit(AddWindowFromTemplateList(sPageInfoTemplate, PSS_DATA_WINDOW_INFO_ABILITY), gAbilitiesInfo[ability].description, 0, 17, 0, 0);
 }
 
@@ -3590,8 +3695,102 @@ static void BufferMonTrainerMemo(void)
 
 static void PrintMonTrainerMemo(void)
 {
+#ifdef NATIVE
+    if (sMonSummaryScreen->innatePageActive)
+    {
+        u8 headingWindow = AddWindowFromTemplateList(sPageInfoTemplate, PSS_DATA_WINDOW_INFO_INNATE_HEADING);
+        FillWindowPixelBuffer(headingWindow, PIXEL_FILL(8));
+        PutWindowTilemap(headingWindow);
+        CopyWindowToVram(headingWindow, COPYWIN_GFX);
+        ScheduleBgCopyTilemapToVram(0);
+        u8 windowId = AddWindowFromTemplateList(sPageInfoTemplate, PSS_DATA_WINDOW_INFO_MEMO);
+        const struct RhhInnateList *list = &sMonSummaryScreen->innateList;
+        for (u32 i = 0; i < list->count; ++i)
+        {
+            char ascii[33]; u8 name[33], status[20];
+            if (RhhModsAbilityName(list->entries[i].ability, ascii, sizeof(ascii))) continue;
+            u32 j;
+            for (j = 0; ascii[j] && j < sizeof(name) - 1; ++j)
+            {
+                u8 c = ascii[j];
+                if (c >= 'A' && c <= 'Z') name[j] = CHAR_A + c - 'A';
+                else if (c >= 'a' && c <= 'z') name[j] = CHAR_a + c - 'a';
+                else if (c >= '0' && c <= '9') name[j] = CHAR_0 + c - '0';
+                else switch (c) {
+                case ' ': name[j] = CHAR_SPACE; break; case '-': name[j] = CHAR_HYPHEN; break;
+                case '.': name[j] = CHAR_PERIOD; break; case '\'': name[j] = CHAR_SGL_QUOTE_RIGHT; break;
+                case '!': name[j] = CHAR_EXCL_MARK; break; case '&': name[j] = CHAR_AMPERSAND; break;
+                case ':': name[j] = CHAR_COLON; break; case ',': name[j] = CHAR_COMMA; break;
+                case '/': name[j] = CHAR_SLASH; break; case '+': name[j] = CHAR_PLUS; break;
+                case '(': name[j] = CHAR_LEFT_PAREN; break; case ')': name[j] = CHAR_RIGHT_PAREN; break;
+                case '%': name[j] = CHAR_PERCENT; break;
+                default: name[j] = CHAR_QUESTION_MARK; break;
+                }
+            }
+            name[j] = EOS;
+            FitInnateName(name, sizeof(name), 90);
+            if (list->entries[i].unlocked) StringCopy(status, COMPOUND_STRING("Unlocked"));
+            else ConvertIntToDecimalStringN(StringCopy(status, COMPOUND_STRING("Lv. ")),
+                                            list->entries[i].unlock_level, STR_CONV_MODE_LEFT_ALIGN, 3);
+            PrintTextOnWindowToFitPx(windowId, name, 0, 1 + i * 16, 0, 1, 90);
+            PrintTextOnWindowWithFont(windowId, status, 94, 2 + i * 16, 0, 0, FONT_SMALL);
+        }
+        return;
+    }
+    RemoveWindowByIndex(PSS_DATA_WINDOW_INFO_INNATE_HEADING);
+    ScheduleBgCopyTilemapToVram(0);
+#endif
     PrintTextOnWindow(AddWindowFromTemplateList(sPageInfoTemplate, PSS_DATA_WINDOW_INFO_MEMO), gStringVar4, 0, 1, 0, 0);
 }
+#ifdef NATIVE
+static void PersonalizeSummaryInnates(struct RhhInnateList *list)
+{
+    if (!RhhModsHasHook(RHH_INNATE_PERSONALIZE) || (gMain.inBattle
+        && (gIsDebugBattle || IsAiVsAiBattle() || (gBattleTypeFlags & (BATTLE_TYPE_LINK | BATTLE_TYPE_RECORDED
+            | BATTLE_TYPE_RECORDED_LINK | BATTLE_TYPE_FRONTIER | BATTLE_TYPE_TRAINER_HILL | BATTLE_TYPE_EREADER_TRAINER))))) return;
+    const struct RhhOwnedMonService *service = (const void *)RhhModsHostAPI()->get_service(
+        "rhh:service/owned_mon", RHH_SERVICE_VERSION(1, 0));
+    if (!service) return;
+    struct RhhOwnedMonSnapshot mon = {.struct_size = sizeof(mon)};
+    bool32 found = FALSE;
+    if (!sMonSummaryScreen->isBoxMon && sMonSummaryScreen->monList.mons == gParties[B_TRAINER_PLAYER])
+        found = !service->party_at(sMonSummaryScreen->curMonIndex, &mon);
+    else if (sMonSummaryScreen->isBoxMon && gPokemonStoragePtr)
+        for (u32 box = 0; box < TOTAL_BOXES_COUNT; ++box)
+            if (sMonSummaryScreen->monList.boxMons == gPokemonStoragePtr->boxes[box])
+            { found = !service->box_at(box, sMonSummaryScreen->curMonIndex, &mon); break; }
+    const struct BoxPokemon *displayed = &sMonSummaryScreen->currentMon.box;
+    if (found && mon.identity == ((u64)displayed->otId << 32 | displayed->personality))
+        RhhModsPersonalizeOwnedInnates(&mon, list);
+}
+static void FitInnateName(u8 *name, u32 capacity, u32 width)
+{
+    if (GetStringWidth(FONT_SMALL_NARROWER, name, 0) <= width) return;
+    u32 length = StringLength(name);
+    if (length > capacity - 4) length = capacity - 4;
+    do
+    {
+        name[length] = name[length + 1] = name[length + 2] = CHAR_PERIOD;
+        name[length + 3] = EOS;
+        if (GetStringWidth(FONT_SMALL_NARROWER, name, 0) <= width || !length) break;
+        --length;
+    } while (TRUE);
+}
+static void ToggleInnateSummary(void)
+{
+    sMonSummaryScreen->innatePageActive ^= 1;
+    u8 abilityWindow = AddWindowFromTemplateList(sPageInfoTemplate, PSS_DATA_WINDOW_INFO_ABILITY);
+    u8 memoWindow = AddWindowFromTemplateList(sPageInfoTemplate, PSS_DATA_WINDOW_INFO_MEMO);
+    FillWindowPixelBuffer(abilityWindow, PIXEL_FILL(0));
+    FillWindowPixelBuffer(memoWindow, PIXEL_FILL(0));
+    PrintMonAbilityName();
+    PrintMonAbilityDescription();
+    if (!sMonSummaryScreen->innatePageActive) BufferMonTrainerMemo();
+    PrintMonTrainerMemo();
+    CopyWindowToVram(abilityWindow, COPYWIN_GFX);
+    CopyWindowToVram(memoWindow, COPYWIN_GFX);
+}
+#endif
 
 static void BufferNatureString(void)
 {
@@ -4324,6 +4523,18 @@ static void CreateMoveTypeIcons(void)
 void SetTypeSpritePosAndPal(enum Type typeId, u8 x, u8 y, u8 spriteArrayId)
 {
     struct Sprite *sprite = &gSprites[sMonSummaryScreen->spriteIds[spriteArrayId]];
+#ifdef NATIVE
+    if (typeId >= NUMBER_OF_MON_TYPES + CONTEST_CATEGORIES_COUNT)
+    {
+        if (ModsSetCustomTypeIcon(sprite, typeId, FALSE))
+        {
+            sprite->x = x + 16; sprite->y = y + 8;
+            SetSpriteInvisibility(spriteArrayId, FALSE); return;
+        }
+        typeId = TYPE_MYSTERY;
+    }
+    ModsClearCustomTypeIcon(sprite);
+#endif
     StartSpriteAnim(sprite, typeId);
     if (typeId < NUMBER_OF_MON_TYPES)
         sprite->oam.paletteNum = gTypesInfo[typeId].palette;
@@ -4334,20 +4545,97 @@ void SetTypeSpritePosAndPal(enum Type typeId, u8 x, u8 y, u8 spriteArrayId)
     SetSpriteInvisibility(spriteArrayId, FALSE);
 }
 
+#if defined(NATIVE) && defined(RHH_BATTLE_TYPE_ICON_TEST)
+void RhhTestSummaryTypeIcon(u8 spriteId, enum Type type)
+{
+    struct PokemonSummaryScreenData fixture = {0};
+    struct PokemonSummaryScreenData *saved = sMonSummaryScreen;
+    fixture.spriteIds[SPRITE_ARR_ID_TYPE] = spriteId;
+    sMonSummaryScreen = &fixture;
+    SetTypeSpritePosAndPal(type, 120, 48, SPRITE_ARR_ID_TYPE);
+    sMonSummaryScreen = saved;
+}
+void RhhTestSummarySpeciesTypes(const u8 spriteIds[4], enum Species species)
+{
+    struct PokemonSummaryScreenData fixture = {0};
+    struct PokemonSummaryScreenData *saved = sMonSummaryScreen;
+    for (u32 i = 0; i < 4; ++i) fixture.spriteIds[SPRITE_ARR_ID_TYPE + i] = spriteIds[i];
+    fixture.summary.species = species;
+    sMonSummaryScreen = &fixture;
+    SetMonTypeIcons();
+    sMonSummaryScreen = saved;
+}
+void RhhTestSummarySpeciesTypeFrames(const u8 spriteIds[4], enum Species species, u32 frames)
+{
+    struct PokemonSummaryScreenData fixture = {0};
+    struct PokemonSummaryScreenData *saved = sMonSummaryScreen;
+    for (u32 i = 0; i < 4; ++i) fixture.spriteIds[SPRITE_ARR_ID_TYPE + i] = spriteIds[i];
+    fixture.summary.species = species; fixture.summary.teraType = TYPE_ELECTRIC;
+    fixture.currPageIndex = PSS_PAGE_INFO;
+    sMonSummaryScreen = &fixture;
+    SetMonTypeIcons();
+    for (u32 i = 0; i < frames; ++i) AdvanceSummaryTypePage();
+    sMonSummaryScreen = saved;
+}
+#endif
+
 static void SetMonTypeIcons(void)
 {
     struct PokeSummary *summary = &sMonSummaryScreen->summary;
     if (summary->isEgg)
     {
+#ifdef NATIVE
+        sMonSummaryScreen->typePageActive = FALSE;
+#endif
         SetTypeSpritePosAndPal(TYPE_MYSTERY, 120, 48, SPRITE_ARR_ID_TYPE);
         SetSpriteInvisibility(SPRITE_ARR_ID_TYPE + 1, TRUE);
+#ifdef NATIVE
+        SetSpriteInvisibility(SPRITE_ARR_ID_TYPE + 2, TRUE);
+        SetSpriteInvisibility(SPRITE_ARR_ID_TYPE + 3, TRUE);
+#endif
     }
     else
     {
-        SetTypeSpritePosAndPal(GetSpeciesType(summary->species, 0), 120, 48, SPRITE_ARR_ID_TYPE);
-        if (GetSpeciesType(summary->species, 0) != GetSpeciesType(summary->species, 1))
+#ifdef NATIVE
+        struct BattleTypeList list;
+        GetSpeciesTypeList(summary->species, &list);
+        if (sMonSummaryScreen->typePageSpecies != summary->species)
         {
-            SetTypeSpritePosAndPal(GetSpeciesType(summary->species, 1), 160, 48, SPRITE_ARR_ID_TYPE + 1);
+            sMonSummaryScreen->typePageSpecies = summary->species;
+            sMonSummaryScreen->typePage = sMonSummaryScreen->typePageTimer = 0;
+        }
+        if (list.count >= 3)
+        {
+            u32 slots = P_SHOW_TERA_TYPE >= GEN_9 ? 3 : 4;
+            u32 pages = (list.count + slots - 1) / slots;
+            sMonSummaryScreen->typePageActive = pages > 1;
+            sMonSummaryScreen->typePage %= pages;
+            u32 start = sMonSummaryScreen->typePage * slots;
+            u32 x = list.count == 3 && slots == 4 ? 120 : 112;
+            u32 spacing = list.count == 3 && slots == 4 ? 40 : 32;
+            for (u32 i = 0; i < slots; ++i)
+            {
+                if (start + i < list.count)
+                    SetTypeSpritePosAndPal(list.types[start + i], x + spacing * i, 48, SPRITE_ARR_ID_TYPE + i);
+                else
+                    SetSpriteInvisibility(SPRITE_ARR_ID_TYPE + i, TRUE);
+            }
+            if (P_SHOW_TERA_TYPE >= GEN_9)
+                SetTypeSpritePosAndPal(summary->teraType, x + spacing * 3, 48, SPRITE_ARR_ID_TYPE + 3);
+            return;
+        }
+        sMonSummaryScreen->typePageActive = FALSE;
+#endif
+        enum Type types[3] = {GetSpeciesType(summary->species, 0), GetSpeciesType(summary->species, 1), TYPE_MYSTERY};
+#ifdef NATIVE
+        types[0] = list.count ? list.types[0] : TYPE_MYSTERY;
+        types[1] = list.count > 1 ? list.types[1] : types[0];
+        SetSpriteInvisibility(SPRITE_ARR_ID_TYPE + 3, TRUE);
+#endif
+        SetTypeSpritePosAndPal(types[0], 120, 48, SPRITE_ARR_ID_TYPE);
+        if (types[0] != types[1])
+        {
+            SetTypeSpritePosAndPal(types[1], 160, 48, SPRITE_ARR_ID_TYPE + 1);
             SetSpriteInvisibility(SPRITE_ARR_ID_TYPE + 1, FALSE);
         }
         else
@@ -4358,6 +4646,10 @@ static void SetMonTypeIcons(void)
         {
             SetTypeSpritePosAndPal(summary->teraType, 200, 48, SPRITE_ARR_ID_TYPE + 2);
         }
+#ifdef NATIVE
+        else
+            SetSpriteInvisibility(SPRITE_ARR_ID_TYPE + 2, TRUE);
+#endif
     }
 }
 
@@ -4378,19 +4670,46 @@ static enum BattlerId GetCurrentBattlerFromSumIndex(u32 sumIndex)
 static enum Type SummaryScreen_GetDynamicMoveType(struct Pokemon *mon, enum Move move, enum Type type)
 {
     if (!P_SHOW_DYNAMIC_TYPES)
+#ifdef NATIVE
+    {
+        if (GetMoveEffect(move) != EFFECT_REVELATION_DANCE && GetMoveEffect(move) != EFFECT_IVY_CUDGEL
+            && GetMoveEffect(move) != EFFECT_RAGING_BULL)
+            return type;
+    }
+#else
         return type;
+#endif
 
+    enum Type dynamic;
     if (gBattleStruct == NULL)
-        return CheckDynamicMoveType(mon, move, 0, MON_OUTSIDE_BATTLE);
-
-    u32 partyIndex = sMonSummaryScreen->curMonIndex;
-    bool32 isDouble = IsDoubleBattle();
-
-    if ((isDouble && partyIndex > 1) || (!isDouble && partyIndex > 0))
-        return CheckDynamicMoveType(mon, move, 0, MON_OUTSIDE_BATTLE);
-
-    return CheckDynamicMoveType(mon, move, GetCurrentBattlerFromSumIndex(sMonSummaryScreen->curMonIndex), MON_IN_BATTLE);
+        dynamic = GetDynamicMoveType(mon, move, 0, ABILITY_NONE, HOLD_EFFECT_NONE, MON_OUTSIDE_BATTLE);
+    else
+    {
+        u32 partyIndex = sMonSummaryScreen->curMonIndex;
+        bool32 isDouble = IsDoubleBattle();
+        if ((isDouble && partyIndex > 1) || (!isDouble && partyIndex > 0))
+            dynamic = GetDynamicMoveType(mon, move, 0, ABILITY_NONE, HOLD_EFFECT_NONE, MON_OUTSIDE_BATTLE);
+        else
+            dynamic = CheckDynamicMoveType(mon, move, GetCurrentBattlerFromSumIndex(partyIndex), MON_IN_BATTLE);
+    }
+    if (dynamic == TYPE_NONE) dynamic = GetMoveType(move);
+#ifdef NATIVE
+    if (!P_SHOW_DYNAMIC_TYPES && !ModsCustomTypeName(dynamic, FALSE)) return type;
+#endif
+    return dynamic;
 }
+
+#if defined(NATIVE) && defined(RHH_BATTLE_TYPE_ICON_TEST)
+enum Type RhhTestSummaryDynamicType(struct Pokemon *mon, enum Move move)
+{
+    struct PokemonSummaryScreenData fixture = {0};
+    struct PokemonSummaryScreenData *saved = sMonSummaryScreen;
+    sMonSummaryScreen = &fixture;
+    enum Type type = SummaryScreen_GetDynamicMoveType(mon, move, GetMoveType(move));
+    sMonSummaryScreen = saved;
+    return type;
+}
+#endif
 
 static void SetMoveTypeIcons(void)
 {

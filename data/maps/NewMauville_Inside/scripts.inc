@@ -176,7 +176,9 @@ NewMauville_Inside_EventScript_GeneratorOff::
 NewMauville_Inside_EventScript_Voltorb1::
 	lock
 	faceplayer
+	identifywildencounter "rhh:encounter/new_mauville_inside/voltorb_1"
 	setwildbattle SPECIES_VOLTORB, 25
+	guardwildbattle release
 	waitse
 	playmoncry SPECIES_VOLTORB, CRY_MODE_ENCOUNTER
 	delay 40
@@ -200,7 +202,9 @@ NewMauville_Inside_EventScript_DefeatedVoltorb1::
 NewMauville_Inside_EventScript_Voltorb2::
 	lock
 	faceplayer
+	identifywildencounter "rhh:encounter/new_mauville_inside/voltorb_2"
 	setwildbattle SPECIES_VOLTORB, 25
+	guardwildbattle release
 	waitse
 	playmoncry SPECIES_VOLTORB, CRY_MODE_ENCOUNTER
 	delay 40
@@ -224,7 +228,9 @@ NewMauville_Inside_EventScript_DefeatedVoltorb2::
 NewMauville_Inside_EventScript_Voltorb3::
 	lock
 	faceplayer
+	identifywildencounter "rhh:encounter/new_mauville_inside/voltorb_3"
 	setwildbattle SPECIES_VOLTORB, 25
+	guardwildbattle release
 	waitse
 	playmoncry SPECIES_VOLTORB, CRY_MODE_ENCOUNTER
 	delay 40

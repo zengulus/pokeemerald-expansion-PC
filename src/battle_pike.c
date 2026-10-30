@@ -834,33 +834,28 @@ static bool8 DoesAbilityPreventStatus(struct Pokemon *mon, u32 status)
 
 static bool8 DoesTypePreventStatus(enum Species species, u32 status)
 {
-    bool8 ret = FALSE;
-
-    switch (status)
+    struct BattleTypeList types;
+    GetSpeciesTypeList(species, &types);
+    for (u32 i = 0; i < types.count; ++i)
     {
-    case STATUS1_TOXIC_POISON:
-        if (GetSpeciesType(species, 0) == TYPE_STEEL || GetSpeciesType(species, 0) == TYPE_POISON
-            || GetSpeciesType(species, 1) == TYPE_STEEL || GetSpeciesType(species, 1) == TYPE_POISON)
-            ret = TRUE;
-        break;
-    case STATUS1_FREEZE:
-    case STATUS1_FROSTBITE:
-        if (GetSpeciesType(species, 0) == TYPE_ICE || GetSpeciesType(species, 1) == TYPE_ICE)
-            ret = TRUE;
-        break;
-    case STATUS1_PARALYSIS:
-        if (GetSpeciesType(species, 0) == TYPE_GROUND || GetSpeciesType(species, 1) == TYPE_GROUND
-            || (GetConfig(B_PARALYZE_ELECTRIC) >= GEN_6 && (GetSpeciesType(species, 0) == TYPE_ELECTRIC || GetSpeciesType(species, 1) == TYPE_ELECTRIC)))
-            ret = TRUE;
-        break;
-    case STATUS1_BURN:
-        if (GetSpeciesType(species, 0) == TYPE_FIRE || GetSpeciesType(species, 1) == TYPE_FIRE)
-            ret = TRUE;
-        break;
-    case STATUS1_SLEEP:
-        break;
+        switch (status)
+        {
+        case STATUS1_TOXIC_POISON:
+            if (types.types[i] == TYPE_STEEL || types.types[i] == TYPE_POISON) return TRUE;
+            break;
+        case STATUS1_FREEZE:
+        case STATUS1_FROSTBITE:
+            if (types.types[i] == TYPE_ICE) return TRUE;
+            break;
+        case STATUS1_PARALYSIS:
+            if (types.types[i] == TYPE_GROUND || (GetConfig(B_PARALYZE_ELECTRIC) >= GEN_6 && types.types[i] == TYPE_ELECTRIC)) return TRUE;
+            break;
+        case STATUS1_BURN:
+            if (types.types[i] == TYPE_FIRE) return TRUE;
+            break;
+        }
     }
-    return ret;
+    return FALSE;
 }
 
 static bool8 TryInflictRandomStatus(void)

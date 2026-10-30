@@ -13,6 +13,9 @@
 #include "constants/abilities.h"
 #include "constants/items.h"
 #include "constants/moves.h"
+#ifdef NATIVE
+#include "mods.h"
+#endif
 
 static enum BattlerId GetBattlerSideForMessage(enum BattleSide side)
 {
@@ -47,8 +50,17 @@ static bool32 HandleEndTurnVarious(enum BattlerId battler)
 
     gBattleStruct->eventState.endTurn++;
 
+#ifdef NATIVE
+    struct RhhBattleFieldRules before;
+    bool32 captured = gFieldTimers.fairyLockTimer == 1 && ModsBattleFieldRulesCapture(&before);
+#endif
     if (gFieldTimers.fairyLockTimer > 0 && --gFieldTimers.fairyLockTimer == 0)
+    {
         gFieldStatuses &= ~STATUS_FIELD_FAIRY_LOCK;
+#ifdef NATIVE
+        if (captured) ModsBattleFieldRulesCommitted(&before, RHH_BATTLE_FIELD_CAUSE_EXPIRED, RHH_BATTLE_NO_BATTLER, MOVE_NONE);
+#endif
+    }
 
     for (enum BattleSide i = 0; i < NUM_BATTLE_SIDES; i++)
     {
@@ -1156,6 +1168,10 @@ static bool32 HandleEndTurnSecondEventBlock(enum BattlerId battler)
 static bool32 HandleEndTurnTrickRoom(enum BattlerId battler)
 {
     bool32 effect = FALSE;
+#ifdef NATIVE
+    struct RhhBattleFieldRules before;
+    bool32 captured = gFieldTimers.trickRoomTimer == 1 && ModsBattleFieldRulesCapture(&before);
+#endif
 
     gBattleStruct->eventState.endTurn++;
 
@@ -1164,6 +1180,9 @@ static bool32 HandleEndTurnTrickRoom(enum BattlerId battler)
         gFieldStatuses &= ~STATUS_FIELD_TRICK_ROOM;
         BattleScriptCall(BattleScript_TrickRoomEnds);
         effect = TRUE;
+#ifdef NATIVE
+        if (captured) ModsBattleFieldRulesCommitted(&before, RHH_BATTLE_FIELD_CAUSE_EXPIRED, RHH_BATTLE_NO_BATTLER, MOVE_NONE);
+#endif
     }
 
     return effect;
@@ -1172,6 +1191,10 @@ static bool32 HandleEndTurnTrickRoom(enum BattlerId battler)
 static bool32 HandleEndTurnGravity(enum BattlerId battler)
 {
     bool32 effect = FALSE;
+#ifdef NATIVE
+    struct RhhBattleFieldRules before;
+    bool32 captured = gFieldTimers.gravityTimer == 1 && ModsBattleFieldRulesCapture(&before);
+#endif
 
     gBattleStruct->eventState.endTurn++;
 
@@ -1180,6 +1203,9 @@ static bool32 HandleEndTurnGravity(enum BattlerId battler)
         gFieldStatuses &= ~STATUS_FIELD_GRAVITY;
         BattleScriptCall(BattleScript_GravityEnds);
         effect = TRUE;
+#ifdef NATIVE
+        if (captured) ModsBattleFieldRulesCommitted(&before, RHH_BATTLE_FIELD_CAUSE_EXPIRED, RHH_BATTLE_NO_BATTLER, MOVE_NONE);
+#endif
     }
 
     return effect;
@@ -1188,6 +1214,10 @@ static bool32 HandleEndTurnGravity(enum BattlerId battler)
 static bool32 HandleEndTurnWaterSport(enum BattlerId battler)
 {
     bool32 effect = FALSE;
+#ifdef NATIVE
+    struct RhhBattleFieldRules before;
+    bool32 captured = gFieldTimers.waterSportTimer == 1 && ModsBattleFieldRulesCapture(&before);
+#endif
 
     gBattleStruct->eventState.endTurn++;
 
@@ -1196,6 +1226,9 @@ static bool32 HandleEndTurnWaterSport(enum BattlerId battler)
         gFieldStatuses &= ~STATUS_FIELD_WATERSPORT;
         BattleScriptCall(BattleScript_WaterSportEnds);
         effect = TRUE;
+#ifdef NATIVE
+        if (captured) ModsBattleFieldRulesCommitted(&before, RHH_BATTLE_FIELD_CAUSE_EXPIRED, RHH_BATTLE_NO_BATTLER, MOVE_NONE);
+#endif
     }
 
     return effect;
@@ -1204,6 +1237,10 @@ static bool32 HandleEndTurnWaterSport(enum BattlerId battler)
 static bool32 HandleEndTurnMudSport(enum BattlerId battler)
 {
     bool32 effect = FALSE;
+#ifdef NATIVE
+    struct RhhBattleFieldRules before;
+    bool32 captured = gFieldTimers.mudSportTimer == 1 && ModsBattleFieldRulesCapture(&before);
+#endif
 
     gBattleStruct->eventState.endTurn++;
 
@@ -1212,6 +1249,9 @@ static bool32 HandleEndTurnMudSport(enum BattlerId battler)
         gFieldStatuses &= ~STATUS_FIELD_MUDSPORT;
         BattleScriptCall(BattleScript_MudSportEnds);
         effect = TRUE;
+#ifdef NATIVE
+        if (captured) ModsBattleFieldRulesCommitted(&before, RHH_BATTLE_FIELD_CAUSE_EXPIRED, RHH_BATTLE_NO_BATTLER, MOVE_NONE);
+#endif
     }
 
     return effect;
@@ -1220,6 +1260,10 @@ static bool32 HandleEndTurnMudSport(enum BattlerId battler)
 static bool32 HandleEndTurnWonderRoom(enum BattlerId battler)
 {
     bool32 effect = FALSE;
+#ifdef NATIVE
+    struct RhhBattleFieldRules before;
+    bool32 captured = gFieldTimers.wonderRoomTimer == 1 && ModsBattleFieldRulesCapture(&before);
+#endif
 
     gBattleStruct->eventState.endTurn++;
 
@@ -1228,6 +1272,9 @@ static bool32 HandleEndTurnWonderRoom(enum BattlerId battler)
         gFieldStatuses &= ~STATUS_FIELD_WONDER_ROOM;
         BattleScriptCall(BattleScript_WonderRoomEnds);
         effect = TRUE;
+#ifdef NATIVE
+        if (captured) ModsBattleFieldRulesCommitted(&before, RHH_BATTLE_FIELD_CAUSE_EXPIRED, RHH_BATTLE_NO_BATTLER, MOVE_NONE);
+#endif
     }
 
     return effect;
@@ -1236,6 +1283,10 @@ static bool32 HandleEndTurnWonderRoom(enum BattlerId battler)
 static bool32 HandleEndTurnMagicRoom(enum BattlerId battler)
 {
     bool32 effect = FALSE;
+#ifdef NATIVE
+    struct RhhBattleFieldRules before;
+    bool32 captured = gFieldTimers.magicRoomTimer == 1 && ModsBattleFieldRulesCapture(&before);
+#endif
 
     gBattleStruct->eventState.endTurn++;
 
@@ -1244,6 +1295,9 @@ static bool32 HandleEndTurnMagicRoom(enum BattlerId battler)
         gFieldStatuses &= ~STATUS_FIELD_MAGIC_ROOM;
         BattleScriptCall(BattleScript_MagicRoomEnds);
         effect = TRUE;
+#ifdef NATIVE
+        if (captured) ModsBattleFieldRulesCommitted(&before, RHH_BATTLE_FIELD_CAUSE_EXPIRED, RHH_BATTLE_NO_BATTLER, MOVE_NONE);
+#endif
     }
 
     return effect;
@@ -1253,6 +1307,11 @@ static bool32 HandleEndTurnTerrain(enum BattlerId battler)
 {
     gBattleStruct->eventState.endTurn++;
 
+#ifdef NATIVE
+    struct RhhBattleEnvironmentState before;
+    bool32 captured = gFieldTimers.terrainTimer == 1 && ModsBattleEnvironmentCapture(&before);
+    bool32 tickCaptured = gFieldTimers.terrainTimer > 1 && ModsBattleEnvironmentTimerCapture(&before);
+#endif
     if (gFieldTimers.terrainTimer > 0 && --gFieldTimers.terrainTimer == 0)
     {
         TryToRevertMimicryAndFlags();
@@ -1260,8 +1319,15 @@ static bool32 HandleEndTurnTerrain(enum BattlerId battler)
         gBattleScripting.battler = gBattlerAttacker;
         BattleScriptCall(BattleScript_TerrainEnds);
         gFieldTimers.terrain = B_TERRAIN_NONE;
+#ifdef NATIVE
+        if (captured) ModsBattleEnvironmentCommitted(&before, RHH_BATTLE_ENV_CAUSE_EXPIRED, RHH_BATTLE_NO_BATTLER, MOVE_NONE, ABILITY_NONE);
+#endif
         return TRUE;
     }
+
+#ifdef NATIVE
+    if (tickCaptured) ModsBattleEnvironmentTimerTicked(&before, RHH_BATTLE_ENV_TIMER_TERRAIN);
+#endif
 
     return FALSE;
 }
@@ -1668,7 +1734,16 @@ bool32 DoEndTurnEffects(void)
 
         // Jump out if possible after endTurnEventsCounter was increased in the above code block
         if (gBattleStruct->eventState.endTurn == ENDTURN_COUNT)
+        {
+#ifdef NATIVE
+            if (ModsBattleTurnEnded())
+            {
+                BattleScriptCall(ModsInnateTurnActionsPending() ? BattleScript_ModInnateTurnAction : BattleScript_ModConditionMessages);
+                return TRUE;
+            }
+#endif
             return FALSE;
+        }
 
         battler = gBattlerAttacker = gBattlerByTurnOrder[gBattleStruct->eventState.endTurnBattler];
 

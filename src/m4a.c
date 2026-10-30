@@ -1686,7 +1686,11 @@ void SetPokemonCryProgress(u32 val)
 
 bool32 IsPokemonCryPlaying(struct MusicPlayerInfo *mplayInfo)
 {
-    struct MusicPlayerTrack *track = mplayInfo->tracks;
+    struct MusicPlayerTrack *track;
+
+    if (mplayInfo == NULL || mplayInfo->tracks == NULL)
+        return FALSE;
+    track = mplayInfo->tracks;
 
     if (track->chan && track->chan->track == track)
         return TRUE;

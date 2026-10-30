@@ -36,6 +36,9 @@ u16 CountPartyAliveNonEggMons_IgnoreVar0x8004Slot(void);
 u8 CountPartyMons(void);
 u8 *StringCopyAndFillWithSpaces(u8 *dst, const u8 *src, u16 n);
 void ShowPokemonStorageSystemPC(void);
+#ifdef NATIVE
+bool32 ModsOwnedStorageBusy(void);
+#endif
 void ResetPokemonStorageSystem(void);
 s16 CompactPartySlots(void);
 u8 StorageGetCurrentBox(void);
@@ -71,5 +74,8 @@ bool32 IsWaldaPhraseEmpty(void);
 void ChooseMonFromStorage();
 u32 CountPartyNonEggMons(void);
 void RemoveSelectedPcMon(struct Pokemon *mon);
+#ifdef NATIVE
+void RemoveSelectedPcMonWithOwnedReceipt(struct Pokemon *mon);
+#endif
 
 #endif // GUARD_POKEMON_STORAGE_SYSTEM_H

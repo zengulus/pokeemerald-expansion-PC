@@ -5,6 +5,9 @@
 
 const struct BattleMoveEffect gBattleMoveEffects[NUM_BATTLE_MOVE_EFFECTS] =
 {
+#ifdef NATIVE
+    [EFFECT_MOD_CUSTOM_STATUS] = { .battleScript = BattleScript_EffectModCustomStatus },
+#endif
     [EFFECT_PLACEHOLDER] =
     {
         .battleScript = BattleScript_EffectPlaceholder,

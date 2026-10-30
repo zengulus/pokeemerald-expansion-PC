@@ -17,6 +17,9 @@
 #include "wallclock.h"
 #include "constants/form_change_types.h"
 #include "apricorn_tree.h"
+#ifdef NATIVE
+#include "mods.h"
+#endif
 
 static void UpdatePerDay(struct Time *localTime);
 static void UpdatePerMinute(struct Time *localTime);
@@ -90,8 +93,14 @@ static void UpdatePerMinute(struct Time *localTime)
     {
         if (minutes >= 0)
         {
+#ifdef NATIVE
+            bool32 notifyBerryClock = ModsBerryClockBegin();
+#endif
             BerryTreeTimeUpdate(minutes);
             gSaveBlock2Ptr->lastBerryTreeUpdate = *localTime;
+#ifdef NATIVE
+            if (notifyBerryClock) ModsBerryClockFinish(minutes);
+#endif
         }
     }
 }

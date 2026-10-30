@@ -1,14 +1,26 @@
 Pokemon Emerald Expansion - native Windows x64
 
 Extract this entire folder, then run pokeemerald-expansion.exe. Keep SDL2.dll
-beside it. Game code and assets are included; no game ROM is loaded.
-Keep the music folder beside it as well for the optional MIDI/SoundFont styles.
+and rhhgme.dll beside it. Game code and assets are included; no game ROM is loaded.
+Keep the music folder beside it as well for the optional battle music styles.
 
 Controls
   Arrow keys: move
   Z: A / confirm       X: B / cancel
-  Enter: Start         Backspace: Select
+  Enter: Start         Left or Right Shift: Select
   A / S: L / R
+
+Choose CONTROLS in the game's Options menu to change any keyboard binding.
+Select an action, press A, then press the desired key; Escape cancels the
+capture. If a key is already assigned, its existing action takes the old key.
+RESET DEFAULTS restores the bindings above. Changes are saved immediately in
+the user's RHH/PokeemeraldExpansion preferences folder, independently of game
+saves. To use a specific settings file, launch with:
+  pokeemerald-expansion.exe --controls "C:\path\controls.cfg"
+
+When naming your character, Pokémon or PC boxes, type directly on the keyboard.
+Enter confirms and Backspace deletes. Running Shoes are available from the
+start; hold the B button to run where the game permits it.
 
 Save from the game's Start menu. Progress is stored in
 pokeemerald-expansion.sav in the working directory. To choose another location,
@@ -23,7 +35,10 @@ executable with an existing save; see MODDING.md for compatibility details.
 New Game includes default-off Nuzlocke, wild pool/full randomization, trainer
 randomization, a non-legendary starter picker, 600 BST, next-Gym/Champion level
 caps, followers, and Generation I-V battle music. Music is also in Options.
-These are eight independent example mods using the public C API.
+These options and the new battle-environment renderer are nine independent
+example mods using the public C API. Enable BATTLE FX in Options for persistent
+weather and terrain shaders. It defaults off. The original messages remain
+when the renderer cannot use a shader.
 
 To run their external DLL builds instead of the built-in copies:
   pokeemerald-expansion.exe --external-bundled-mods example-mods

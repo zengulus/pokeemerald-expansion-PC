@@ -3,28 +3,36 @@
 #include "battle_anim.h"
 #include "battle_controllers.h"
 #include "battle_gimmick.h"
+#include "battle_util.h"
 #include "decompress.h"
 #include "graphics.h"
 #include "pokedex.h"
 #include "sprite.h"
 #include "type_icons.h"
+#ifdef NATIVE
+#include "mods.h"
+#endif
 
 static void LoadTypeSpritesAndPalettes(void);
 static void LoadTypeIconsPerBattler(enum BattlerId, u32);
 
 static bool32 UseDoubleBattleCoords(u32);
 
+#ifndef NATIVE
 static enum Type GetMonPublicType(enum BattlerId, u32);
+#endif
 static bool32 ShouldHideUncaughtType(enum Species species);
 static bool32 ShouldHideUnseenType(enum Species species);
+#ifndef NATIVE
 static enum Type GetMonDefensiveTeraType(struct Pokemon *, struct Pokemon *, enum BattlerId, u32, enum Species, enum Species);
+#endif
 static bool32 IsIllusionActiveAndTypeUnchanged(struct Pokemon *, enum Species, enum BattlerId);
 
-static void CreateSpriteFromType(u32, bool32, enum Type[], u32, enum BattlerId);
+static void CreateSpriteFromType(u32, bool32, enum Type[], u32, u32, enum BattlerId);
 static bool32 ShouldSkipSecondType(enum Type[], u32);
 static void SetTypeIconXY(s32*, s32*, u32, bool32, u32);
 
-static void CreateSpriteAndSetTypeSpriteAttributes(enum Type, u32 x, u32 y, u32, enum BattlerId, bool32);
+static void CreateSpriteAndSetTypeSpriteAttributes(enum Type, u32 x, u32 y, u32, enum BattlerId, bool32, u32, u32);
 static bool32 ShouldFlipTypeIcon(bool32, u32, enum Type);
 
 static void SpriteCB_TypeIcon(struct Sprite*);
@@ -263,19 +271,61 @@ static void LoadTypeSpritesAndPalettes(void)
 static void LoadTypeIconsPerBattler(enum BattlerId battler, u32 position)
 {
     u32 typeNum;
+#ifdef NATIVE
+    enum Type types[3];
+#else
     enum Type types[2];
+#endif
     enum BattlerId battlerId = GetBattlerAtPosition(position);
     bool32 useDoubleBattleCoords = UseDoubleBattleCoords(battlerId);
 
     if (!IsBattlerAlive(battlerId))
         return;
 
-    for (typeNum = 0; typeNum < 2; ++typeNum)
+#ifdef NATIVE
+    u32 typeCount = GetBattlerPublicTypeIcons(battlerId, types);
+#else
+    u32 typeCount = 2;
+    for (typeNum = 0; typeNum < typeCount; ++typeNum)
         types[typeNum] = GetMonPublicType(battlerId, typeNum);
+#endif
 
-    for (typeNum = 0; typeNum < 2; ++typeNum)
-        CreateSpriteFromType(position, useDoubleBattleCoords, types, typeNum, battler);
+    for (typeNum = 0; typeNum < typeCount; ++typeNum)
+        CreateSpriteFromType(position, useDoubleBattleCoords, types, typeNum, typeCount, battler);
 }
+
+#ifdef NATIVE
+u32 GetBattlerPublicTypeIcons(enum BattlerId battler, enum Type types[3])
+{
+    struct BattleTypeList list;
+    GetBattlerPublicTypeList(battler, &list);
+    u32 count = min(list.count, 3);
+    for (u32 i = 0; i < count; ++i) types[i] = list.types[i];
+    return count;
+}
+
+void GetBattlerPublicTypeList(enum BattlerId battler, struct BattleTypeList *list)
+{
+    struct Pokemon *mon = GetBattlerMon(battler);
+    enum Species species = GetMonData(mon, MON_DATA_SPECIES);
+    struct Pokemon *illusion = GetIllusionMonPtr(battler);
+    list->count = 0;
+    if (!ShouldHideUncaughtType(species) && !ShouldHideUnseenType(species))
+    {
+        bool32 tera = GetActiveGimmick(battler) == GIMMICK_TERA;
+        if (tera && GetBattlerTeraType(battler) != TYPE_STELLAR)
+            BattleTypeListAdd(list, GetBattlerTeraType(battler));
+        else if (IsIllusionActiveAndTypeUnchanged(illusion, species, battler))
+        {
+            GetSpeciesTypeList(GetMonData(illusion, MON_DATA_SPECIES), list);
+            if (!tera && gBattleMons[battler].volatiles.roostActive) ApplyRoostToTypeList(list);
+        }
+        else
+            GetBattlerTypeList(battler, FALSE, list);
+    }
+    if (!list->count) { list->types[0] = TYPE_MYSTERY; list->count = 1; }
+}
+#endif
 
 static bool32 UseDoubleBattleCoords(u32 position)
 {
@@ -291,6 +341,7 @@ static bool32 UseDoubleBattleCoords(u32 position)
     return TRUE;
 }
 
+#ifndef NATIVE
 static enum Type GetMonPublicType(enum BattlerId battlerId, u32 typeNum)
 {
     struct Pokemon *mon = GetBattlerMon(battlerId);
@@ -302,7 +353,7 @@ static enum Type GetMonPublicType(enum BattlerId battlerId, u32 typeNum)
         return TYPE_MYSTERY;
 
     monIllusion = GetIllusionMonPtr(battlerId);
-    illusionSpecies = GetMonData(monIllusion,MON_DATA_SPECIES,NULL);
+    illusionSpecies = monIllusion ? GetMonData(monIllusion,MON_DATA_SPECIES,NULL) : SPECIES_NONE;
 
     if (GetActiveGimmick(battlerId) == GIMMICK_TERA)
         return GetMonDefensiveTeraType(mon,monIllusion,battlerId,typeNum,illusionSpecies,monSpecies);
@@ -312,6 +363,7 @@ static enum Type GetMonPublicType(enum BattlerId battlerId, u32 typeNum)
 
     return gBattleMons[battlerId].types[typeNum];
 }
+#endif
 
 static bool32 ShouldHideUncaughtType(enum Species species)
 {
@@ -335,6 +387,7 @@ static bool32 ShouldHideUnseenType(enum Species species)
     return TRUE;
 }
 
+#ifndef NATIVE
 static enum Type GetMonDefensiveTeraType(struct Pokemon *mon, struct Pokemon *monIllusion, enum BattlerId battlerId, u32 typeNum, enum Species illusionSpecies, enum Species monSpecies)
 {
     enum Type teraType = GetBattlerTeraType(battlerId);
@@ -347,22 +400,29 @@ static enum Type GetMonDefensiveTeraType(struct Pokemon *mon, struct Pokemon *mo
 
     return GetSpeciesType(targetSpecies, typeNum);
 }
+#endif
 
 static bool32 IsIllusionActiveAndTypeUnchanged(struct Pokemon *monIllusion, enum Species monSpecies, enum BattlerId battlerId)
 {
-    u32 typeNum;
-
     if (monIllusion == NULL)
         return FALSE;
 
+#ifdef NATIVE
+    struct BattleTypeList speciesTypes, active;
+    GetSpeciesTypeList(monSpecies, &speciesTypes);
+    GetBattlerRawTypeList(battlerId, &active);
+    return BattleTypeListsEqual(&speciesTypes, &active);
+#else
+    u32 typeNum;
     for (typeNum = 0; typeNum < 2; typeNum++)
         if (GetSpeciesType(monSpecies, typeNum) != gBattleMons[battlerId].types[typeNum])
         return FALSE;
+#endif
 
     return TRUE;
 }
 
-static void CreateSpriteFromType(u32 position, bool32 useDoubleBattleCoords, enum Type types[], u32 typeNum, enum BattlerId battler)
+static void CreateSpriteFromType(u32 position, bool32 useDoubleBattleCoords, enum Type types[], u32 typeNum, u32 typeCount, enum BattlerId battler)
 {
     s32 x = 0, y = 0;
 
@@ -371,7 +431,7 @@ static void CreateSpriteFromType(u32 position, bool32 useDoubleBattleCoords, enu
 
     SetTypeIconXY(&x, &y, position, useDoubleBattleCoords, typeNum);
 
-    CreateSpriteAndSetTypeSpriteAttributes(types[typeNum], x, y, position, battler, useDoubleBattleCoords);
+    CreateSpriteAndSetTypeSpriteAttributes(types[typeNum], x, y, position, battler, useDoubleBattleCoords, typeNum, typeCount);
 }
 
 static bool32 ShouldSkipSecondType(enum Type types[], u32 typeNum)
@@ -391,9 +451,13 @@ static void SetTypeIconXY(s32* x, s32* y, u32 position, bool32 useDoubleBattleCo
     *y = sTypeIconPositions[position][useDoubleBattleCoords].y + (11 * typeNum);
 }
 
-static void CreateSpriteAndSetTypeSpriteAttributes(enum Type type, u32 x, u32 y, u32 position, enum BattlerId battler, bool32 useDoubleBattleCoords)
+static void CreateSpriteAndSetTypeSpriteAttributes(enum Type type, u32 x, u32 y, u32 position, enum BattlerId battler, bool32 useDoubleBattleCoords, u32 slot, u32 slots)
 {
     struct Sprite* sprite;
+#ifdef NATIVE
+    u32 originalType = type;
+    if (type >= NUMBER_OF_MON_TYPES) type = TYPE_MYSTERY;
+#endif
     const struct SpriteTemplate* spriteTemplate = gTypesInfo[type].useSecondTypeIconPalette ? &sSpriteTemplate_TypeIcons2 : &sSpriteTemplate_TypeIcons1;
     u32 spriteId = CreateSpriteAtEndUnchecked(spriteTemplate, x, y, UCHAR_MAX);
 
@@ -408,6 +472,16 @@ static void CreateSpriteAndSetTypeSpriteAttributes(enum Type type, u32 x, u32 y,
     sprite->hFlip = ShouldFlipTypeIcon(useDoubleBattleCoords, position, type);
 
     StartSpriteAnim(sprite, type);
+#ifdef NATIVE
+    sprite->tTypeIconSlot = slot;
+    sprite->tTypeIconTimer = 0;
+    sprite->tTypeIconPage = slots;
+    sprite->tTypeIconType = originalType;
+    if (originalType >= NUMBER_OF_MON_TYPES && ModsSetCustomTypeIcon(sprite, originalType, TRUE))
+        sprite->hFlip = FALSE;
+#else
+    (void)slot; (void)slots;
+#endif
 }
 
 static bool32 ShouldFlipTypeIcon(bool32 useDoubleBattleCoords, u32 position, enum Type typeId)
@@ -419,6 +493,55 @@ static bool32 ShouldFlipTypeIcon(bool32 useDoubleBattleCoords, u32 position, enu
 
     return !gTypesInfo[typeId].isSpecialCaseType;
 }
+
+#ifdef NATIVE
+static void UpdateTypeIconPage(struct Sprite *sprite, bool32 useDoubleBattleCoords)
+{
+    bool32 advance = ++sprite->tTypeIconTimer >= 90;
+    if (!advance && sprite->tTypeIconTimer % 15) return;
+    if (advance) sprite->tTypeIconTimer = 0;
+    struct BattleTypeList types;
+    enum BattlerId shownBattler = GetBattlerAtPosition(sprite->tMonPosition);
+    GetBattlerPublicTypeList(shownBattler, &types);
+    u32 slots = sprite->tTypeIconPage & 3;
+    u32 pages = (types.count + slots - 1) / slots;
+    u32 page = ((u32)sprite->tTypeIconPage >> 2) % pages;
+    if (advance) page = (page + 1) % pages;
+    sprite->tTypeIconPage = slots | (page << 2);
+    u32 index = page * slots + sprite->tTypeIconSlot;
+    if (index >= types.count)
+    {
+        sprite->invisible = TRUE;
+        ModsClearCustomTypeIcon(sprite);
+        sprite->tTypeIconType = -1;
+        return;
+    }
+    sprite->invisible = FALSE;
+    u32 type = types.types[index];
+    if (sprite->tTypeIconType == type) return;
+    ModsClearCustomTypeIcon(sprite);
+    u32 displayType = type < NUMBER_OF_MON_TYPES ? type : TYPE_MYSTERY;
+    const struct SpriteTemplate *template = gTypesInfo[displayType].useSecondTypeIconPalette
+        ? &sSpriteTemplate_TypeIcons2 : &sSpriteTemplate_TypeIcons1;
+    sprite->template = template;
+    sprite->anims = template->anims;
+    sprite->sheetTileStart = GetSpriteTileStartByTag(template->tileTag);
+    sprite->oam.tileNum = sprite->sheetTileStart;
+    u32 palette = IndexOfSpritePaletteTag(template->paletteTag);
+    sprite->oam.paletteNum = palette < 16 ? palette : 15;
+    sprite->hFlip = ShouldFlipTypeIcon(useDoubleBattleCoords, sprite->tMonPosition, displayType);
+    StartSpriteAnim(sprite, displayType);
+    if (type >= NUMBER_OF_MON_TYPES && ModsSetCustomTypeIcon(sprite, type, TRUE)) sprite->hFlip = FALSE;
+    sprite->tTypeIconType = type;
+}
+
+#ifdef RHH_BATTLE_TYPE_ICON_TEST
+void RhhTestAdvanceBattleTypeIcon(struct Sprite *sprite)
+{
+    UpdateTypeIconPage(sprite, UseDoubleBattleCoords(GetBattlerAtPosition(sprite->tMonPosition)));
+}
+#endif
+#endif
 
 static void SpriteCB_TypeIcon(struct Sprite *sprite)
 {
@@ -439,6 +562,9 @@ static void SpriteCB_TypeIcon(struct Sprite *sprite)
         return;
     }
 
+#ifdef NATIVE
+    UpdateTypeIconPage(sprite, useDoubleBattleCoords);
+#endif
     sprite->x += GetTypeIconSlideMovement(useDoubleBattleCoords,position, sprite->x);
     sprite->y = GetTypeIconBounceMovement(sprite->tVerticalPosition,position);
 }
@@ -453,7 +579,12 @@ static void DestroyTypeIcon(struct Sprite* sprite)
 {
     u32 spriteId, tag;
 
+#ifdef NATIVE
+    DestroySprite(sprite);
+    ModsReclaimCustomTypeIcons();
+#else
     DestroySpriteAndFreeResources(sprite);
+#endif
 
     for (spriteId = 0; spriteId < MAX_SPRITES; ++spriteId)
     {

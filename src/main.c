@@ -25,6 +25,10 @@
 #include "trainer_hill.h"
 #include "test_runner.h"
 #include "constants/rgb.h"
+#ifdef NATIVE
+#include "battle_main.h"
+#include "mods.h"
+#endif
 
 static void VBlankIntr(void);
 static void HBlankIntr(void);
@@ -211,6 +215,9 @@ static void CallCallbacks(void)
 
 void SetMainCallback2(MainCallback callback)
 {
+#ifdef NATIVE
+    ModsScriptedBattleCallback(callback == CB2_InitBattle);
+#endif
     gMain.callback2 = callback;
     gMain.state = 0;
 }

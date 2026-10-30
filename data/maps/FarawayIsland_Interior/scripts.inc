@@ -112,6 +112,7 @@ FarawayIsland_Interior_Movement_MewFloatUpEast:
 
 FarawayIsland_Interior_EventScript_Mew::
 	lock
+	special ScriptSnapshotMewEncounter
 	faceplayer
 	applymovement LOCALID_FARAWAY_ISLAND_MEW, FarawayIsland_Interior_Movement_MewAppear
 	waitmovement 0
@@ -127,7 +128,11 @@ FarawayIsland_Interior_EventScript_Mew::
 	special DestroyMewEmergingGrassSprite
 	delay 40
 	waitmoncry
+FarawayIsland_Interior_EventScript_PrepareMew::
+	identifywildencounter "rhh:encounter/faraway_island_interior/mew"
 	seteventmon SPECIES_MEW, 30
+	specialvar VAR_RESULT, ScriptedWildBattleAllowed
+	goto_if_eq VAR_RESULT, FALSE, FarawayIsland_Interior_EventScript_MewCancelled
 	setflag FLAG_SYS_CTRL_OBJ_DELETE
 	special BattleSetup_StartLegendaryBattle
 	clearflag FLAG_SYS_CTRL_OBJ_DELETE
@@ -137,6 +142,11 @@ FarawayIsland_Interior_EventScript_Mew::
 	goto_if_eq VAR_RESULT, B_OUTCOME_PLAYER_TELEPORTED, FarawayIsland_Interior_EventScript_PlayerOrMewRan
 	goto_if_eq VAR_RESULT, B_OUTCOME_MON_TELEPORTED, FarawayIsland_Interior_EventScript_PlayerOrMewRan
 	setflag FLAG_CAUGHT_MEW
+	release
+	end
+
+FarawayIsland_Interior_EventScript_MewCancelled::
+	special ScriptRestoreMewEncounter
 	release
 	end
 

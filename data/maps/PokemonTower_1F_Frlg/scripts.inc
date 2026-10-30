@@ -37,17 +37,17 @@ PokemonTower_1F_EventScript_WorkerF::
 	end
 
 PokemonTower_1F_Text_ErectedInMemoryOfDeadMons::
-	.string "POKéMON TOWER was erected in the\n"
-	.string "memory of POKéMON that died.$"
+	.string "Pokémon Tower was erected in the\n"
+	.string "memory of Pokémon that died.$"
 
 PokemonTower_1F_Text_ComeToPayRespectsSon::
 	.string "Did you come to pay respects?\p"
-	.string "Bless your POKéMON-loving heart,\n"
+	.string "Bless your Pokémon-loving heart,\n"
 	.string "son.$"
 
 PokemonTower_1F_Text_ComeToPayRespectsGirl::
 	.string "Did you come to pay respects?\p"
-	.string "Bless your POKéMON-loving heart,\n"
+	.string "Bless your Pokémon-loving heart,\n"
 	.string "girl.$"
 
 PokemonTower_1F_Text_CameToPrayForDepartedClefairy::
@@ -63,5 +63,5 @@ PokemonTower_1F_Text_GrowlitheWhyDidYouDie::
 PokemonTower_1F_Text_SenseSpiritsUpToMischief::
 	.string "I am a CHANNELER.\p"
 	.string "There are spirits up to mischief.\n"
-	.string "I sense them high in the TOWER.$"
+	.string "I sense them high in the Tower.$"
 

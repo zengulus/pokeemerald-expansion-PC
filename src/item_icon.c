@@ -177,7 +177,10 @@ const u16 *GetItemIconPalette(enum Item itemId)
     if (itemId >= ITEMS_COUNT)
         return gItemsInfo[0].iconPalette;
     if (gItemsInfo[itemId].pocket == POCKET_TM_HM)
-        return gTypesInfo[GetMoveType(GetItemTMHMMoveId(itemId))].paletteTMHM;
+    {
+        enum Type type = GetMoveType(GetItemTMHMMoveId(itemId));
+        return gTypesInfo[type < NUMBER_OF_MON_TYPES ? type : TYPE_MYSTERY].paletteTMHM;
+    }
 
     return gItemsInfo[itemId].iconPalette;
 }

@@ -100,7 +100,7 @@ FuchsiaCity_Gym_Text_KogaIntro::
 	.string "Poison brings steady doom.\n"
 	.string "Sleep renders foes helpless.\p"
 	.string "Despair to the creeping horror of\n"
-	.string "POISON-type POKéMON!{PLAY_BGM}{MUS_RG_ENCOUNTER_GYM_LEADER}$"
+	.string "POISON-type Pokémon!{PLAY_BGM}{MUS_RG_ENCOUNTER_GYM_LEADER}$"
 
 FuchsiaCity_Gym_Text_KogaDefeat::
 	.string "Humph!\n"
@@ -109,7 +109,7 @@ FuchsiaCity_Gym_Text_KogaDefeat::
 	.string "Take the SOULBADGE!$"
 
 FuchsiaCity_Gym_Text_KogaPostBattle::
-	.string "When afflicted by TOXIC, a POKéMON\n"
+	.string "When afflicted by TOXIC, a Pokémon\n"
 	.string "suffers more and more.\p"
 	.string "It suffers worsening damage as the\n"
 	.string "battle wears on!\p"
@@ -117,7 +117,7 @@ FuchsiaCity_Gym_Text_KogaPostBattle::
 
 FuchsiaCity_Gym_Text_KogaExplainSoulBadge::
 	.string "Now that you have the SOULBADGE,\n"
-	.string "the DEFENSE of your POKéMON rises.\p"
+	.string "the DEFENSE of your Pokémon rises.\p"
 	.string "It also lets you SURF outside of\n"
 	.string "battle.\p"
 	.string "Ah!\n"
@@ -137,9 +137,9 @@ FuchsiaCity_Gym_Text_MakeSpaceForThis::
 	.string "Make space for this, child!$"
 
 FuchsiaCity_Gym_Text_KaydenIntro::
-	.string "Strength isn't the key for POKéMON.\n"
+	.string "Strength isn't the key for Pokémon.\n"
 	.string "Do you understand this?\p"
-	.string "POKéMON is about strategy!\p"
+	.string "Pokémon is about strategy!\p"
 	.string "I'll show you how strategy can\n"
 	.string "beat brute strength.$"
 
@@ -151,12 +151,12 @@ FuchsiaCity_Gym_Text_KaydenPostBattle::
 	.string "So, you mix brawn with brains?\n"
 	.string "Good strategy!\p"
 	.string "That's remarkable for a child\n"
-	.string "TRAINER.$"
+	.string "Trainer.$"
 
 FuchsiaCity_Gym_Text_KirkIntro::
 	.string "I was a magician once upon a time.\p"
 	.string "But I dreamt of becoming a ninja,\n"
-	.string "so I joined this GYM.$"
+	.string "so I joined this Gym.$"
 
 FuchsiaCity_Gym_Text_KirkDefeat::
 	.string "I'm done for!$"
@@ -180,7 +180,7 @@ FuchsiaCity_Gym_Text_NatePostBattle::
 FuchsiaCity_Gym_Text_PhilIntro::
 	.string "Stop right there!\p"
 	.string "The famed invisible walls of\n"
-	.string "FUCHSIA GYM have you frustrated?$"
+	.string "FUCHSIA Gym have you frustrated?$"
 
 FuchsiaCity_Gym_Text_PhilDefeat::
 	.string "Whoa!\n"
@@ -222,7 +222,7 @@ FuchsiaCity_Gym_Text_ShawnPostBattle::
 FuchsiaCity_Gym_Text_GymGuyAdvice::
 	.string "Yo!\n"
 	.string "Champ in the making!\p"
-	.string "FUCHSIA GYM is a tricked-up place.\n"
+	.string "FUCHSIA Gym is a tricked-up place.\n"
 	.string "It's riddled with invisible walls!\p"
 	.string "KOGA might appear close, but he's\n"
 	.string "blocked off.\p"
@@ -234,14 +234,14 @@ FuchsiaCity_Gym_Text_GymGuyPostVictory::
 	.string "even now!$"
 
 FuchsiaCity_Gym_Text_GymStatue::
-	.string "FUCHSIA POKéMON GYM\n"
-	.string "LEADER: KOGA\p"
-	.string "WINNING TRAINERS:\n"
+	.string "FUCHSIA Pokémon Gym\n"
+	.string "Leader: KOGA\p"
+	.string "WINNING Trainers:\n"
 	.string "{RIVAL}$"
 
 FuchsiaCity_Gym_Text_GymStatuePlayerWon::
-	.string "FUCHSIA POKéMON GYM\n"
-	.string "LEADER: KOGA\p"
-	.string "WINNING TRAINERS:\n"
+	.string "FUCHSIA Pokémon Gym\n"
+	.string "Leader: KOGA\p"
+	.string "WINNING Trainers:\n"
 	.string "{RIVAL}, {PLAYER}$"
 

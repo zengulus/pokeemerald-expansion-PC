@@ -30,6 +30,9 @@
 #include "trainer_card.h"
 #include "party_menu.h"
 #include "window.h"
+#ifdef NATIVE
+#include "mods.h"
+#endif
 #include "constants/battle_frontier.h"
 #include "constants/cable_club.h"
 #include "constants/songs.h"
@@ -808,6 +811,21 @@ void CableClubSaveGame(void)
     SaveGame();
 }
 
+void PrepareCableClubMultiBattleParty(void)
+{
+#ifdef NATIVE
+    u32 count = 0;
+    while (count < MAX_FRONTIER_PARTY_SIZE && gSelectedOrderFromParty[count]) ++count;
+    for (u32 i = count; i < MAX_FRONTIER_PARTY_SIZE; ++i)
+        if (gSelectedOrderFromParty[i]) { count = 0; break; }
+    ModsOwnedLinkMultiPartyBegin(gSelectedOrderFromParty, count);
+#endif
+    ReducePlayerPartyToSelectedMons();
+#ifdef NATIVE
+    ModsOwnedUnionPartyPrepared();
+#endif
+}
+
 static void SetLinkBattleTypeFlags(int linkService)
 {
     switch (linkService)
@@ -819,7 +837,7 @@ static void SetLinkBattleTypeFlags(int linkService)
         gBattleTypeFlags = BATTLE_TYPE_DOUBLE | BATTLE_TYPE_LINK | BATTLE_TYPE_TRAINER;
         break;
     case USING_MULTI_BATTLE:
-        ReducePlayerPartyToSelectedMons();
+        PrepareCableClubMultiBattleParty();
         gBattleTypeFlags = BATTLE_TYPE_DOUBLE | BATTLE_TYPE_LINK | BATTLE_TYPE_TRAINER | BATTLE_TYPE_MULTI;
         break;
     case USING_BATTLE_TOWER:
@@ -991,7 +1009,13 @@ void CB2_ReturnFromCableClubBattle(void)
 {
     gBattleTypeFlags &= ~BATTLE_TYPE_LINK_IN_BATTLE;
     Overworld_ResetMapMusic();
+#ifdef NATIVE
+    ModsOwnedUnionPartyBeforeRestore();
+#endif
     LoadPlayerParty();
+#ifdef NATIVE
+    ModsOwnedUnionPartyAfterRestore();
+#endif
     SavePlayerBag();
     UpdateTrainerFansAfterLinkBattle();
 
@@ -1027,7 +1051,13 @@ void CleanupLinkRoomState(void)
      || gSpecialVar_0x8004 == USING_MULTI_BATTLE
      || gSpecialVar_0x8004 == USING_BATTLE_TOWER)
     {
+#ifdef NATIVE
+        ModsOwnedUnionPartyBeforeRestore();
+#endif
         LoadPlayerParty();
+#ifdef NATIVE
+        ModsOwnedUnionPartyAfterRestore();
+#endif
         SavePlayerBag();
     }
     SetWarpDestinationToDynamicWarp(WARP_ID_DYNAMIC);

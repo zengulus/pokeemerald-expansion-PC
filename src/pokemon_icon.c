@@ -7,6 +7,9 @@
 #include "sprite.h"
 #include "data.h"
 #include "constants/pokemon_icon.h"
+#ifdef NATIVE
+#include "mods.h"
+#endif
 
 struct MonIconSpriteTemplate
 {
@@ -30,6 +33,15 @@ const struct SpritePalette gMonIconPaletteTable[] =
     { gMonIconPalettes[4], POKE_ICON_BASE_PAL_TAG + 4 },
     { gMonIconPalettes[5], POKE_ICON_BASE_PAL_TAG + 5 },
 };
+
+#ifdef NATIVE
+bool32 RhhModsCopyPokemonIconPalette(u32 index, u16 *out)
+{
+    if (!out || index >= ARRAY_COUNT(gMonIconPaletteTable) || !gMonIconPaletteTable[index].data) return FALSE;
+    memcpy(out, gMonIconPaletteTable[index].data, 16 * sizeof(*out));
+    return TRUE;
+}
+#endif
 
 static const struct OamData sMonIconOamData =
 {

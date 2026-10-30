@@ -84,7 +84,7 @@ static void TryUpdateGymLeaderRematchFromTrainer(void);
 static void CB2_GiveStarter(void);
 static void CB2_StartFirstBattle(void);
 static void CB2_EndFirstBattle(void);
-static void SaveChangesToPlayerParty(void);
+static void SaveChangesToPlayerParty(u8 participatedPokemon);
 static void HandleBattleVariantEndParty(void);
 static void CB2_EndTrainerBattle(void);
 static bool32 IsPlayerDefeated(u32 battleOutcome);
@@ -265,9 +265,15 @@ static void Task_BattleStart(u8 taskId)
         {
             PrepareForFollowerNPCBattle();
             CleanupOverworldWindowsAndTilemaps();
+#ifdef NATIVE
+            ModsScriptedBattleTransitionComplete(taskId);
+#endif
             SetMainCallback2(CB2_InitBattle);
             RestartWildEncounterImmunitySteps();
             ClearPoisonStepCounter();
+#ifdef NATIVE
+            ModsWildActorBattleTransition();
+#endif
             DespawnOWEOnBattleStart();
             DestroyTask(taskId);
         }
@@ -275,12 +281,26 @@ static void Task_BattleStart(u8 taskId)
     }
 }
 
-static void CreateBattleStartTask(enum BattleTransition transition, u16 song)
+static u8 CreateBattleStartTask(enum BattleTransition transition, u16 song)
 {
     u8 taskId = CreateTask(Task_BattleStart, 1);
 
+#ifdef NATIVE
+    ModsScriptedBattleSchedule(taskId, (struct RhhScriptedEncounterSource){0});
+#endif
     gTasks[taskId].tTransition = transition;
     PlayMapChosenOrBattleBGM(song);
+    return taskId;
+}
+
+static void CreateScriptedBattleStartTask(enum BattleTransition transition, u16 song)
+{
+    u8 taskId = CreateBattleStartTask(transition, song);
+#ifdef NATIVE
+    ModsWildScriptedBattleSchedule(taskId);
+#else
+    (void)taskId;
+#endif
 }
 
 static void Task_BattleStart_Debug(u8 taskId)
@@ -447,6 +467,9 @@ void DoStandardWildBattle_Debug(void)
 
 void BattleSetup_StartRoamerBattle(void)
 {
+#ifdef NATIVE
+    ModsEncounterStarted();
+#endif
     LockPlayerFieldControls();
     FreezeObjectEvents();
     StopPlayerAvatar();
@@ -487,6 +510,9 @@ static void DoGhostBattle(void)
 
 static void DoBattlePikeWildBattle(void)
 {
+#ifdef NATIVE
+    ModsEncounterStarted();
+#endif
     LockPlayerFieldControls();
     FreezeObjectEvents();
     StopPlayerAvatar();
@@ -501,6 +527,9 @@ static void DoBattlePikeWildBattle(void)
 
 static void DoTrainerBattle(void)
 {
+#ifdef NATIVE
+    ModsTrainerProvenanceClear();
+#endif
     CreateNPCTrainerParty(&gParties[B_TRAINER_OPPONENT_A][0], TRAINER_BATTLE_PARAM.opponentA);
     if (gBattleTypeFlags & BATTLE_TYPE_TWO_OPPONENTS && !BATTLE_TWO_VS_ONE_OPPONENT)
         CreateNPCTrainerParty(&gParties[B_TRAINER_OPPONENT_B][0], TRAINER_BATTLE_PARAM.opponentB);
@@ -522,23 +551,44 @@ static void DoBattlePyramidTrainerHillBattle(void)
     TryUpdateGymLeaderRematchFromTrainer();
 }
 
+void PrepareWallyTutorialBattle(void)
+{
+#ifdef NATIVE
+    ModsWildTutorialCheckpointBegin();
+#endif
+    CreateMaleMon(&gParties[B_TRAINER_OPPONENT_A][0], SPECIES_RALTS, 5);
+}
+
+void PrepareOldManTutorialBattle(void)
+{
+#ifdef NATIVE
+    ModsWildTutorialCheckpointBegin();
+#endif
+    CreateMaleMon(&gParties[B_TRAINER_OPPONENT_A][0], SPECIES_WEEDLE, 5);
+}
+
+void StartPreparedTutorialBattle(void)
+{
+    LockPlayerFieldControls();
+    gMain.savedCallback = CB2_ReturnToFieldContinueScriptPlayMapMusic;
+    gBattleTypeFlags = BATTLE_TYPE_CATCH_TUTORIAL;
+#ifdef NATIVE
+    ModsWildSpecialScriptedReady(TRUE);
+#endif
+    CreateScriptedBattleStartTask(B_TRANSITION_SLICE, 0);
+}
+
 // Initiates battle where Wally catches Ralts
 void StartWallyTutorialBattle(void)
 {
     CreateMaleMon(&gParties[B_TRAINER_OPPONENT_A][0], SPECIES_RALTS, 5);
-    LockPlayerFieldControls();
-    gMain.savedCallback = CB2_ReturnToFieldContinueScriptPlayMapMusic;
-    gBattleTypeFlags = BATTLE_TYPE_CATCH_TUTORIAL;
-    CreateBattleStartTask(B_TRANSITION_SLICE, 0);
+    StartPreparedTutorialBattle();
 }
 
 void StartOldManTutorialBattle(void)
 {
     CreateMaleMon(&gParties[B_TRAINER_OPPONENT_A][0], SPECIES_WEEDLE, 5);
-    LockPlayerFieldControls();
-    gMain.savedCallback = CB2_ReturnToFieldContinueScriptPlayMapMusic;
-    gBattleTypeFlags = BATTLE_TYPE_CATCH_TUTORIAL;
-    CreateBattleStartTask(B_TRANSITION_SLICE, 0);
+    StartPreparedTutorialBattle();
 }
 
 void BattleSetup_StartScriptedWildBattle(void)
@@ -549,7 +599,10 @@ void BattleSetup_StartScriptedWildBattle(void)
     LockPlayerFieldControls();
     gMain.savedCallback = CB2_EndScriptedWildBattle;
     gBattleTypeFlags = 0;
-    CreateBattleStartTask(GetWildBattleTransition(), 0);
+#ifdef NATIVE
+    ModsWildScriptedReady(1);
+#endif
+    CreateScriptedBattleStartTask(GetWildBattleTransition(), 0);
     IncrementGameStat(GAME_STAT_TOTAL_BATTLES);
     IncrementGameStat(GAME_STAT_WILD_BATTLES);
     IncrementDailyWildBattles();
@@ -564,11 +617,38 @@ void BattleSetup_StartScriptedDoubleWildBattle(void)
     LockPlayerFieldControls();
     gMain.savedCallback = CB2_EndScriptedWildBattle;
     gBattleTypeFlags = BATTLE_TYPE_DOUBLE;
-    CreateBattleStartTask(GetWildBattleTransition(), 0);
+#ifdef NATIVE
+    ModsWildScriptedReady(2);
+#endif
+    CreateScriptedBattleStartTask(GetWildBattleTransition(), 0);
     IncrementGameStat(GAME_STAT_TOTAL_BATTLES);
     IncrementGameStat(GAME_STAT_WILD_BATTLES);
     IncrementDailyWildBattles();
     TryUpdateGymLeaderRematchFromWild();
+}
+
+void PrepareMarowakBattle(void)
+{
+    u32 previousBattleTypeFlags = gBattleTypeFlags;
+    gBattleTypeFlags = BATTLE_TYPE_GHOST;
+    if (CheckBagHasItem(ITEM_SILPH_SCOPE, 1))
+    {
+        u32 personality = GetMonPersonality(SPECIES_MAROWAK, MON_FEMALE, NATURE_SERIOUS, RANDOM_UNOWN_LETTER);
+
+        CreateMonWithIVsPersonality(&gParties[B_TRAINER_OPPONENT_A][0], SPECIES_MAROWAK, 30, 31, personality);
+    }
+    gBattleTypeFlags = previousBattleTypeFlags;
+}
+
+static void FinishMarowakBattleSetup(void)
+{
+    SetMonData(&gParties[B_TRAINER_OPPONENT_A][0], MON_DATA_NICKNAME, gText_Ghost);
+#ifdef NATIVE
+    ModsWildSpecialScriptedReady(FALSE);
+#endif
+    CreateScriptedBattleStartTask(GetWildBattleTransition(), 0);
+    IncrementGameStat(GAME_STAT_TOTAL_BATTLES);
+    IncrementGameStat(GAME_STAT_WILD_BATTLES);
 }
 
 void StartMarowakBattle(void)
@@ -576,18 +656,16 @@ void StartMarowakBattle(void)
     LockPlayerFieldControls();
     gMain.savedCallback = CB2_EndMarowakBattle;
     gBattleTypeFlags = BATTLE_TYPE_GHOST;
+    PrepareMarowakBattle();
+    FinishMarowakBattleSetup();
+}
 
-    if (CheckBagHasItem(ITEM_SILPH_SCOPE, 1))
-    {
-        u32 personality = GetMonPersonality(SPECIES_MAROWAK, MON_FEMALE, NATURE_SERIOUS, RANDOM_UNOWN_LETTER);
-
-        CreateMonWithIVsPersonality(&gParties[B_TRAINER_OPPONENT_A][0], SPECIES_MAROWAK, 30, 31, personality);
-    }
-
-    CreateBattleStartTask(GetWildBattleTransition(), 0);
-    SetMonData(&gParties[B_TRAINER_OPPONENT_A][0], MON_DATA_NICKNAME, gText_Ghost);
-    IncrementGameStat(GAME_STAT_TOTAL_BATTLES);
-    IncrementGameStat(GAME_STAT_WILD_BATTLES);
+void StartPreparedMarowakBattle(void)
+{
+    LockPlayerFieldControls();
+    gMain.savedCallback = CB2_EndMarowakBattle;
+    gBattleTypeFlags = BATTLE_TYPE_GHOST;
+    FinishMarowakBattleSetup();
 }
 
 void BattleSetup_StartLatiBattle(void)
@@ -598,7 +676,10 @@ void BattleSetup_StartLatiBattle(void)
     LockPlayerFieldControls();
     gMain.savedCallback = CB2_EndScriptedWildBattle;
     gBattleTypeFlags = BATTLE_TYPE_LEGENDARY;
-    CreateBattleStartTask(GetWildBattleTransition(), 0);
+#ifdef NATIVE
+    ModsWildScriptedReady(1);
+#endif
+    CreateScriptedBattleStartTask(GetWildBattleTransition(), 0);
     IncrementGameStat(GAME_STAT_TOTAL_BATTLES);
     IncrementGameStat(GAME_STAT_WILD_BATTLES);
     IncrementDailyWildBattles();
@@ -613,34 +694,37 @@ void BattleSetup_StartLegendaryBattle(void)
     LockPlayerFieldControls();
     gMain.savedCallback = CB2_EndScriptedWildBattle;
     gBattleTypeFlags = BATTLE_TYPE_LEGENDARY;
+#ifdef NATIVE
+    ModsWildScriptedReady(1);
+#endif
 
     switch (GetMonData(&gParties[B_TRAINER_OPPONENT_A][0], MON_DATA_SPECIES))
     {
     case SPECIES_GROUDON:
     case SPECIES_GROUDON_PRIMAL:
-        CreateBattleStartTask(B_TRANSITION_GROUDON, MUS_VS_KYOGRE_GROUDON);
+        CreateScriptedBattleStartTask(B_TRANSITION_GROUDON, MUS_VS_KYOGRE_GROUDON);
         break;
     case SPECIES_KYOGRE:
     case SPECIES_KYOGRE_PRIMAL:
-        CreateBattleStartTask(B_TRANSITION_KYOGRE, MUS_VS_KYOGRE_GROUDON);
+        CreateScriptedBattleStartTask(B_TRANSITION_KYOGRE, MUS_VS_KYOGRE_GROUDON);
         break;
     case SPECIES_RAYQUAZA:
     case SPECIES_RAYQUAZA_MEGA:
-        CreateBattleStartTask(B_TRANSITION_RAYQUAZA, MUS_VS_RAYQUAZA);
+        CreateScriptedBattleStartTask(B_TRANSITION_RAYQUAZA, MUS_VS_RAYQUAZA);
         break;
     case SPECIES_DEOXYS_NORMAL:
     case SPECIES_DEOXYS_ATTACK:
     case SPECIES_DEOXYS_DEFENSE:
     case SPECIES_DEOXYS_SPEED:
-        CreateBattleStartTask(B_TRANSITION_BLUR, MUS_RG_VS_DEOXYS);
+        CreateScriptedBattleStartTask(B_TRANSITION_BLUR, MUS_RG_VS_DEOXYS);
         break;
     case SPECIES_LUGIA:
     case SPECIES_HO_OH:
     default:
-        CreateBattleStartTask(B_TRANSITION_BLUR, MUS_RG_VS_LEGEND);
+        CreateScriptedBattleStartTask(B_TRANSITION_BLUR, MUS_RG_VS_LEGEND);
         break;
     case SPECIES_MEW:
-        CreateBattleStartTask(B_TRANSITION_GRID_SQUARES, MUS_VS_MEW);
+        CreateScriptedBattleStartTask(B_TRANSITION_GRID_SQUARES, MUS_VS_MEW);
         break;
     }
 
@@ -658,11 +742,14 @@ void StartGroudonKyogreBattle(void)
     LockPlayerFieldControls();
     gMain.savedCallback = CB2_EndScriptedWildBattle;
     gBattleTypeFlags = BATTLE_TYPE_LEGENDARY;
+#ifdef NATIVE
+    ModsWildScriptedReady(1);
+#endif
 
     if (gGameVersion == VERSION_RUBY)
-        CreateBattleStartTask(B_TRANSITION_ANGLED_WIPES, MUS_VS_KYOGRE_GROUDON); // GROUDON
+        CreateScriptedBattleStartTask(B_TRANSITION_ANGLED_WIPES, MUS_VS_KYOGRE_GROUDON); // GROUDON
     else
-        CreateBattleStartTask(B_TRANSITION_RIPPLE, MUS_VS_KYOGRE_GROUDON); // KYOGRE
+        CreateScriptedBattleStartTask(B_TRANSITION_RIPPLE, MUS_VS_KYOGRE_GROUDON); // KYOGRE
 
     IncrementGameStat(GAME_STAT_TOTAL_BATTLES);
     IncrementGameStat(GAME_STAT_WILD_BATTLES);
@@ -678,6 +765,9 @@ void StartRegiBattle(void)
     LockPlayerFieldControls();
     gMain.savedCallback = CB2_EndScriptedWildBattle;
     gBattleTypeFlags = BATTLE_TYPE_LEGENDARY;
+#ifdef NATIVE
+    ModsWildScriptedReady(1);
+#endif
 
     species = GetMonData(&gParties[B_TRAINER_OPPONENT_A][0], MON_DATA_SPECIES);
     switch (species)
@@ -695,7 +785,7 @@ void StartRegiBattle(void)
         transitionId = B_TRANSITION_GRID_SQUARES;
         break;
     }
-    CreateBattleStartTask(transitionId, MUS_VS_REGI);
+    CreateScriptedBattleStartTask(transitionId, MUS_VS_REGI);
 
     IncrementGameStat(GAME_STAT_TOTAL_BATTLES);
     IncrementGameStat(GAME_STAT_WILD_BATTLES);
@@ -730,6 +820,9 @@ static void CB2_EndWildBattle(void)
             HealPlayerParty();
     }
 
+#ifdef NATIVE
+    ModsWildActorBattleFinished(gBattleOutcome);
+#endif
     if (IsPlayerDefeated(gBattleOutcome) == TRUE && CurrentBattlePyramidLocation() == PYRAMID_LOCATION_NONE && !InBattlePike())
     {
         SetMainCallback2(CB2_WhiteOut);
@@ -1027,6 +1120,9 @@ enum BattleTransition GetSpecialBattleTransition(enum BattleTransitionGroup id)
 
 void ChooseStarter(void)
 {
+#ifdef NATIVE
+    ModsWildFirstBattleSelect();
+#endif
     SetMainCallback2(CB2_ChooseStarter);
     gMain.savedCallback = CB2_GiveStarter;
 }
@@ -1054,6 +1150,9 @@ static void CB2_StartFirstBattle(void)
         gBattleTypeFlags = BATTLE_TYPE_FIRST_BATTLE;
         gMain.savedCallback = CB2_EndFirstBattle;
         FreeAllWindowBuffers();
+#ifdef NATIVE
+        ModsFirstBattleHandoff();
+#endif
         SetMainCallback2(CB2_InitBattle);
         RestartWildEncounterImmunitySteps();
         ClearPoisonStepCounter();
@@ -1573,10 +1672,9 @@ void BattleSetup_StartTrainerBattle_Debug(void)
     ScriptContext_Stop();
 }
 
-static void SaveChangesToPlayerParty(void)
+static void SaveChangesToPlayerParty(u8 participatedPokemon)
 {
     u8 i = 0, j = 0;
-    u8 participatedPokemon = VarGet(B_VAR_SKY_BATTLE);
     for (i = 0; i < PARTY_SIZE; i++)
     {
         if ((participatedPokemon >> i & 1) == 1)
@@ -1591,10 +1689,26 @@ static void HandleBattleVariantEndParty(void)
 {
     if (B_FLAG_SKY_BATTLE == 0 || !FlagGet(B_FLAG_SKY_BATTLE))
         return;
-    SaveChangesToPlayerParty();
+    u8 participatedPokemon = VarGet(B_VAR_SKY_BATTLE);
+#ifdef NATIVE
+    ModsOwnedSkyPartyBeforeRestore(participatedPokemon);
+#endif
+    SaveChangesToPlayerParty(participatedPokemon);
     LoadPlayerParty();
+#ifdef NATIVE
+    ModsOwnedSkyPartyAfterRestore();
+#endif
     FlagClear(B_FLAG_SKY_BATTLE);
 }
+#if defined(NATIVE) && defined(RHH_OWNED_IDENTITY_TEST)
+void ModsOwnedSkyTestRestore(u8 participatedPokemon)
+{
+    ModsOwnedSkyPartyBeforeRestore(participatedPokemon);
+    SaveChangesToPlayerParty(participatedPokemon);
+    LoadPlayerParty();
+    ModsOwnedSkyPartyAfterRestore();
+}
+#endif
 
 static void CB2_EndTrainerBattle(void)
 {
@@ -2215,11 +2329,17 @@ void SetMultiTrainerBattle(struct ScriptContext *ctx)
     gPartnerTrainerId = TRAINER_PARTNER(ScriptReadHalfword(ctx));
 };
 
-static void CreateNPCTrainerPartyImpl(struct Pokemon *party, const struct Trainer *trainer, u16 trainerId)
+static void CreateNPCTrainerPartyImpl(struct Pokemon *party, const struct Trainer *trainer, u16 trainerId, u16 rosterTrainerId)
 {
     s32 i;
     u8 monsCount;
 
+#ifndef NATIVE
+    (void)rosterTrainerId;
+#endif
+#ifdef NATIVE
+    ModsTrainerPartyClear(party);
+#endif
     ZeroPartyMons(party);
 
     monsCount = trainer->partySize;
@@ -2253,12 +2373,19 @@ static void CreateNPCTrainerPartyImpl(struct Pokemon *party, const struct Traine
             }
         }
         GenerateMonFromTrainerMon(&party[i], &randomized, trainerGen);
+        ModsTrainerPartyRecord(party, i, trainerId, rosterTrainerId, monIndex,
+            trainer->poolSize ? trainer->poolSize : trainer->partySize, &trainer->party[monIndex]);
 #else
         GenerateMonFromTrainerMon(&party[i], &trainer->party[monIndex], trainerGen);
 #endif
     }
     Free(trainerGen);
 }
+
+#if defined(NATIVE) && defined(RHH_TRAINER_SOURCE_TEST)
+void RhhTrainerSourceTestCreate(struct Pokemon *party, const struct Trainer *trainer, u16 trainerId, u16 rosterTrainerId)
+{ CreateNPCTrainerPartyImpl(party, trainer, trainerId, rosterTrainerId); }
+#endif
 
 void CreateNPCTrainerPartyFromTrainer(struct Pokemon *party, const struct Trainer *trainer)
 {
@@ -2268,14 +2395,14 @@ void CreateNPCTrainerPartyFromTrainer(struct Pokemon *party, const struct Traine
         for (u32 i = 1; i < TRAINERS_COUNT; ++i)
             if (trainer == GetTrainerStructFromId(i)) { id = i; break; }
 #endif
-    CreateNPCTrainerPartyImpl(party, trainer, id);
+    CreateNPCTrainerPartyImpl(party, trainer, id, id);
 }
 
 static void CreateNPCTrainerParty(struct Pokemon *party, u16 trainerNum)
 {
     if (!GetTrainerStructFromId(trainerNum)->overrideTrainer)
     {
-        CreateNPCTrainerPartyImpl(party, GetTrainerStructFromId(trainerNum), trainerNum);
+        CreateNPCTrainerPartyImpl(party, GetTrainerStructFromId(trainerNum), trainerNum, trainerNum);
         return;
     }
 
@@ -2288,7 +2415,7 @@ static void CreateNPCTrainerParty(struct Pokemon *party, u16 trainerNum)
     tempTrainer.poolSize = origTrainer->poolSize;
     if (tempTrainer.partySize == 0)
         tempTrainer.partySize = origTrainer->partySize;
-    CreateNPCTrainerPartyImpl(party, (const struct Trainer *)(&tempTrainer), trainerNum);
+    CreateNPCTrainerPartyImpl(party, (const struct Trainer *)(&tempTrainer), trainerNum, tempTrainer.overrideTrainer);
 }
 
 void CreateTrainerPartyForPlayer(void)

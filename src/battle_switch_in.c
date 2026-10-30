@@ -9,6 +9,9 @@
 #include "config_changes.h"
 #include "constants/battle.h"
 #include "constants/moves.h"
+#ifdef NATIVE
+#include "mods.h"
+#endif
 
 static bool32 FirstEventBlockEvents(struct BattleCalcValues *calcValues);
 static bool32 TryHazardsOnSwitchIn(enum BattlerId battler, enum Ability ability, enum HoldEffect holdEffect, enum Hazards hazardType);
@@ -279,6 +282,16 @@ static bool32 FirstEventBlockEvents(struct BattleCalcValues *calcValues)
             effect = TRUE;
         gBattleStruct->eventState.battlerSwitchIn++;
         break;
+#ifdef NATIVE
+    case FIRST_EVENT_BLOCK_MOD_INNATES:
+        if (gBattleStruct->battlerState[battler].switchIn && ModsInnateSwitchIn(battler))
+        {
+            BattleScriptCall(BattleScript_ModInnateHeal);
+            effect = TRUE;
+        }
+        gBattleStruct->eventState.battlerSwitchIn++;
+        break;
+#endif
     case FIRST_EVENT_BLOCK_IMMUNITY_ABILITIES:
         if (AbilityBattleEffects(ABILITYEFFECT_IMMUNITY, battler, calcValues->abilities[battler], MOVE_NONE, TRUE))
             effect = TRUE;

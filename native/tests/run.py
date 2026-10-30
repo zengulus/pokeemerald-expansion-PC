@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import random
 import subprocess
+import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -19,6 +20,7 @@ def main():
     args = parser.parse_args()
     if args.sanitize and args.target != 'linux64':
         parser.error('--sanitize requires --target linux64')
+    run(sys.executable, ROOT / 'native/tests/music_pairs.py')
     windows = args.target.startswith('windows')
     bits = '-m64' if args.target.endswith('64') else '-m32'
     compiler = ('x86_64-w64-mingw32-gcc' if bits == '-m64' else 'i686-w64-mingw32-gcc') if windows else 'gcc'
@@ -47,17 +49,23 @@ def main():
                 first.stdout.close()
                 if first.wait(): raise RuntimeError(f'{source} preprocessing failed')
             return prepared
-        platform = build('platform', 'native/memory.c', 'native/save.c', 'native/mod_host.c', 'native/tests/platform_test.c')
+        platform = build('platform', 'native/memory.c', 'native/save.c', 'native/pc_save_format.c', 'native/mod_host.c', 'native/tests/platform_test.c')
         mods = build('mod-host', 'native/mod_host.c', 'native/tests/mod_host_test.c')
-        mod_save = build('mod-save', 'native/memory.c', 'native/save.c', 'native/mod_host.c', 'native/tests/mod_save_test.c')
+        pc_save = build('pc-save-format', 'native/pc_save_format.c', 'native/tests/pc_save_format_test.c')
+        controls = build('controls', 'native/controls.c', 'native/tests/controls_test.c', '-lSDL2') if not windows else None
+        text_input = build('text-input', 'native/text_input.c', 'native/tests/text_input_test.c', '-lSDL2') if not windows else None
+        mod_save = build('mod-save', 'native/memory.c', 'native/save.c', 'native/pc_save_format.c', 'native/mod_host.c', 'native/tests/mod_save_test.c')
+        ecology = build('ecology', 'native/memory.c', 'native/save.c', 'native/pc_save_format.c', 'native/mod_host.c', 'native/mod_ecology.c', 'native/tests/ecology_test.c')
         rng = build('rng', 'src/random.c', 'native/tests/rng_test.c')
+        scene_ray = build('scene-ray', 'native/tests/scene_ray_test.c', '-lm')
+        scene_billboard = build('scene-billboard', 'native/scene_billboard_trace.c', 'native/tests/scene_billboard_test.c', '-lm')
         rtc = build('rtc', 'native/rtc.c', 'native/tests/rtc_test.c')
         tasks = build('tasks', 'src/task.c', 'native/tests/task_test.c')
         operands = build('script-operands', 'src/script.c', 'native/tests/script_read_test.c')
         contest = build('contest-operands', 'native/tests/contest_script_test.c')
         allocator = build('allocator', 'native/allocator.c', 'native/memory.c',
                           'src/dma3_manager.c', 'native/tests/allocator_test.c')
-        save_layout = build('save-layout', 'native/memory.c', 'native/save.c', 'native/mod_host.c', 'native/tests/save_layout_test.c')
+        save_layout = build('save-layout', 'native/memory.c', 'native/save.c', 'native/pc_save_format.c', 'native/mod_host.c', 'native/tests/save_layout_test.c')
         transfers = build('transfers', 'native/memory.c', 'src/dma3_manager.c', 'src/bg.c',
                           'src/gpu_regs.c', 'native/allocator.c', 'native/tests/graphics_transfer_test.c')
         # Compile the actual RHH implementation, with only asset-specific
@@ -83,7 +91,7 @@ def main():
         execute(platform, 'write', target_path(save))
         execute(platform, 'read', target_path(save))
         saved = save.read_bytes()
-        assert len(saved) == 131072 + 32 and saved[:8] == b'RHHNATV\0'
+        assert saved[:8] == b'RHHPCS01'
         invalid = [saved[:24], saved[:-1], saved + b'\0', saved[32:]]
         for offset in [0, 8, 12, 16, 20, 24, 28]:
             changed = bytearray(saved)
@@ -95,7 +103,16 @@ def main():
             execute(platform, 'reject', target_path(bad))
             assert bad.read_bytes() == contents, 'Rejected save was modified'
         execute(rng)
+        execute(scene_ray)
+        execute(scene_billboard)
         execute(mods)
+        execute(pc_save)
+        for phase in ('write', 'read', 'removed'):
+            execute(ecology, phase, target_path(work / 'ecology.sav'))
+        if controls:
+            execute(controls, work / 'controls.cfg')
+        if text_input:
+            run(text_input, env=dict(env, SDL_VIDEODRIVER='dummy'))
         execute(mod_save, 'legacy', target_path(save))
         execute(mod_save, 'legacy-read', target_path(save))
         mod_path = work / 'mods.sav'
@@ -147,7 +164,7 @@ def main():
             # Wine may still be flushing its private prefix after its last
             # process exits. Let it finish before removing the test directory.
             run('wineserver', '-w', env=env, timeout=30)
-        print(f'{args.target}: platform, RTC, fresh-process save/reload, RHH RNG, '
+        print(f'{args.target}: platform, RTC, fresh-process PC save/reload, RHH RNG, '
               f'8 compression roundtrips and {len(assets)} game asset modes passed; modes={sorted(modes)}')
 
 if __name__ == '__main__':

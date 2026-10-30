@@ -1,4 +1,7 @@
 #include "global.h"
+#ifdef NATIVE
+#include "mods.h"
+#endif
 #include "battle.h"
 #include "battle_anim.h"
 #include "battle_controllers.h"
@@ -167,6 +170,10 @@ void SwitchPartyOrderInGameMulti(enum BattlerId battler, u8 arg1)
 u32 BattlePalace_TryEscapeStatus(enum BattlerId battler)
 {
     u32 effect = 0;
+#ifdef NATIVE
+    struct ModsStatusCureCapture statusCure;
+    ModsCaptureStatusCure(&statusCure, battler);
+#endif
 
     do
     {
@@ -251,6 +258,9 @@ u32 BattlePalace_TryEscapeStatus(enum BattlerId battler)
     {
         BtlController_EmitSetMonData(battler, B_COMM_TO_CONTROLLER, REQUEST_STATUS_BATTLE, 0, 4, &gBattleMons[battler].status1);
         MarkBattlerForControllerExec(battler);
+#ifdef NATIVE
+        ModsFinishEngineStatusCure(&statusCure, battler, RHH_BATTLE_CURE_NATURAL, RHH_BATTLE_NO_BATTLER, MOVE_NONE);
+#endif
     }
 
     return effect;
@@ -271,4 +281,68 @@ struct Pokemon* GetBattlerMon(enum BattlerId battler)
     u32 index = gBattlerPartyIndexes[battler];
 
     return &GetBattlerParty(battler)[index];
+}
+
+#ifdef NATIVE
+void CaptureBattlerNature(enum BattlerId battler)
+{
+    struct BattlePokemon *battle = &gBattleMons[battler];
+    battle->nativeNatureFlags = 0;
+    if (gBattlerPartyIndexes[battler] >= PARTY_SIZE || GetBattlerTrainer(battler) >= MAX_BATTLE_TRAINERS) return;
+    struct Pokemon *mon = GetBattlerMon(battler);
+    if (!mon->box.hasSpecies || mon->box.isBadEgg
+        || mon->box.personality != battle->personality || mon->box.otId != battle->otId) return;
+    CaptureBattleMonNature(battle, mon);
+}
+u8 GetBattlerNatureDetails(enum BattlerId battler, u8 *statNature, u8 *flags)
+{
+    const struct BattlePokemon *battle = &gBattleMons[battler];
+    *statNature = 0; *flags = 0;
+    if ((battle->nativeNatureFlags & NATIVE_BATTLE_NATURE_SNAPSHOT)
+        && battle->nativeNature < NUM_NATURES && battle->nativeNaturePersonality == battle->personality
+        && battle->nativeNatureOtId == battle->otId)
+    {
+        *flags = NATIVE_BATTLE_NATURE_SNAPSHOT;
+        if ((battle->nativeNatureFlags & NATIVE_BATTLE_NATURE_STAT_VALID) && battle->nativeStatNature < NUM_NATURES)
+        { *flags |= NATIVE_BATTLE_NATURE_STAT_VALID; *statNature = battle->nativeStatNature; }
+        return battle->nativeNature;
+    }
+    if (gBattlerPartyIndexes[battler] < PARTY_SIZE && GetBattlerTrainer(battler) < MAX_BATTLE_TRAINERS)
+    {
+        struct Pokemon *mon = GetBattlerMon(battler);
+        if (mon->box.hasSpecies && !mon->box.isBadEgg
+            && mon->box.personality == battle->personality && mon->box.otId == battle->otId)
+        {
+            struct Pokemon copy = *mon;
+            if (!GetMonData(&copy, MON_DATA_SPECIES) || copy.box.isBadEgg)
+                return GetNatureFromPersonality(battle->personality);
+            u32 nature = GetNature(&copy), stat = GetMonData(&copy, MON_DATA_HIDDEN_NATURE);
+            if (nature < NUM_NATURES)
+            {
+                *flags = NATIVE_BATTLE_NATURE_PARTY;
+                if (stat < NUM_NATURES) { *flags |= NATIVE_BATTLE_NATURE_STAT_VALID; *statNature = stat; }
+                return nature;
+            }
+        }
+    }
+    return GetNatureFromPersonality(battle->personality);
+}
+#endif
+u8 GetBattlerNature(enum BattlerId battler)
+{
+#ifdef NATIVE
+    u8 statNature, flags;
+    return GetBattlerNatureDetails(battler, &statNature, &flags);
+#else
+    const struct BattlePokemon *battle = &gBattleMons[battler];
+    if (gBattlerPartyIndexes[battler] < PARTY_SIZE)
+    {
+        struct Pokemon *mon = GetBattlerMon(battler);
+        if (mon->box.hasSpecies && !mon->box.isBadEgg
+            && mon->box.personality == battle->personality && mon->box.otId == battle->otId)
+            return GetNature(mon);
+    }
+    /* Simulated or stale battlers may not have a matching party entry. */
+    return GetNatureFromPersonality(battle->personality);
+#endif
 }

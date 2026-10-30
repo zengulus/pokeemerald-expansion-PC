@@ -638,3 +638,21 @@ gSpecials::
 	def_special UpdateTrainerCardPhotoIcons
 	def_special StickerManGetBragFlags
 	def_special CheckAddCoins
+	def_special ScriptedWildBattleAllowed
+	def_special ScriptGetSavedWeather
+	def_special ScriptRestoreEncounterWeather
+	def_special ScriptRemoveObjectWithoutFlag
+	def_special ScriptRestoreEncounterObject
+	def_special ScriptSnapshotMewEncounter
+	def_special ScriptRestoreMewEncounter
+	def_special ScriptRestoreDeoxysRockPalette
+	def_special PrepareMarowakBattle
+	def_special StartPreparedMarowakBattle
+	def_special PrepareWallyTutorialBattle
+	def_special PrepareOldManTutorialBattle
+	def_special StartPreparedTutorialBattle
+	def_special TutorialWildBattleAllowed
+	def_special RestorePlayerPartyAfterTutorialDenial
+.if ALLOCATE_SPECIAL_TABLE
+gSpecials_End::
+.endif

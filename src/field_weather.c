@@ -252,7 +252,11 @@ static void UpdateWeatherForms(void)
         enum Species targetSpecies = GetOverworldWeatherSpecies(species);
         if (species != targetSpecies)
         {
+#ifdef NATIVE
+            SetMonSpeciesWithOwnedReceipt(mon, &targetSpecies);
+#else
             SetMonData(mon, MON_DATA_SPECIES, &targetSpecies);
+#endif
             CalculateMonStats(mon);
         }
     }

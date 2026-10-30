@@ -51,7 +51,10 @@ NavelRock_Bottom_EventScript_Lugia::
 	playmoncry SPECIES_LUGIA, CRY_MODE_ENCOUNTER
 	waitmoncry
 	delay 20
+NavelRock_Bottom_EventScript_PrepareLugia::
+	identifywildencounter "rhh:encounter/navel_rock_bottom/lugia"
 	seteventmon SPECIES_LUGIA, 70
+	guardwildbattle release
 	setflag FLAG_SYS_CTRL_OBJ_DELETE
 	special BattleSetup_StartLegendaryBattle
 	clearflag FLAG_SYS_CTRL_OBJ_DELETE

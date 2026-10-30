@@ -1,4 +1,7 @@
 #include "global.h"
+#ifdef NATIVE
+#include "mods.h"
+#endif
 #include "follower_npc.h"
 #include "follower_npc_alternate_sprites.h"
 #include "battle.h"
@@ -1679,20 +1682,41 @@ bool32 IsNPCFollowerWildBattle(void)
     return FALSE;
 }
 
+static void PrepareFollowerSelectedParty(void)
+{
+    SavePlayerParty();
+    ChooseFirstThreeEligibleMons();
+#ifdef NATIVE
+    ModsOwnedFollowerPartyBegin(gSelectedOrderFromParty, MAX_FRONTIER_PARTY_SIZE);
+#endif
+    ReducePlayerPartyToSelectedMons();
+#ifdef NATIVE
+    ModsOwnedFollowerPartyPrepared();
+#endif
+    VarSet(VAR_0x8004, FRONTIER_UTIL_FUNC_SET_DATA);
+    VarSet(VAR_0x8005, FRONTIER_DATA_SELECTED_MON_ORDER);
+    CallFrontierUtilFunc();
+}
+static void RestoreFollowerSelectedParty(void)
+{
+#ifdef NATIVE
+    bool32 projected = ModsOwnedFollowerPartyActive();
+    if (projected) ModsOwnedFollowerPartyBeforeRestore(gSaveBlock2Ptr->frontier.selectedPartyMons, MAX_FRONTIER_PARTY_SIZE);
+#endif
+    VarSet(VAR_0x8004, FRONTIER_UTIL_FUNC_SAVE_PARTY);
+    CallFrontierUtilFunc();
+    LoadPlayerParty();
+#ifdef NATIVE
+    if (projected) ModsOwnedFollowerPartyAfterRestore();
+#endif
+}
 void PrepareForFollowerNPCBattle(void)
 {
     // Load the partner party if the NPC follower should participate.
     if (gBattleTypeFlags & BATTLE_TYPE_INGAME_PARTNER && FollowerNPCIsBattlePartner())
     {
         if (!AreMultiPartiesFullTeams())
-        {
-            SavePlayerParty();
-            ChooseFirstThreeEligibleMons();
-            ReducePlayerPartyToSelectedMons();
-            VarSet(VAR_0x8004, FRONTIER_UTIL_FUNC_SET_DATA);
-            VarSet(VAR_0x8005, FRONTIER_DATA_SELECTED_MON_ORDER);
-            CallFrontierUtilFunc();
-        }
+            PrepareFollowerSelectedParty();
         gPartnerTrainerId = TRAINER_PARTNER(GetFollowerNPCData(FNPC_DATA_BATTLE_PARTNER));
         FillPartnerParty(gPartnerTrainerId);
     }
@@ -1701,12 +1725,12 @@ void PrepareForFollowerNPCBattle(void)
 void RestorePartyAfterFollowerNPCBattle(void)
 {
     if (!AreMultiPartiesFullTeams())
-    {
-        VarSet(VAR_0x8004, FRONTIER_UTIL_FUNC_SAVE_PARTY);
-        CallFrontierUtilFunc();
-        LoadPlayerParty();
-    }
+        RestoreFollowerSelectedParty();
 }
+#if defined(NATIVE) && defined(RHH_OWNED_IDENTITY_TEST)
+void ModsOwnedFollowerTestPrepare(void) { PrepareFollowerSelectedParty(); }
+void ModsOwnedFollowerTestRestore(void) { RestoreFollowerSelectedParty(); }
+#endif
 
 void FollowerNPC_TryRemoveFollowerOnWhiteOut(void)
 {

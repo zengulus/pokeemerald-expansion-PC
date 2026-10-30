@@ -1,4 +1,7 @@
 #include "global.h"
+#ifdef NATIVE
+#include "mods.h"
+#endif
 #include "battle.h"
 #include "battle_set_effect.h"
 #include "battle_util.h"
@@ -100,6 +103,37 @@ static void HandleSetEffectFlinch(struct BattleCalcValues *cv, struct SetEffect 
     }
 }
 
+static void HandleSetEffectAbsorbAmount(struct BattleCalcValues *cv, struct SetEffect *se, s32 healAmount)
+{
+    healAmount = GetDrainedBigRootHp(cv->battlerAtk, healAmount);
+    gEffectBattler = cv->battlerAtk;
+    gBattlerAbility = gBattleScripting.battler = cv->battlerDef;
+
+    if (cv->abilities[cv->battlerDef] == ABILITY_LIQUID_OOZE
+     && (GetMoveEffect(cv->move)!= EFFECT_DREAM_EATER || GetConfig(B_DREAM_EATER_LIQUID_OOZE) >= GEN_5))
+    {
+        SetPassiveDamageAmount(cv->battlerAtk, healAmount);
+        gBattleCommunication[MULTISTRING_CHOOSER] = B_MSG_ABSORB_OOZE;
+        BattleScriptPush(se->script);
+        gBattlescriptCurrInstr = BattleScript_EffectAbsorbLiquidOoze;
+    }
+    else if (!IsBattlerAtMaxHp(cv->battlerAtk) || GetConfig(B_ABSORB_MESSAGE) < GEN_5)
+    {
+        SetHealAmount(cv->battlerAtk, healAmount);
+        gBattleCommunication[MULTISTRING_CHOOSER] = B_MSG_ABSORB;
+        BattleScriptPush(se->script);
+        gBattlescriptCurrInstr = BattleScript_EffectAbsorb;
+    }
+}
+#ifdef NATIVE
+void ModsApplyDrainAmount(struct BattleCalcValues *cv, const u8 *resume, s32 amount)
+{
+    struct SetEffect se = {.script = resume};
+    gBattlescriptCurrInstr = resume;
+    HandleSetEffectAbsorbAmount(cv, &se, amount);
+}
+#endif
+
 static void HandleSetEffectAbsorb(struct BattleCalcValues *cv, struct SetEffect *se)
 {
     if (gBattleStruct->moveDamage[cv->battlerDef] > 0
@@ -108,31 +142,13 @@ static void HandleSetEffectAbsorb(struct BattleCalcValues *cv, struct SetEffect 
     {
         u32 absorbPercentage = se->additionalEffect->argument.absorbPercentage;
 
-        assertf(absorbPercentage != 0, "Missing absorb percentage for %S", gMovesInfo[cv->move].name)
+        assertf(absorbPercentage != 0, "Missing absorb percentage for %S", GetMoveName(cv->move))
         {
             return;
         }
 
         s32 healAmount = (gBattleStruct->moveDamage[cv->battlerDef] * absorbPercentage / 100);
-        healAmount = GetDrainedBigRootHp(cv->battlerAtk, healAmount);
-        gEffectBattler = cv->battlerAtk;
-        gBattlerAbility = gBattleScripting.battler = cv->battlerDef;
-
-        if (cv->abilities[cv->battlerDef] == ABILITY_LIQUID_OOZE
-         && (GetMoveEffect(cv->move)!= EFFECT_DREAM_EATER || GetConfig(B_DREAM_EATER_LIQUID_OOZE) >= GEN_5))
-        {
-            SetPassiveDamageAmount(cv->battlerAtk, healAmount);
-            gBattleCommunication[MULTISTRING_CHOOSER] = B_MSG_ABSORB_OOZE;
-            BattleScriptPush(se->script);
-            gBattlescriptCurrInstr = BattleScript_EffectAbsorbLiquidOoze;
-        }
-        else if (!IsBattlerAtMaxHp(cv->battlerAtk) || GetConfig(B_ABSORB_MESSAGE) < GEN_5)
-        {
-            SetHealAmount(cv->battlerAtk, healAmount);
-            gBattleCommunication[MULTISTRING_CHOOSER] = B_MSG_ABSORB;
-            BattleScriptPush(se->script);
-            gBattlescriptCurrInstr = BattleScript_EffectAbsorb;
-        }
+        HandleSetEffectAbsorbAmount(cv, se, healAmount);
     }
 }
 
@@ -146,7 +162,7 @@ static void HandleSetEffectRandomFromList(struct BattleCalcValues *cv, struct Se
         validEffectCount++;
     }
 
-    assertf(validEffectCount != 0, "Missing or empty randomMoveEffects array for move %S", gMovesInfo[gCurrentMove].name)
+    assertf(validEffectCount != 0, "Missing or empty randomMoveEffects array for move %S", GetMoveName(gCurrentMove))
     {
         return;
     }
@@ -706,9 +722,16 @@ static void HandleSetEffectIonDeluge(struct BattleCalcValues *cv, struct SetEffe
 {
     if (!(gFieldStatuses & STATUS_FIELD_ION_DELUGE))
     {
+#ifdef NATIVE
+        struct RhhBattleFieldRules before;
+        bool32 captured = ModsBattleFieldRulesCapture(&before);
+#endif
         gFieldStatuses |= STATUS_FIELD_ION_DELUGE;
         BattleScriptPush(se->script);
         gBattlescriptCurrInstr = BattleScript_MoveEffectIonDeluge;
+#ifdef NATIVE
+        if (captured) ModsBattleFieldRulesCommitted(&before, RHH_BATTLE_FIELD_CAUSE_MOVE, cv->battlerAtk, cv->move);
+#endif
     }
 }
 
@@ -948,7 +971,7 @@ static void HandleSetEffectWeather(struct BattleCalcValues *cv, struct SetEffect
     default:
         break;
     }
-    if (TryChangeBattleWeather(cv->battlerAtk, weather, ABILITY_NONE) == WEATHER_FAILURE_SUCCESS)
+    if (TryChangeBattleWeatherFromMove(cv->battlerAtk, weather, cv->move) == WEATHER_FAILURE_SUCCESS)
     {
         gBattleCommunication[MULTISTRING_CHOOSER] = msg;
         BattleScriptPush(se->script);
@@ -980,7 +1003,7 @@ static void HandleSetEffectTerrain(struct BattleCalcValues *cv, struct SetEffect
     default:
         break;
     }
-    if (TryChangeBattleTerrain(cv->battlerAtk, terrain))
+    if (TryChangeBattleTerrainFromMove(cv->battlerAtk, terrain, cv->move))
     {
         BattleScriptPush(se->script);
         gBattlescriptCurrInstr = BattleScript_MoveEffectSetTerrain;
@@ -1123,10 +1146,17 @@ static void HandleSetEffectGravity(struct BattleCalcValues *cv, struct SetEffect
 {
     if (!(gFieldStatuses & STATUS_FIELD_GRAVITY))
     {
+#ifdef NATIVE
+        struct RhhBattleFieldRules before;
+        bool32 captured = ModsBattleFieldRulesCapture(&before);
+#endif
         gFieldStatuses |= STATUS_FIELD_GRAVITY;
         gFieldTimers.gravityTimer = 5;
         BattleScriptPush(se->script);
         gBattlescriptCurrInstr = BattleScript_MoveEffectGravity;
+#ifdef NATIVE
+        if (captured) ModsBattleFieldRulesCommitted(&before, RHH_BATTLE_FIELD_CAUSE_MOVE, cv->battlerAtk, cv->move);
+#endif
     }
 }
 

@@ -6,6 +6,10 @@
 #include "battle_dome.h"
 #include "battle_interface.h"
 #include "battle_message.h"
+#include "battle_main.h"
+#ifdef NATIVE
+#include "mods.h"
+#endif
 #include "battle_setup.h"
 #include "battle_tv.h"
 #include "battle_z_move.h"
@@ -1694,13 +1698,9 @@ static void MoveSelectionDisplayPPNumber(enum BattlerId battler)
     BattlePutTextOnWindow(gDisplayedStringBattle, B_WIN_PP_REMAINING);
 }
 
-static void MoveSelectionDisplayMoveType(enum BattlerId battler)
+static enum Type MoveSelectionDisplayedType(enum BattlerId battler, enum Move move)
 {
-    u8 *txtPtr, *end;
     enum Species speciesId = gBattleMons[battler].species;
-    struct ChooseMoveStruct *moveInfo = (struct ChooseMoveStruct *)(&gBattleResources->bufferA[battler][4]);
-    txtPtr = StringCopy(gDisplayedStringBattle, gText_MoveInterfaceType);
-    enum Move move = moveInfo->moves[gMoveSelectionCursor[battler]];
     enum Type type = GetMoveType(move);
     enum BattleMoveEffects effect = GetMoveEffect(move);
 
@@ -1714,7 +1714,11 @@ static void MoveSelectionDisplayMoveType(enum BattlerId battler)
         if (speciesId == SPECIES_OGERPON_WELLSPRING || speciesId == SPECIES_OGERPON_WELLSPRING_TERA
          || speciesId == SPECIES_OGERPON_HEARTHFLAME || speciesId == SPECIES_OGERPON_HEARTHFLAME_TERA
          || speciesId == SPECIES_OGERPON_CORNERSTONE || speciesId == SPECIES_OGERPON_CORNERSTONE_TERA)
-            type = GetSpeciesType(speciesId, 1);
+        {
+            enum Type types[3];
+            GetSpeciesTypes(speciesId, types);
+            type = types[1];
+        }
     }
     else if (GetMoveCategory(move) == DAMAGE_CATEGORY_STATUS
              && (GetActiveGimmick(battler) == GIMMICK_DYNAMAX || IsGimmickSelected(battler, GIMMICK_DYNAMAX)))
@@ -1732,7 +1736,37 @@ static void MoveSelectionDisplayMoveType(enum BattlerId battler)
         struct Pokemon *mon = GetBattlerMon(battler);
         type = CheckDynamicMoveType(mon, move, battler, MON_IN_BATTLE);
     }
-    end = StringCopy(txtPtr, gTypesInfo[type].name);
+#ifdef NATIVE
+    if (GetMoveCategory(move) != DAMAGE_CATEGORY_STATUS
+        && (GetActiveGimmick(battler) == GIMMICK_DYNAMAX || IsGimmickSelected(battler, GIMMICK_DYNAMAX)))
+    {
+        enum Type resolved = GetMaxMoveSourceType(battler, move);
+        if (ModsCustomTypeName(GetMoveType(move), FALSE) || ModsCustomTypeName(resolved, FALSE)) type = resolved;
+    }
+    if (!P_SHOW_DYNAMIC_TYPES && (effect == EFFECT_REVELATION_DANCE || effect == EFFECT_RAGING_BULL))
+    {
+        enum Type dynamic = CheckDynamicMoveType(GetBattlerMon(battler), move, battler, MON_IN_BATTLE);
+        if (ModsCustomTypeName(dynamic, FALSE)) type = dynamic;
+    }
+#endif
+    return type;
+}
+
+#if defined(NATIVE) && defined(RHH_BATTLE_TYPE_ICON_TEST)
+enum Type RhhTestMoveSelectionType(enum BattlerId battler, enum Move move)
+{
+    return MoveSelectionDisplayedType(battler, move);
+}
+#endif
+
+static void MoveSelectionDisplayMoveType(enum BattlerId battler)
+{
+    struct ChooseMoveStruct *moveInfo = (struct ChooseMoveStruct *)(&gBattleResources->bufferA[battler][4]);
+    enum Move move = moveInfo->moves[gMoveSelectionCursor[battler]];
+    enum Type type = MoveSelectionDisplayedType(battler, move);
+    u8 *txtPtr = StringCopy(gDisplayedStringBattle, gText_MoveInterfaceType);
+    u8 *end;
+    end = StringCopy(txtPtr, GetTypeName(type));
 
     PrependFontIdToFit(txtPtr, end, FONT_NORMAL, WindowWidthPx(B_WIN_MOVE_TYPE) - 25);
     BattlePutTextOnWindow(gDisplayedStringBattle, B_WIN_MOVE_TYPE);

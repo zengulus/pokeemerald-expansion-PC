@@ -5389,7 +5389,7 @@ static void SetMoveSpecificAnimData(u8 contestant)
     switch (move)
     {
     case MOVE_CURSE:
-        if (GetSpeciesType(species, 0) == TYPE_GHOST || GetSpeciesType(species, 1) == TYPE_GHOST)
+        if (IsSpeciesOfType(species, TYPE_GHOST))
             gAnimMoveTurn = 0;
         else
             gAnimMoveTurn = 1;
@@ -5426,6 +5426,9 @@ static void SetMoveSpecificAnimData(u8 contestant)
     }
     SetBattleTargetSpritePosition();
 }
+#if defined(NATIVE) && defined(RHH_CONTEST_TYPE_TEST)
+void ModsContestTestSelectMove(u8 contestant) { SetMoveSpecificAnimData(contestant); }
+#endif
 
 static void ClearMoveAnimData(u8 contestant)
 {

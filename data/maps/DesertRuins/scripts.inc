@@ -61,7 +61,9 @@ DesertRuins_EventScript_Regirock::
 	playmoncry SPECIES_REGIROCK, CRY_MODE_ENCOUNTER
 	delay 40
 	waitmoncry
+	identifywildencounter "rhh:encounter/desert_ruins/regirock"
 	setwildbattle SPECIES_REGIROCK, 40
+	guardwildbattle release
 	setflag FLAG_SYS_CTRL_OBJ_DELETE
 	special StartRegiBattle
 	clearflag FLAG_SYS_CTRL_OBJ_DELETE

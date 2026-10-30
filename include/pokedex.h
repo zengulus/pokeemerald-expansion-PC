@@ -25,5 +25,6 @@ void PrintMonMeasurements(enum Species species, u32 owned);
 u8* ConvertMonHeightToString(u32 height);
 u8* ConvertMonWeightToString(u32 weight);
 bool32 ShouldSkipPokedexListEntry(enum NationalDexOrder dexNum);
+bool32 PokedexSpeciesMatchesTypes(enum Species species, enum Type type1, enum Type type2);
 
 #endif // GUARD_POKEDEX_H

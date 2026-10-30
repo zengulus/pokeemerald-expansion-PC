@@ -38,6 +38,7 @@ else
 $(error Unsupported TARGET $(TARGET))
 endif
 CC := $(PREFIX)gcc
+CXX := $(PREFIX)g++
 CPP := $(CC) -E
 AS := $(PREFIX)as
 OBJCOPY := $(PREFIX)objcopy
@@ -97,9 +98,46 @@ SCRIPT_METADATA_OBJ := $(OBJ_DIR)/script_metadata.o
 SCRIPT_METADATA_DEPS := $(wildcard asm/macros/*.inc data/*.inc data/scripts/*.inc)
 OBJS += $(SCRIPT_METADATA_OBJ)
 
+# The Game Boy music player is a separate LGPL library, so it can be replaced
+# or rebuilt independently of the game executable. Only its GBS backend is built.
+GME_NAMES := Blip_Buffer Classic_Emu Data_Reader Dual_Resampler Effects_Buffer Fir_Resampler gme Gme_File M3u_Playlist Multi_Buffer Music_Emu Gb_Apu Gb_Cpu Gb_Oscs Gbs_Emu
+GME_OBJS := $(addprefix $(OBJ_DIR)/third_party/gme/,$(addsuffix .o,$(GME_NAMES)))
+ifneq ($(filter windows32 windows64,$(TARGET)),)
+GME_LIBRARY := $(OBJ_DIR)/rhhgme.dll
+GME_SHARED_FLAGS := -shared -static-libgcc -static-libstdc++ -Wl,--no-insert-timestamp
+GME_LINK := $(GME_LIBRARY)
+else
+GME_LIBRARY := $(OBJ_DIR)/librhhgme.so
+GME_SHARED_FLAGS := -shared -Wl,-soname,librhhgme.so
+GME_LINK := -L$(OBJ_DIR) -lrhhgme -Wl,-rpath,'$$ORIGIN'
+endif
+
+$(OBJ_DIR)/third_party/gme/%.o: native/third_party/gme/%.cpp $(wildcard native/third_party/gme/*.h) Makefile.native
+	@mkdir -p $(@D)
+	$(CXX) -m$(BITS) -std=gnu++11 -O2 -g -fPIC -ffile-prefix-map=$(CURDIR)=. -DBLARGG_BUILD_DLL -c $< -o $@
+
+$(GME_LIBRARY): $(GME_OBJS)
+	$(CXX) -m$(BITS) $(GME_SHARED_FLAGS) -o $@ $^
+
 $(OBJ_DIR)/mod_content.inc: native/generate_mod_content.py $(wildcard include/constants/*.h)
 	python3 $< --output $@
 $(OBJ_DIR)/native/mod_game.o: $(OBJ_DIR)/mod_content.inc
+
+$(OBJ_DIR)/authored_object_frames.inc: native/generate_object_frame_counts.py src/data/object_events/object_event_pic_tables.h
+	python3 $< --output $@
+$(OBJ_DIR)/src/event_object_movement.o: $(OBJ_DIR)/authored_object_frames.inc
+
+$(OBJ_DIR)/berry_object_frames.inc: native/generate_object_frame_counts.py src/data/object_events/berry_tree_graphics_tables.h
+	python3 $< --source src/data/object_events/berry_tree_graphics_tables.h --output $@
+$(OBJ_DIR)/src/event_object_movement.o: $(OBJ_DIR)/berry_object_frames.inc
+
+$(OBJ_DIR)/authored_object_anims.inc: native/generate_object_anim_counts.py src/data/object_events/object_event_anims.h
+	python3 $< --output $@
+$(OBJ_DIR)/src/event_object_movement.o: $(OBJ_DIR)/authored_object_anims.inc
+
+$(OBJ_DIR)/pokemon_icon_bounds.inc: native/generate_pokemon_icon_bounds.py src/data/graphics/pokemon.h
+	python3 $< --output $@
+$(OBJ_DIR)/src/pokemon.o: $(OBJ_DIR)/pokemon_icon_bounds.inc
 
 $(SCRIPT_METADATA): native/generate_script_metadata.py $(SCRIPT_METADATA_DEPS) $(C_OBJS)
 	python3 $< --nm $(PREFIX)nm $(if $(filter windows32,$(TARGET)),--windows) --output $@ $(C_OBJS)
@@ -117,7 +155,7 @@ $(OBJ_DIR)/config: config-force
 $(OBJS): $(OBJ_DIR)/config
 $(DATA_OBJS) $(MID_OBJS): native/asm_filter.py Makefile.native
 
-.PHONY: all prepare objects check gameplay-tests
+.PHONY: all prepare objects check gameplay-tests trainer-source-tests owned-identity-tests contest-type-tests environment-gallery clean-test-builds
 all: $(GAME) $(SDL_DLL) $(OBJ_DIR)/music/manifest.json
 EXAMPLE_MOD_SRCS := $(wildcard native/mods/*.c)
 ifneq ($(filter windows32 windows64,$(TARGET)),)
@@ -131,32 +169,98 @@ EXAMPLE_MOD_LIBS := $(patsubst native/mods/%.c,$(OBJ_DIR)/example-mods/%$(MOD_SU
 .PHONY: example-mods
 all: example-mods
 example-mods: $(EXAMPLE_MOD_LIBS)
+native/mods/battle_environment_shader.h: native/mods/battle_environment.frag native/generate_shader.py
+	python3 native/generate_shader.py
+$(OBJ_DIR)/native/mods/battle_environment.o $(OBJ_DIR)/example-mods/battle_environment$(MOD_SUFFIX): native/mods/battle_environment_shader.h
 $(OBJ_DIR)/example-mods/%$(MOD_SUFFIX): native/mods/%.c native/mods/common.h include/mod_api.h $(OBJ_DIR)/config
 	@mkdir -p $(@D)
 	$(CC) -m$(BITS) -std=gnu17 -O2 -ffile-prefix-map=$(CURDIR)=. -Wall -Wextra -Werror -iquote include -DRHH_MOD_SHARED $(MOD_SHARED_FLAGS) $< -o $@
-$(OBJ_DIR)/music/manifest.json: native/copy_battle_music.py $(wildcard native/assets/music/*/*.mid native/assets/music/fonts/*.sf2 native/assets/music/manifest.json)
+$(OBJ_DIR)/music/manifest.json: native/copy_battle_music.py $(wildcard native/assets/music/*/*.mid native/assets/music/fonts/*.sf2 native/assets/music/gameboy/*.gbs native/assets/music/manifest.json)
 	python3 native/copy_battle_music.py $(OBJ_DIR)/music
 objects: $(C_OBJS) $(NATIVE_OBJS)
 check:
 	python3 native/tests/run.py --target $(TARGET)
 gameplay-tests: $(OBJ_DIR)/gameplay-tests$(SUFFIX)
+clean-test-builds:
+	rm -f $(OBJ_DIR)/gameplay-tests$(SUFFIX) $(OBJ_DIR)/environment-gallery$(SUFFIX) \
+	  $(OBJ_DIR)/trainer-source-tests$(SUFFIX) \
+	  $(OBJ_DIR)/owned-identity-tests$(SUFFIX) \
+	  $(OBJ_DIR)/contest-type-tests$(SUFFIX) $(OBJ_DIR)/native/contest-type-contest.o $(OBJ_DIR)/native/contest-type-test.o $(OBJ_DIR)/native/contest-type-test.d \
+	  $(OBJ_DIR)/native/trainer-source-gameplay.o $(OBJ_DIR)/native/trainer-source-gameplay.d \
+	  $(OBJ_DIR)/native/trainer-source-battle-setup.o $(OBJ_DIR)/native/trainer-source-mod-battle.o $(OBJ_DIR)/native/trainer-source-mod-battle.d \
+	  $(OBJ_DIR)/native/owned-identity-gameplay.o $(OBJ_DIR)/native/owned-identity-gameplay.d $(OBJ_DIR)/native/owned-identity-storage.o $(OBJ_DIR)/native/owned-identity-party.o $(OBJ_DIR)/native/owned-identity-battle-commands.o $(OBJ_DIR)/native/owned-identity-battle-setup.o $(OBJ_DIR)/native/owned-identity-follower.o $(OBJ_DIR)/native/owned-identity-trade.o $(OBJ_DIR)/native/owned-identity-evolution.o $(OBJ_DIR)/native/owned-identity-tracker.o $(OBJ_DIR)/native/owned-identity-tracker.d \
+	  $(OBJ_DIR)/native/platform-test.o $(OBJ_DIR)/native/platform-test.d \
+	  $(OBJ_DIR)/native/gameplay-test.o $(OBJ_DIR)/native/gameplay-test.d
+environment-gallery: $(OBJ_DIR)/environment-gallery$(SUFFIX)
+$(OBJ_DIR)/environment-gallery$(SUFFIX): native/tests/environment_gallery.c native/include/battle_shader.h $(OBJ_DIR)/native/shader_renderer.o $(OBJ_DIR)/native/mod_host.o $(OBJ_DIR)/native/mods/battle_environment.o
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) -o $@ $(filter %.c %.o,$^) $(SDL_LIBS) -lm
 
 $(OBJ_DIR)/native/platform-test.o: native/platform.c $(OBJ_DIR)/config Makefile.native
-	$(CC) $(CPPFLAGS) $(CFLAGS) -MMD -MP -Dmain=NativePlatformMain -c $< -o $@
+	$(CC) $(CPPFLAGS) $(CFLAGS) -MMD -MP -DSDL_MAIN_HANDLED -Dmain=NativePlatformMain -c $< -o $@
 
 $(OBJ_DIR)/native/gameplay-test.o: native/tests/gameplay_test.c $(OBJ_DIR)/config Makefile.native
 	$(CC) $(CPPFLAGS) $(CFLAGS) -MMD -MP -c $< -o $@
 
-$(OBJ_DIR)/gameplay-tests$(SUFFIX): $(filter-out $(OBJ_DIR)/native/platform.o,$(OBJS)) $(OBJ_DIR)/native/platform-test.o $(OBJ_DIR)/native/gameplay-test.o
-	$(CC) $(LDFLAGS) -o $@ $^ $(SDL_LIBS) -lm
+$(OBJ_DIR)/gameplay-tests$(SUFFIX): $(filter-out $(OBJ_DIR)/native/platform.o,$(OBJS)) $(OBJ_DIR)/native/platform-test.o $(OBJ_DIR)/native/gameplay-test.o $(GME_LIBRARY)
+	$(CC) $(LDFLAGS) -o $@ $(filter %.o,$^) $(SDL_LIBS) $(GME_LINK) -lm
+trainer-source-tests: $(OBJ_DIR)/trainer-source-tests$(SUFFIX)
+owned-identity-tests: $(OBJ_DIR)/owned-identity-tests$(SUFFIX)
+contest-type-tests: $(OBJ_DIR)/contest-type-tests$(SUFFIX)
+$(OBJ_DIR)/native/contest-type-contest.o: src/contest.c $(OBJ_DIR)/config Makefile.native
+	@mkdir -p $(@D)
+	@$(CPP) -m$(BITS) $(CPPFLAGS) -DRHH_CONTEST_TYPE_TEST $< | $(PREPROC) -ni -g $(ASSETS_DIR_NAME) $< charmap.txt | $(CC) $(CFLAGS) -x cpp-output -c - -o $@
+$(OBJ_DIR)/native/contest-type-test.o: native/tests/contest_type_test.c $(OBJ_DIR)/config Makefile.native
+	@mkdir -p $(@D)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -MMD -MP -c $< -o $@
+$(OBJ_DIR)/contest-type-tests$(SUFFIX): $(filter-out $(OBJ_DIR)/native/platform.o $(OBJ_DIR)/src/contest.o,$(OBJS)) $(OBJ_DIR)/native/platform-test.o $(OBJ_DIR)/native/contest-type-contest.o $(OBJ_DIR)/native/contest-type-test.o $(GME_LIBRARY)
+	$(CC) $(LDFLAGS) -o $@ $(filter %.o,$^) $(SDL_LIBS) $(GME_LINK) -lm
+$(OBJ_DIR)/native/owned-identity-storage.o: src/pokemon_storage_system.c $(OBJ_DIR)/config Makefile.native
+	@mkdir -p $(@D)
+	@$(CPP) -m$(BITS) $(CPPFLAGS) -DRHH_OWNED_IDENTITY_TEST $< | $(PREPROC) -ni -g $(ASSETS_DIR_NAME) $< charmap.txt | $(CC) $(CFLAGS) -x cpp-output -c - -o $@
+$(OBJ_DIR)/native/owned-identity-party.o: src/party_menu.c $(OBJ_DIR)/config Makefile.native
+	@mkdir -p $(@D)
+	@$(CPP) -m$(BITS) $(CPPFLAGS) -DRHH_OWNED_IDENTITY_TEST $< | $(PREPROC) -ni -g $(ASSETS_DIR_NAME) $< charmap.txt | $(CC) $(CFLAGS) -x cpp-output -c - -o $@
+$(OBJ_DIR)/native/owned-identity-battle-commands.o: src/battle_script_commands.c $(OBJ_DIR)/config Makefile.native
+	@mkdir -p $(@D)
+	@$(CPP) -m$(BITS) $(CPPFLAGS) -DRHH_OWNED_IDENTITY_TEST $< | $(PREPROC) -ni -g $(ASSETS_DIR_NAME) $< charmap.txt | $(CC) $(CFLAGS) -x cpp-output -c - -o $@
+$(OBJ_DIR)/native/owned-identity-battle-setup.o: src/battle_setup.c $(OBJ_DIR)/config Makefile.native
+	@mkdir -p $(@D)
+	@$(CPP) -m$(BITS) $(CPPFLAGS) -DRHH_OWNED_IDENTITY_TEST $< | $(PREPROC) -ni -g $(ASSETS_DIR_NAME) $< charmap.txt | $(CC) $(CFLAGS) -x cpp-output -c - -o $@
+$(OBJ_DIR)/native/owned-identity-follower.o: src/follower_npc.c $(OBJ_DIR)/config Makefile.native
+	@mkdir -p $(@D)
+	@$(CPP) -m$(BITS) $(CPPFLAGS) -DRHH_OWNED_IDENTITY_TEST $< | $(PREPROC) -ni -g $(ASSETS_DIR_NAME) $< charmap.txt | $(CC) $(CFLAGS) -x cpp-output -c - -o $@
+$(OBJ_DIR)/native/owned-identity-trade.o: src/trade.c $(OBJ_DIR)/config Makefile.native
+	@mkdir -p $(@D)
+	@$(CPP) -m$(BITS) $(CPPFLAGS) -DRHH_OWNED_IDENTITY_TEST $< | $(PREPROC) -ni -g $(ASSETS_DIR_NAME) $< charmap.txt | $(CC) $(CFLAGS) -x cpp-output -c - -o $@
+$(OBJ_DIR)/native/owned-identity-evolution.o: src/evolution_scene.c $(OBJ_DIR)/config Makefile.native
+	@mkdir -p $(@D)
+	@$(CPP) -m$(BITS) $(CPPFLAGS) -DRHH_OWNED_IDENTITY_TEST $< | $(PREPROC) -ni -g $(ASSETS_DIR_NAME) $< charmap.txt | $(CC) $(CFLAGS) -x cpp-output -c - -o $@
+$(OBJ_DIR)/native/owned-identity-factory.o: src/battle_factory_screen.c $(OBJ_DIR)/config Makefile.native
+	@mkdir -p $(@D)
+	@$(CPP) -m$(BITS) $(CPPFLAGS) -DRHH_OWNED_IDENTITY_TEST $< | $(PREPROC) -ni -g $(ASSETS_DIR_NAME) $< charmap.txt | $(CC) $(CFLAGS) -x cpp-output -c - -o $@
+$(OBJ_DIR)/native/owned-identity-gameplay.o: native/tests/gameplay_test.c $(OBJ_DIR)/config Makefile.native
+	$(CC) $(CPPFLAGS) $(CFLAGS) -MMD -MP -DRHH_OWNED_IDENTITY_TEST -c $< -o $@
+$(OBJ_DIR)/native/owned-identity-tracker.o: native/owned_identity_pc.c $(OBJ_DIR)/config Makefile.native
+	$(CC) $(CPPFLAGS) $(CFLAGS) -MMD -MP -DRHH_OWNED_IDENTITY_TEST -c $< -o $@
+$(OBJ_DIR)/owned-identity-tests$(SUFFIX): $(filter-out $(OBJ_DIR)/native/platform.o $(OBJ_DIR)/native/owned_identity_pc.o $(OBJ_DIR)/src/pokemon_storage_system.o $(OBJ_DIR)/src/party_menu.o $(OBJ_DIR)/src/battle_script_commands.o $(OBJ_DIR)/src/battle_setup.o $(OBJ_DIR)/src/follower_npc.o $(OBJ_DIR)/src/trade.o $(OBJ_DIR)/src/evolution_scene.o $(OBJ_DIR)/src/battle_factory_screen.o,$(OBJS)) $(OBJ_DIR)/native/platform-test.o $(OBJ_DIR)/native/owned-identity-storage.o $(OBJ_DIR)/native/owned-identity-party.o $(OBJ_DIR)/native/owned-identity-battle-commands.o $(OBJ_DIR)/native/owned-identity-battle-setup.o $(OBJ_DIR)/native/owned-identity-follower.o $(OBJ_DIR)/native/owned-identity-trade.o $(OBJ_DIR)/native/owned-identity-evolution.o $(OBJ_DIR)/native/owned-identity-factory.o $(OBJ_DIR)/native/owned-identity-tracker.o $(OBJ_DIR)/native/owned-identity-gameplay.o $(GME_LIBRARY)
+	$(CC) $(LDFLAGS) -o $@ $(filter %.o,$^) $(SDL_LIBS) $(GME_LINK) -lm
+$(OBJ_DIR)/native/trainer-source-battle-setup.o: src/battle_setup.c $(OBJ_DIR)/config Makefile.native
+	@mkdir -p $(@D)
+	@$(CPP) -m$(BITS) $(CPPFLAGS) -DRHH_TRAINER_SOURCE_TEST $< | $(PREPROC) -ni -g $(ASSETS_DIR_NAME) $< charmap.txt | $(CC) $(CFLAGS) -x cpp-output -c - -o $@
+$(OBJ_DIR)/native/trainer-source-gameplay.o: native/tests/gameplay_test.c $(OBJ_DIR)/config Makefile.native
+	$(CC) $(CPPFLAGS) $(CFLAGS) -MMD -MP -DRHH_TRAINER_SOURCE_TEST -c $< -o $@
+$(OBJ_DIR)/native/trainer-source-mod-battle.o: native/mod_battle.c $(OBJ_DIR)/config Makefile.native
+	$(CC) $(CPPFLAGS) $(CFLAGS) -MMD -MP -DRHH_TRAINER_SOURCE_TEST -c $< -o $@
+$(OBJ_DIR)/trainer-source-tests$(SUFFIX): $(filter-out $(OBJ_DIR)/native/platform.o $(OBJ_DIR)/native/mod_battle.o $(OBJ_DIR)/src/battle_setup.o,$(OBJS)) $(OBJ_DIR)/native/platform-test.o $(OBJ_DIR)/native/trainer-source-battle-setup.o $(OBJ_DIR)/native/trainer-source-mod-battle.o $(OBJ_DIR)/native/trainer-source-gameplay.o $(GME_LIBRARY)
+	$(CC) $(LDFLAGS) -o $@ $(filter %.o,$^) $(SDL_LIBS) $(GME_LINK) -lm
 prepare:
 	$(MAKE) -f make_tools.mk $(patsubst %/,%,$(sort $(dir $(GFX) $(PREPROC) $(SCANINC) $(MID) $(WAV2AGB) $(SMOL) $(JSONPROC) $(MAPJSON) $(TRAINERPROC))))
 	$(MAKE) NODEP=1 SETUP_PREREQS=0 NATIVE_ASSETS=1 generated
 	$(MAKE) NODEP=1 SETUP_PREREQS=0 NATIVE_ASSETS=1 src/data/pokemon/teachable_learnsets.h src/data/tutor_moves.h
 
-$(GAME): $(OBJS)
+$(GAME): $(OBJS) $(GME_LIBRARY)
 	@echo "NATIVE LINK $@"
-	@$(CC) $(LDFLAGS) -o $@ $^ $(SDL_LIBS) -lm
+	@$(CC) $(LDFLAGS) -o $@ $(filter %.o,$^) $(SDL_LIBS) $(GME_LINK) -lm
 
 ifneq ($(filter windows32 windows64,$(TARGET)),)
 $(SDL_DLL): $(SDL2_ROOT)/bin/SDL2.dll
@@ -172,6 +276,22 @@ $(OBJ_DIR)/src/%.o: src/%.c
 $(OBJ_DIR)/native/%.o: native/%.c
 	@mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -MMD -MP -c $< -o $@
+
+# The Linux picker dynamically loads D-Bus; builds without development
+# headers still work and report the desktop picker as unavailable.
+ifneq ($(filter linux32 linux64,$(TARGET)),)
+DBUS_PICKER_CFLAGS := $(shell pkg-config --cflags dbus-1 2>/dev/null)
+ifneq ($(DBUS_PICKER_CFLAGS),)
+ifeq ($(TARGET),linux32)
+ifneq ($(wildcard /usr/lib/i386-linux-gnu/dbus-1.0/include/dbus/dbus-arch-deps.h),)
+DBUS_PICKER_CFLAGS := $(subst /usr/lib/x86_64-linux-gnu/dbus-1.0/include,/usr/lib/i386-linux-gnu/dbus-1.0/include,$(DBUS_PICKER_CFLAGS))
+endif
+endif
+$(OBJ_DIR)/native/mod_file_dialog.o: native/mod_file_dialog.c
+	@mkdir -p $(@D)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(DBUS_PICKER_CFLAGS) -DRHH_HAVE_DBUS_PICKER -MMD -MP -c $< -o $@
+endif
+endif
 
 $(OBJ_DIR)/src/%.d: src/%.c
 	@mkdir -p $(@D)
@@ -233,7 +353,9 @@ $(SONG_BUILDDIR)/%.o: $(SONG_SUBDIR)/%.s
 ifeq ($(filter prepare,$(MAKECMDGOALS)),)
 ifneq ($(NODEP),1)
 -include $(C_OBJS:.o=.d) $(DATA_OBJS:.o=.d) $(NATIVE_OBJS:.o=.d)
--include $(OBJ_DIR)/native/platform-test.d $(OBJ_DIR)/native/gameplay-test.d
+-include $(OBJ_DIR)/native/platform-test.d $(OBJ_DIR)/native/gameplay-test.d \
+    $(OBJ_DIR)/native/trainer-source-gameplay.d $(OBJ_DIR)/native/trainer-source-mod-battle.d \
+    $(OBJ_DIR)/native/owned-identity-gameplay.d $(OBJ_DIR)/native/owned-identity-tracker.d
 endif
 endif
 .DELETE_ON_ERROR:

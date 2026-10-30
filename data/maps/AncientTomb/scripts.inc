@@ -61,7 +61,9 @@ AncientTomb_EventScript_Registeel::
 	playmoncry SPECIES_REGISTEEL, CRY_MODE_ENCOUNTER
 	delay 40
 	waitmoncry
+	identifywildencounter "rhh:encounter/ancient_tomb/registeel"
 	setwildbattle SPECIES_REGISTEEL, 40
+	guardwildbattle release
 	setflag FLAG_SYS_CTRL_OBJ_DELETE
 	special StartRegiBattle
 	clearflag FLAG_SYS_CTRL_OBJ_DELETE

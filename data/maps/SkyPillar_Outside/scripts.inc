@@ -163,7 +163,7 @@ SkyPillar_Outside_Text_GotToGoBackForSootopolis:
 	.string "{PLAYER}{KUN}.\p"
 	.string "RAYQUAZA should be farther up\n"
 	.string "from here.\p"
-	.string "I'm worried about SOOTOPOLIS.\n"
+	.string "I'm worried about Sootopolis.\n"
 	.string "I've got to go back.\p"
 	.string "Everything is in your hands now.\n"
 	.string "Don't fail us!$"

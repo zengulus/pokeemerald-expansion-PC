@@ -140,13 +140,13 @@ CinnabarIsland_PokemonCenter_1F_Movement_PlayerExitWest::
 	step_end
 
 CinnabarIsland_PokemonCenter_1F_Text_CinnabarGymLocked::
-	.string "I came to visit the CINNABAR GYM,\n"
+	.string "I came to visit the CINNABAR Gym,\n"
 	.string "but the door is locked tight.\p"
 	.string "There should be a key for it\n"
 	.string "somewhere.\p"
 	.string "Could it be in that burned-out\n"
 	.string "mansion?\p"
-	.string "The GYM LEADER's friend used to\n"
+	.string "The Gym Leader's friend used to\n"
 	.string "live there, they say.$"
 
 CinnabarIsland_PokemonCenter_1F_Text_VisitUnionRoom::
@@ -161,7 +161,7 @@ CinnabarIsland_PokemonCenter_1F_Text_VisitUnionRoom::
 	.string "to check the UNION ROOM.$"
 
 CinnabarIsland_PokemonCenter_1F_Text_EvolutionCanWaitForNewMoves::
-	.string "POKéMON can still learn techniques\n"
+	.string "Pokémon can still learn techniques\n"
 	.string "after canceling evolution.\p"
 	.string "Evolution can wait until new moves\n"
 	.string "have been learned.$"

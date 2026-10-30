@@ -8,6 +8,8 @@ const struct Trainer* GetDebugAiTrainer(void);
 
 void DebugNative_GetAbilityNames(void);
 void DebugNative_Party_SetFriendship(void);
+struct BoxPokemon;
+bool32 DebugStoreBoxMon(u32 box, u32 position, struct BoxPokemon *mon);
 
 extern EWRAM_DATA bool8 gIsDebugBattle;
 extern EWRAM_DATA u64 gDebugAIFlags;

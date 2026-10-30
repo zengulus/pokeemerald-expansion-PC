@@ -44,7 +44,7 @@ Route110_TrickHousePuzzle4_Text_CoraDefeat:
 
 Route110_TrickHousePuzzle4_Text_CoraPostBattle:
 	.string "Wouldn't you agree? You would go\n"
-	.string "anywhere if TRAINERS were there.$"
+	.string "anywhere if Trainers were there.$"
 
 Route110_TrickHousePuzzle4_Text_YujiIntro:
 	.string "Heh! Boulders like this, I can brush\n"

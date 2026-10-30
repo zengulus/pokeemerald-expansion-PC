@@ -18,7 +18,7 @@ static void Music(const struct RhhModEvent *event, const void *state, struct Rhh
     }
 }
 static const struct RhhModSetting sSettings[] = {{sizeof(struct RhhModSetting), RHH_SETTING_CHOICE,
-    RHH_SETTING_RUNTIME, 0, "style", "Battle music", "MIDI and SoundFont music for Generations I-V.", 0, 5, 6, 0, sChoices}};
+    RHH_SETTING_RUNTIME, 0, "style", "Battle music", "Battle music styles from Generations I-V.", 0, 5, 6, 0, sChoices}};
 static const struct RhhModHook sHooks[] = {REDUCER(RHH_BATTLE_MUSIC, RHH_TRANSFORM, 0, Music)};
 static const struct RhhModDefinition sMod = {
     .struct_size = sizeof(sMod), .abi_version = RHH_MOD_ABI_V1, .mod_version = 1, .state_schema = 1,

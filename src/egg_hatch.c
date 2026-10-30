@@ -37,6 +37,9 @@
 #include "battle.h" // to get rid of later
 #include "constants/rgb.h"
 #include "party_menu.h"
+#ifdef NATIVE
+#include "mods.h"
+#endif
 
 #define GFXTAG_EGG       12345
 #define GFXTAG_EGG_SHARD 23456
@@ -308,11 +311,17 @@ static void AddHatchedMonToParty(u8 id)
 {
     enum Species species;
     enum NationalDexOrder nationalDexNum;
-    u8 name[POKEMON_NAME_LENGTH + 1];
+    u8 name[POKEMON_NAME_LENGTH + 1] = {0};
     u32 metLevel, friendship;
     enum Language language;
     metloc_u8_t metLocation;
+    if (id >= PARTY_SIZE) return;
     struct Pokemon *mon = &gParties[B_TRAINER_PLAYER][id];
+#ifdef NATIVE
+    struct RhhOwnedMonSnapshot before = {.struct_size = sizeof(before)};
+    bool32 notifyHatch = ModsEggHatchBefore(id, &before);
+    bool32 trackHatch = NativeOwnedTrackHatchBefore(id);
+#endif
 
     bool32 isEgg = FALSE;
     SetMonData(mon, MON_DATA_IS_EGG, &isEgg);
@@ -322,8 +331,11 @@ static void AddHatchedMonToParty(u8 id)
     SetMonData(mon, MON_DATA_NICKNAME, name);
 
     nationalDexNum = SpeciesToNationalPokedexNum(species);
-    GetSetPokedexFlag(nationalDexNum, FLAG_SET_SEEN);
-    GetSetPokedexFlag(nationalDexNum, FLAG_SET_CAUGHT);
+    if (nationalDexNum != NATIONAL_DEX_NONE && nationalDexNum <= NATIONAL_DEX_COUNT)
+    {
+        GetSetPokedexFlag(nationalDexNum, FLAG_SET_SEEN);
+        GetSetPokedexFlag(nationalDexNum, FLAG_SET_CAUGHT);
+    }
 
     GetMonNickname(mon, gStringVar1);
 
@@ -343,17 +355,22 @@ static void AddHatchedMonToParty(u8 id)
     SetMonData(mon, MON_DATA_MET_GAME, &gGameVersion);
 
     u32 otId = READ_OTID_FROM_SAVE;
-    SetMonData(mon, MON_DATA_OT_ID, &otId);
+    UpdateBoxMonOtId(&mon->box, otId);
     SetMonData(mon, MON_DATA_OT_NAME, gSaveBlock2Ptr->playerName);
     SetMonData(mon, MON_DATA_OT_GENDER, &gSaveBlock2Ptr->playerGender);
 
     MonRestorePP(mon);
     CalculateMonStats(mon);
+#ifdef NATIVE
+    if (trackHatch) NativeOwnedTrackHatchAfter(id);
+    if (notifyHatch) ModsEggHatched(id, &before);
+#endif
 }
 
 void ScriptHatchMon(void)
 {
-    AddHatchedMonToParty(gSpecialVar_0x8004);
+    if (gSpecialVar_0x8004 < PARTY_SIZE)
+        AddHatchedMonToParty(gSpecialVar_0x8004);
 }
 
 static u8 EggHatchCreateMonSprite(u8 useAlt, u8 state, u8 partyId, enum Species *speciesLoc)

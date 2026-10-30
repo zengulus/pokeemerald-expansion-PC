@@ -74,6 +74,6 @@ ThreeIsland_DunsparceTunnel_Text_ThatsANugget::
 	.string "wisdom, so that'll have to do!$"
 
 ThreeIsland_DunsparceTunnel_Text_WhoopsBagCrammedFull::
-	.string "Whoops, your BAG is crammed full!\n"
+	.string "Whoops, your Bag is crammed full!\n"
 	.string "I'll give this to you later.$"
 

@@ -14,6 +14,7 @@
 #include "battle_main.h"
 #include "battle_message.h"
 #include "battle_util.h"
+#include "battle_type_set.h"
 #include "battle_script_commands.h"
 #include "battle_gfx_sfx_util.h"
 #include "battle_util2.h"
@@ -194,6 +195,11 @@ struct AI_SavedBattleMon
     enum Species species:15;
     u16 saved:1;
     enum Type types[3];
+#ifdef NATIVE
+    u8 extraTypeCount;
+    u8 extraTypes[251];
+    u8 addedType, addedTypeValid;
+#endif
 };
 
 struct AiPartyMon
@@ -613,6 +619,10 @@ struct BattleStruct
     u8 battlerPartyIndexes[MAX_BATTLERS_COUNT];
     u8 monToSwitchIntoId[MAX_BATTLERS_COUNT];
     u8 battlerPartyOrders[MAX_BATTLERS_COUNT][PARTY_SIZE / 2];
+    /* A reduced follower party temporarily becomes the full party during a catch. */
+    u8 followerCatchFullParty;
+    u8 followerCatchMenuOrderSaved;
+    u8 followerCatchSavedOrder[PARTY_SIZE / 2];
     u8 runTries;
     u8 caughtMonNick[POKEMON_NAME_LENGTH + 1];
     u8 safariGoNearCounter;
@@ -693,6 +703,10 @@ struct BattleStruct
     u8 moveInfoSpriteId; // move info, window gfx
     // When using a move which hits multiple opponents which is then bounced by a target, we need to make sure, the move hits both opponents, the one with bounce, and the one without.
     enum Species beatUpSpecies[PARTY_SIZE]; // Species for Gen5+ Beat Up, otherwise party indexes
+#ifdef NATIVE
+    u8 beatUpPartySlots[PARTY_SIZE], beatUpContributorCount, beatUpContributorBattler;
+    bool8 beatUpContributorValid;
+#endif
     u8 beatUpSlot:3;
     enum PledgeCombo pledgeState:2;
     enum DamageCategory dynamicMoveCategory:3;
@@ -706,6 +720,9 @@ struct BattleStruct
     u8 shellSideArmCategory[MAX_BATTLERS_COUNT][MAX_BATTLERS_COUNT];
     u8 speedTieBreaks; // MAX_BATTLERS_COUNT! values.
     u32 stellarBoostFlags[MAX_BATTLE_TRAINERS]; // bitfield
+#ifdef NATIVE
+    u32 stellarCustomBoostFlags[MAX_BATTLE_TRAINERS][7]; // runtime type slots 32..255
+#endif
     struct SleepClause monCausingSleepClause[NUM_BATTLE_SIDES]; // Stores which Pokémon on a given side is causing Sleep Clause to be active as the mon's index in the party
     u8 additionalEffectsCounter:4; // A counter for the additionalEffects applied by the current move in Cmd_setadditionaleffects
     u8 pursuitStoredSwitch:4; // Stored id for the Pursuit target's switch (value between 0 and PARTY_SIZE included)
@@ -815,12 +832,12 @@ static inline bool32 IsBattleMoveStatus(enum Move move)
  * times with one type because it shares the 'GetBattlerTypes' result. */
 #define _IS_BATTLER_ANY_TYPE(battler, ignoreTera, ...)                           \
     ({                                                                           \
-        enum Type types[3];                                                      \
-        GetBattlerTypes(battler, ignoreTera, types);                             \
+        struct BattleTypeList types;                                             \
+        GetBattlerTypeList(battler, ignoreTera, &types);                        \
         RECURSIVELY(R_FOR_EACH(_IS_BATTLER_ANY_TYPE_HELPER, __VA_ARGS__)) FALSE; \
     })
 
-#define _IS_BATTLER_ANY_TYPE_HELPER(type) (types[0] == type) || (types[1] == type) || (types[2] == type) ||
+#define _IS_BATTLER_ANY_TYPE_HELPER(type) BattleTypeListContains(&types, type) ||
 
 #define IS_BATTLER_ANY_TYPE(battler, ...) _IS_BATTLER_ANY_TYPE(battler, FALSE, __VA_ARGS__)
 #define IS_BATTLER_OF_TYPE IS_BATTLER_ANY_TYPE
@@ -829,16 +846,23 @@ static inline bool32 IsBattleMoveStatus(enum Move move)
 
 #define IS_BATTLER_TYPELESS(battlerId)                                                    \
     ({                                                                                    \
-        enum Type types[3];                                                               \
-        GetBattlerTypes(battlerId, FALSE, types);                                         \
-        types[0] == TYPE_MYSTERY && types[1] == TYPE_MYSTERY && types[2] == TYPE_MYSTERY; \
+        struct BattleTypeList types;                                                      \
+        GetBattlerTypeList(battlerId, FALSE, &types);                                     \
+        types.count == 0;                                                                 \
     })
 
+#ifdef NATIVE
+#define CLEAR_BATTLER_EXTRA_TYPES(battler) \
+    (gBattleMons[battler].extraTypeCount = 0, gBattleMons[battler].addedTypeValid = FALSE)
+#else
+#define CLEAR_BATTLER_EXTRA_TYPES(battler) ((void)0)
+#endif
 #define SET_BATTLER_TYPE(battler, type)              \
 {                                                    \
     gBattleMons[battler].types[0] = type;            \
     gBattleMons[battler].types[1] = type;            \
     gBattleMons[battler].types[2] = TYPE_MYSTERY;    \
+    CLEAR_BATTLER_EXTRA_TYPES(battler);              \
 }
 
 #define RESTORE_BATTLER_TYPE(battler)                                                \
@@ -846,6 +870,7 @@ static inline bool32 IsBattleMoveStatus(enum Move move)
     gBattleMons[battler].types[0] = GetSpeciesType(gBattleMons[battler].species, 0); \
     gBattleMons[battler].types[1] = GetSpeciesType(gBattleMons[battler].species, 1); \
     gBattleMons[battler].types[2] = TYPE_MYSTERY;                                    \
+    CLEAR_BATTLER_EXTRA_TYPES(battler);                                              \
 }
 
 // NOTE: The members of this struct have hard-coded offsets
@@ -1114,6 +1139,13 @@ extern u8 gCategoryIconSpriteId;
 struct Pokemon *GetBattlerParty(enum BattlerId battler);
 struct Pokemon *GetTrainerParty(enum BattleTrainer trainer);
 struct Pokemon* GetBattlerMon(enum BattlerId battler);
+u8 GetBattlerNature(enum BattlerId battler);
+#ifdef NATIVE
+enum NativeBattleNatureFlags { NATIVE_BATTLE_NATURE_SNAPSHOT = 1u, NATIVE_BATTLE_NATURE_PARTY = 2u,
+    NATIVE_BATTLE_NATURE_STAT_VALID = 4u };
+void CaptureBattlerNature(enum BattlerId battler);
+u8 GetBattlerNatureDetails(enum BattlerId battler, u8 *statNature, u8 *flags);
+#endif
 
 enum BattlerId GetBattlerAtPosition(enum BattlerPosition position);
 enum BattlerId GetPartnerBattler(enum BattlerId battler);

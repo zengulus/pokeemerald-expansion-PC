@@ -1,6 +1,7 @@
 #include "global.h"
 #ifdef NATIVE
 #include "mods.h"
+#include "mod_ui.h"
 #endif
 #include "malloc.h"
 #include "battle.h"
@@ -113,6 +114,9 @@ enum {
     MENU_CATALOG_MOWER,
     MENU_CHANGE_FORM,
     MENU_CHANGE_ABILITY,
+#ifdef NATIVE
+    MENU_MODS,
+#endif
     MENU_FIELD_MOVES
 };
 
@@ -188,7 +192,11 @@ struct PartyMenuInternal
     u32 spriteIdCancelPokeball:7;
     u32 messageId:14;
     u8 windowId[3];
+#ifdef NATIVE
+    u8 actions[9];
+#else
     u8 actions[8];
+#endif
     u8 numActions;
     // In vanilla Emerald, only the first 0xB0 hwords (0x160 bytes) are actually used.
     // However, a full 0x100 hwords (0x200 bytes) are allocated.
@@ -213,6 +221,125 @@ struct PartyMenuBox
 static EWRAM_DATA struct PartyMenuInternal *sPartyMenuInternal = NULL;
 EWRAM_DATA struct PartyMenu gPartyMenu = {0};
 static EWRAM_DATA struct PartyMenuBox *sPartyMenuBoxes = NULL;
+static void GetPartyAndSlotFromPartyMenuId(s8 menuId, struct Pokemon **party, s8 *partySlot);
+static bool32 BeginFollowerCatchMenu(u8 action)
+{
+    if (action != PARTY_ACTION_SEND_MON_TO_BOX || !IsFollowerCatchFullParty()) return FALSE;
+    memcpy(gBattleStruct->followerCatchSavedOrder, gBattlePartyCurrentOrder, sizeof(gBattlePartyCurrentOrder));
+    gBattleStruct->followerCatchMenuOrderSaved = TRUE;
+    for (u32 i = 0; i < ARRAY_COUNT(gBattlePartyCurrentOrder); ++i)
+        gBattlePartyCurrentOrder[i] = (2 * i << 4) | (2 * i + 1);
+    return TRUE;
+}
+static void EndFollowerCatchMenu(void)
+{
+    if (!gBattleStruct || !gBattleStruct->followerCatchMenuOrderSaved) return;
+    memcpy(gBattlePartyCurrentOrder, gBattleStruct->followerCatchSavedOrder, sizeof(gBattlePartyCurrentOrder));
+    gBattleStruct->followerCatchMenuOrderSaved = FALSE;
+}
+#ifdef NATIVE
+static bool32 sModsBattlePartyView;
+static bool32 sModsBattlePartyMapValid;
+static bool32 sModsBattlePartyFollower;
+static bool32 sModsBattlePartyLinkMulti;
+static bool32 sModsBattlePartyFrontierMulti;
+static bool32 sModsBattlePartyFullMulti;
+static bool32 sModsBattlePartyCatchFull;
+static bool32 sModsBattlePartySummary;
+static struct Pokemon sModsSummaryOwnedParty[MULTI_PARTY_SIZE];
+static u8 sModsBattlePartyLayout;
+static u8 sModsBattlePartyFieldSlots[PARTY_SIZE];
+static void ModsInvalidateBattlePartyMap(void)
+{
+    sModsBattlePartyMapValid = FALSE;
+    ModsOwnedProjectedPartyInvalidate();
+    NativeOwnedTrackerBattleViewUnsupported();
+}
+bool32 ModsOwnedBattlePartySummaryCheck(void)
+{
+    if (!sModsBattlePartySummary) return TRUE;
+    if (!memcmp(&sModsSummaryOwnedParty[0], &gParties[B_TRAINER_PLAYER][0], sizeof(struct Pokemon))
+        && !memcmp(&sModsSummaryOwnedParty[1], &gParties[B_TRAINER_PLAYER][2], sizeof(struct Pokemon))
+        && !memcmp(&sModsSummaryOwnedParty[2], &gParties[B_TRAINER_PLAYER][3], sizeof(struct Pokemon))) return TRUE;
+    ModsInvalidateBattlePartyMap();
+    NativeOwnedTrackerUnsupported();
+    return FALSE;
+}
+void ModsOwnedBattlePartySummaryBeforeBytes(const void *dest, size_t size)
+{
+    if (!sModsBattlePartySummary || !dest || !size) return;
+    uintptr_t first = (uintptr_t)dest;
+    static const u8 ownedSlots[] = {0, 2, 3};
+    for (u32 i = 0; i < ARRAY_COUNT(ownedSlots); ++i)
+    {
+        uintptr_t start = (uintptr_t)&gParties[B_TRAINER_PLAYER][ownedSlots[i]];
+        if (first >= start ? first - start < sizeof(struct Pokemon) : start - first < size)
+        {
+            ModsInvalidateBattlePartyMap();
+            NativeOwnedTrackerUnsupported();
+            return;
+        }
+    }
+}
+void ModsOwnedBattlePartySummaryBeforeWrite(const struct BoxPokemon *mon)
+{ ModsOwnedBattlePartySummaryBeforeBytes(mon, sizeof(*mon)); }
+bool32 ModsOwnedBattlePartyViewActive(void) { return gMain.inBattle && sModsBattlePartyView; }
+void ModsOwnedBattlePartyViewReset(void)
+{
+    if (sModsBattlePartyView) ModsInvalidateBattlePartyMap();
+    sModsBattlePartyView = sModsBattlePartyMapValid = sModsBattlePartyFollower = sModsBattlePartyLinkMulti = sModsBattlePartyFrontierMulti = sModsBattlePartyFullMulti = sModsBattlePartyCatchFull = sModsBattlePartySummary = FALSE;
+}
+int ModsOwnedBattlePartyFieldSlot(u32 viewSlot, u32 *fieldSlot)
+{
+    if (!fieldSlot || viewSlot >= PARTY_SIZE || !ModsOwnedBattlePartyViewActive() || !ModsOwnedBattlePartySummaryCheck() || !sModsBattlePartyMapValid
+        || gPartyMenu.layout != sModsBattlePartyLayout)
+        return -1;
+    if (sModsBattlePartyFieldSlots[viewSlot] >= PARTY_SIZE) return -1;
+    *fieldSlot = sModsBattlePartyFieldSlots[viewSlot]; return 0;
+}
+int ModsOwnedBattlePartyVisibleIdentity(u32 viewSlot, u64 *identity)
+{
+    if (!identity || viewSlot >= PARTY_SIZE || !ModsOwnedBattlePartyViewActive() || !ModsOwnedBattlePartySummaryCheck() || !sModsBattlePartyMapValid
+        || gPartyMenu.layout != sModsBattlePartyLayout) return -1;
+    struct Pokemon *party = NULL; s8 slot = 0;
+    GetPartyAndSlotFromPartyMenuId(viewSlot, &party, &slot);
+    /* The multi-battle summary combines the two parties in menu order. */
+    if (sModsBattlePartySummary && (sModsBattlePartyFollower || sModsBattlePartyLinkMulti || sModsBattlePartyFrontierMulti) && gPartyMenu.layout == PARTY_LAYOUT_MULTI)
+    { party = gParties[B_TRAINER_PLAYER]; slot = viewSlot; }
+    if (!party || slot < 0 || slot >= PARTY_SIZE || !party[slot].box.hasSpecies) return -1;
+    *identity = (u64)party[slot].box.otId << 32 | party[slot].box.personality; return 0;
+}
+static int ModsBattlePartyRef(struct Pokemon *party, s8 slot, bool32 follower)
+{
+    if (slot < 0 || slot >= PARTY_SIZE) return -1;
+    if (party == gParties[B_TRAINER_PLAYER]) return slot;
+    if (follower && party == gParties[B_TRAINER_PARTNER]) return PARTY_SIZE + slot;
+    return -1;
+}
+static void ModsBattlePartyNoteSwap(struct Pokemon *first, struct Pokemon *second)
+{
+    if (!ModsOwnedBattlePartyViewActive()) { if (gMain.inBattle) ModsInvalidateBattlePartyMap(); return; }
+    if (!sModsBattlePartyMapValid || gPartyMenu.layout != sModsBattlePartyLayout) { ModsInvalidateBattlePartyMap(); return; }
+    u32 a = PARTY_SIZE, b = PARTY_SIZE;
+    for (u32 i = 0; i < PARTY_SIZE; ++i)
+    {
+        struct Pokemon *party = NULL; s8 slot = 0;
+        GetPartyAndSlotFromPartyMenuId(i, &party, &slot);
+        if (party && slot >= 0 && slot < PARTY_SIZE)
+        {
+            if (first == &party[slot]) a = i;
+            if (second == &party[slot]) b = i;
+        }
+    }
+    if (a == PARTY_SIZE || b == PARTY_SIZE || a == b) { ModsInvalidateBattlePartyMap(); return; }
+    bool32 firstOwned = sModsBattlePartyFieldSlots[a] < PARTY_SIZE;
+    bool32 secondOwned = sModsBattlePartyFieldSlots[b] < PARTY_SIZE;
+    if (firstOwned != secondOwned) { ModsInvalidateBattlePartyMap(); return; }
+    u8 temp = sModsBattlePartyFieldSlots[a]; sModsBattlePartyFieldSlots[a] = sModsBattlePartyFieldSlots[b];
+    sModsBattlePartyFieldSlots[b] = temp;
+    if (firstOwned) NativeOwnedTrackerUnreportedPartySwap(a, b);
+}
+#endif
 static EWRAM_DATA u8 *sPartyBgGfxTilemap = NULL;
 static EWRAM_DATA u8 *sPartyBgTilemapBuffer = NULL;
 EWRAM_DATA bool8 gPartyMenuUseExitCallback = 0;
@@ -458,6 +585,9 @@ static void ShiftMoveSlot(struct BoxPokemon *, u8, u8);
 static void BlitBitmapToPartyWindow_LeftColumn(u8, u8, u8, u8, u8, bool8);
 static void BlitBitmapToPartyWindow_RightColumn(u8, u8, u8, u8, u8, bool8);
 static void CursorCb_Summary(u8);
+#ifdef NATIVE
+static void CursorCb_Mods(u8);
+#endif
 static void CursorCb_Switch(u8);
 static void CursorCb_Cancel1(u8);
 static void CursorCb_Item(u8);
@@ -490,7 +620,6 @@ static void ShowMoveSelectWindow(u8 slot);
 static void Task_HandleWhichMoveInput(u8 taskId);
 static void Task_HideFollowerNPCForTeleport(u8);
 static void FieldCallback_RockClimb(void);
-static void GetPartyAndSlotFromPartyMenuId(s8 menuId, struct Pokemon **party, s8 *partySlot);
 static struct Pokemon *GetPartyMonFromPartyMenuId(s8 menuId);
 static void GetMultiPartyForSummaryScreen(void);
 static void RestoreMultiPartyFromSummaryScreen(void);
@@ -511,6 +640,9 @@ static u8 IndividualToCombinedPartyId(u8 index, enum BattlerId battler);
 static const u8 sText_askText[] = _("Would you like to change {STR_VAR_1}'s\nability to {STR_VAR_2}?");
 static const u8 sText_doneText[] = _("{STR_VAR_1}'s ability became\n{STR_VAR_2}!{PAUSE_UNTIL_PRESS}");
 static const u8 sText_BasePointsResetToZero[] = _("{STR_VAR_1}'s base points\nwere all reset to zero!{PAUSE_UNTIL_PRESS}");
+#ifdef NATIVE
+static const u8 sText_ItemEvBanked[] = _("{STR_VAR_1}'s training points\nwere set aside!{PAUSE_UNTIL_PRESS}");
+#endif
 static const u8 sText_CannotSendMonToBoxHM[] = _("Cannot send that mon to the box,\nbecause it knows a HM move.{PAUSE_UNTIL_PRESS}");
 static const u8 sText_CannotSendMonToBoxPartner[] = _("Cannot send a mon that doesn't\nbelong to you to the box.{PAUSE_UNTIL_PRESS}");
 
@@ -1435,6 +1567,9 @@ static void SwapPartyPokemon(struct Pokemon *mon1, struct Pokemon *mon2)
     *temp = *mon1;
     *mon1 = *mon2;
     *mon2 = *temp;
+#ifdef NATIVE
+    ModsBattlePartyNoteSwap(mon1, mon2);
+#endif
 
     Free(temp);
 }
@@ -1450,7 +1585,10 @@ static void Task_ClosePartyMenuAndSetCB2(u8 taskId)
     if (!gPaletteFade.active)
     {
         if (gPartyMenu.menuType == PARTY_MENU_TYPE_IN_BATTLE)
+        {
             UpdatePartyToFieldOrder();
+            EndFollowerCatchMenu();
+        }
 
         if (sPartyMenuInternal->exitCallback != NULL)
             SetMainCallback2(sPartyMenuInternal->exitCallback);
@@ -1475,6 +1613,9 @@ u8 GetPartyMenuType(void)
 
 void Task_HandleChooseMonInput(u8 taskId)
 {
+#ifdef NATIVE
+    if (RhhUiPartyTakeRefresh()) { RefreshPartyMenu(); return; }
+#endif
     if (!gPaletteFade.active && MenuHelpers_ShouldWaitForLinkRecv() != TRUE)
     {
         s8 *slotPtr = GetCurrentPartySlotPtr();
@@ -1613,11 +1754,21 @@ static void HandleChooseMonSelection(u8 taskId, s8 *slotPtr)
         case PARTY_ACTION_SEND_MON_TO_BOX:
         {
             u8 partyId = (u8)*slotPtr;
-            if ((gBattleTypeFlags & BATTLE_TYPE_MULTI) && !AreMultiPartiesFullTeams() && partyId >= (PARTY_SIZE / 2))
+            if ((gBattleTypeFlags & BATTLE_TYPE_MULTI) && !AreMultiPartiesFullTeams()
+                && !IsFollowerCatchFullParty() && partyId >= (PARTY_SIZE / 2))
             {
                 // Can't select if mon doesn't belong to you
                 PlaySE(SE_FAILURE);
                 DisplayPartyMenuMessage(sText_CannotSendMonToBoxPartner, FALSE);
+                ScheduleBgCopyTilemapToVram(2);
+                gTasks[taskId].func = Task_ReturnToChooseMonAfterText;
+            }
+            else if (IsFollowerCatchFullParty() && !FollowerCatchCanSend(partyId))
+            {
+                PlaySE(SE_FAILURE);
+                GetMonNickname(&gParties[B_TRAINER_PLAYER][partyId], gStringVar1);
+                StringExpandPlaceholders(gStringVar4, gText_PkmnAlreadyInBattle);
+                DisplayPartyMenuMessage(gStringVar4, FALSE);
                 ScheduleBgCopyTilemapToVram(2);
                 gTasks[taskId].func = Task_ReturnToChooseMonAfterText;
             }
@@ -3056,6 +3207,20 @@ static bool8 CreateSelectionWindow(u8 taskId)
     if (gPartyMenu.menuType != PARTY_MENU_TYPE_STORE_PYRAMID_HELD_ITEMS)
     {
         SetPartyMonSelectionActions(party, gPartyMenu.slotId, GetPartyMenuActionsType(mon));
+#ifdef NATIVE
+        if (gPartyMenu.menuType == PARTY_MENU_TYPE_FIELD && gPartyMenu.action == PARTY_ACTION_CHOOSE_MON
+            && gPartyMenu.layout == PARTY_LAYOUT_SINGLE && gPartyMenu.exitCallback == CB2_ReturnToFieldWithOpenMenu
+            && !gMain.inBattle && !IsOverworldLinkActive()
+            && party == gParties[B_TRAINER_PLAYER] && partySlot >= 0 && partySlot < PARTY_SIZE
+            && sPartyMenuInternal->numActions < ARRAY_COUNT(sPartyMenuInternal->actions)
+            && RhhUiPreparePartyMenu(partySlot))
+        {
+            u8 n = sPartyMenuInternal->numActions;
+            sPartyMenuInternal->actions[n] = sPartyMenuInternal->actions[n - 1];
+            sPartyMenuInternal->actions[n - 1] = MENU_MODS;
+            ++sPartyMenuInternal->numActions;
+        }
+#endif
         DisplaySelectionWindow(SELECTWINDOW_ACTIONS);
         DisplayPartyMenuStdMessage(PARTY_MSG_DO_WHAT_WITH_MON);
     }
@@ -3132,6 +3297,13 @@ static void CursorCb_Summary(u8 taskId)
     sPartyMenuInternal->exitCallback = CB2_ShowPokemonSummaryScreen;
     Task_ClosePartyMenu(taskId);
 }
+#ifdef NATIVE
+static void CursorCb_Mods(u8 taskId)
+{
+    RhhUiOpenPartyMenu();
+    CursorCb_Cancel1(taskId);
+}
+#endif
 
 static void CB2_ShowPokemonSummaryScreen(void)
 {
@@ -3401,6 +3573,17 @@ static void SwitchPartyMon(void)
     struct PartyMenuBox *menuBoxes[2];
     struct Pokemon *mon1, *mon2;
     struct Pokemon *monBuffer;
+#ifdef NATIVE
+    struct RhhPartyReorder batch;
+    bool32 notify = gPartyMenu.slotId != gPartyMenu.slotId2 && ModsPartyReorderBegin(RHH_PARTY_REORDER_SWAP, &batch);
+    bool32 frontierSwap = gPartyMenu.slotId != gPartyMenu.slotId2
+        && ModsOwnedFrontierPartyBeforeSwap(gPartyMenu.slotId, gPartyMenu.slotId2);
+    if (notify)
+    {
+        ModsPartyReorderAdd(&batch, gPartyMenu.slotId, gPartyMenu.slotId2);
+        ModsPartyReorderAdd(&batch, gPartyMenu.slotId2, gPartyMenu.slotId);
+    }
+#endif
 
     menuBoxes[0] = &sPartyMenuBoxes[gPartyMenu.slotId];
     menuBoxes[1] = &sPartyMenuBoxes[gPartyMenu.slotId2];
@@ -3410,12 +3593,34 @@ static void SwitchPartyMon(void)
     *monBuffer = *mon1;
     *mon1 = *mon2;
     *mon2 = *monBuffer;
+#ifdef NATIVE
+    ModsBattlePartyNoteSwap(mon1, mon2);
+#endif
     Free(monBuffer);
     SwitchMenuBoxSprites(&menuBoxes[0]->pokeballSpriteId, &menuBoxes[1]->pokeballSpriteId);
     SwitchMenuBoxSprites(&menuBoxes[0]->itemSpriteId, &menuBoxes[1]->itemSpriteId);
     SwitchMenuBoxSprites(&menuBoxes[0]->monSpriteId, &menuBoxes[1]->monSpriteId);
     SwitchMenuBoxSprites(&menuBoxes[0]->statusSpriteId, &menuBoxes[1]->statusSpriteId);
+#ifdef NATIVE
+    if (frontierSwap) ModsOwnedUnionPartyPrepared();
+    else if (notify) ModsPartyReorderCommitted(&batch);
+    else if (gPartyMenu.slotId != gPartyMenu.slotId2)
+        NativeOwnedTrackerUnreportedPartySwap(gPartyMenu.slotId, gPartyMenu.slotId2);
+#endif
 }
+
+#if defined(NATIVE) && defined(RHH_OWNED_IDENTITY_TEST)
+bool32 ModsOwnedPartyTestSwap(u32 first, u32 second)
+{
+    if (first >= PARTY_SIZE || second >= PARTY_SIZE || first == second || sPartyMenuBoxes) return FALSE;
+    struct PartyMenuBox boxes[PARTY_SIZE] = {0};
+    u8 oldFirst = gPartyMenu.slotId, oldSecond = gPartyMenu.slotId2;
+    sPartyMenuBoxes = boxes; gPartyMenu.slotId = first; gPartyMenu.slotId2 = second;
+    SwitchPartyMon();
+    sPartyMenuBoxes = NULL; gPartyMenu.slotId = oldFirst; gPartyMenu.slotId2 = oldSecond;
+    return TRUE;
+}
+#endif
 
 // Finish switching mons or using Softboiled
 static void FinishTwoMonAction(u8 taskId)
@@ -4884,6 +5089,9 @@ void ItemUseCB_Medicine(u8 taskId, TaskFunc task)
     struct Pokemon *mon = &party[partySlot];
     enum Item item = gSpecialVar_ItemId;
     bool8 canHeal, cannotUse;
+#ifdef NATIVE
+    enum ModItemEvResult itemEv = MOD_ITEM_EV_UNHANDLED;
+#endif
     u32 oldStatus = GetMonData(mon, MON_DATA_STATUS);
 
     if (NotUsingHPEVItemOnShedinja(mon, item) == FALSE)
@@ -4899,7 +5107,13 @@ void ItemUseCB_Medicine(u8 taskId, TaskFunc task)
             if (hp == GetMonData(mon, MON_DATA_MAX_HP))
                 canHeal = FALSE;
         }
-        cannotUse = ExecuteTableBasedItemEffect(mon, item, gPartyMenu.slotId, 0);
+#ifdef NATIVE
+        if (gPartyMenu.menuType == PARTY_MENU_TYPE_FIELD)
+            itemEv = ModsUseItemEv(mon, item, partySlot);
+        if (itemEv != MOD_ITEM_EV_UNHANDLED) cannotUse = itemEv == MOD_ITEM_EV_DENIED;
+        else
+#endif
+            cannotUse = ExecuteTableBasedItemEffect(mon, item, gPartyMenu.slotId, 0);
     }
 
     if (cannotUse != FALSE)
@@ -4920,7 +5134,10 @@ void ItemUseCB_Medicine(u8 taskId, TaskFunc task)
         if (!IsItemFlute(item))
         {
             PlaySE(SE_USE_ITEM);
-            RemoveBagItem(item, 1);
+#ifdef NATIVE
+            if (itemEv == MOD_ITEM_EV_UNHANDLED)
+#endif
+                RemoveBagItem(item, 1);
         }
         else
         {
@@ -4940,7 +5157,11 @@ void ItemUseCB_Medicine(u8 taskId, TaskFunc task)
         else
         {
             GetMonNickname(mon, gStringVar1);
-            GetMedicineItemEffectMessage(item, oldStatus);
+#ifdef NATIVE
+            if (itemEv == MOD_ITEM_EV_BANKED) StringExpandPlaceholders(gStringVar4, sText_ItemEvBanked);
+            else
+#endif
+                GetMedicineItemEffectMessage(item, oldStatus);
             DisplayPartyMenuMessage(gStringVar4, TRUE);
             ScheduleBgCopyTilemapToVram(2);
             if (gPartyMenu.menuType == PARTY_MENU_TYPE_FIELD && CheckBagHasItem(item, 1))
@@ -5266,7 +5487,16 @@ void ItemUseCB_ResetEVs(u8 taskId, TaskFunc task)
 {
     struct Pokemon *mon = &gParties[B_TRAINER_PLAYER][gPartyMenu.slotId];
     enum Item item = gSpecialVar_ItemId;
-    bool8 cannotUseEffect = ExecuteTableBasedItemEffect(mon, item, gPartyMenu.slotId, 0);
+    bool8 cannotUseEffect;
+#ifdef NATIVE
+    enum ModItemEvResult itemEv = MOD_ITEM_EV_UNHANDLED;
+    const u8 *effect = GetItemEffect(item);
+    if (gPartyMenu.menuType == PARTY_MENU_TYPE_FIELD && effect && !(s8)effect[ITEM_EFFECT_ARG_START])
+        itemEv = ModsUseItemEv(mon, item, gPartyMenu.slotId);
+    if (itemEv != MOD_ITEM_EV_UNHANDLED) cannotUseEffect = itemEv == MOD_ITEM_EV_DENIED;
+    else
+#endif
+        cannotUseEffect = ExecuteTableBasedItemEffect(mon, item, gPartyMenu.slotId, 0);
 
     if (cannotUseEffect)
     {
@@ -5280,7 +5510,10 @@ void ItemUseCB_ResetEVs(u8 taskId, TaskFunc task)
     {
         gPartyMenuUseExitCallback = TRUE;
         PlaySE(SE_USE_ITEM);
-        RemoveBagItem(item, 1);
+#ifdef NATIVE
+        if (itemEv == MOD_ITEM_EV_UNHANDLED)
+#endif
+            RemoveBagItem(item, 1);
         GetMonNickname(mon, gStringVar1);
         StringExpandPlaceholders(gStringVar4, sText_BasePointsResetToZero);
         DisplayPartyMenuMessage(gStringVar4, TRUE);
@@ -5296,7 +5529,16 @@ void ItemUseCB_ReduceEV(u8 taskId, TaskFunc task)
     enum ItemEffectType effectType = GetItemEffectType(item);
     u16 friendship = GetMonData(mon, MON_DATA_FRIENDSHIP);
     u16 ev = ItemEffectToMonEv(mon, effectType);
-    bool8 cannotUseEffect = ExecuteTableBasedItemEffect(mon, item, gPartyMenu.slotId, 0);
+    bool8 cannotUseEffect;
+#ifdef NATIVE
+    enum ModItemEvResult itemEv = MOD_ITEM_EV_UNHANDLED;
+    const u8 *effect = GetItemEffect(item);
+    if (gPartyMenu.menuType == PARTY_MENU_TYPE_FIELD && effect && (s8)effect[ITEM_EFFECT_ARG_START] < 0)
+        itemEv = ModsUseItemEv(mon, item, gPartyMenu.slotId);
+    if (itemEv != MOD_ITEM_EV_UNHANDLED) cannotUseEffect = itemEv == MOD_ITEM_EV_DENIED;
+    else
+#endif
+        cannotUseEffect = ExecuteTableBasedItemEffect(mon, item, gPartyMenu.slotId, 0);
     u16 newFriendship = GetMonData(mon, MON_DATA_FRIENDSHIP);
     u16 newEv = ItemEffectToMonEv(mon, effectType);
 
@@ -5312,7 +5554,10 @@ void ItemUseCB_ReduceEV(u8 taskId, TaskFunc task)
     {
         gPartyMenuUseExitCallback = TRUE;
         PlaySE(SE_USE_ITEM);
-        RemoveBagItem(item, 1);
+#ifdef NATIVE
+        if (itemEv == MOD_ITEM_EV_UNHANDLED)
+#endif
+            RemoveBagItem(item, 1);
         GetMonNickname(mon, gStringVar1);
         ItemEffectToStatString(effectType, gStringVar2);
         if (friendship != newFriendship)
@@ -5689,8 +5934,6 @@ static void CB2_ShowSummaryScreenToForgetMove(void)
 
 static void CB2_ReturnToPartyMenuWhileLearningMove(void)
 {
-    if (sFinalLevel != 0)
-        SetMonData(&gParties[B_TRAINER_PLAYER][gPartyMenu.slotId], MON_DATA_LEVEL, &sFinalLevel); // to avoid displaying incorrect level
     if (GetItemFieldFunc(gSpecialVar_ItemId) == ItemUseOutOfBattle_RareCandy && gPartyMenu.menuType == PARTY_MENU_TYPE_FIELD && CheckBagHasItem(gSpecialVar_ItemId, 1))
         InitPartyMenu(PARTY_MENU_TYPE_FIELD, PARTY_LAYOUT_SINGLE, PARTY_ACTION_USE_ITEM, TRUE, PARTY_MSG_NONE, Task_ReturnToPartyMenuWhileLearningMove, gPartyMenu.exitCallback);
     else
@@ -5919,6 +6162,62 @@ void ItemUseCB_RareCandy(u8 taskId, TaskFunc task)
     }
 }
 
+#ifdef NATIVE
+static enum Item sExperienceFlowPreviousItem;
+static void CB2_ReturnFromExperienceFlow(void)
+{
+    gSpecialVar_ItemId = sExperienceFlowPreviousItem;
+    sInitialLevel = sFinalLevel = 0;
+    ModsExperienceFlowFinish();
+    CB2_ReturnToField();
+}
+static void Task_StartExperienceFlow(u8 taskId)
+{
+    if (gPaletteFade.active) return;
+    struct Pokemon *mon = &gParties[B_TRAINER_PLAYER][gPartyMenu.slotId];
+    u32 before, after, applied;
+    BufferMonStatsToTaskData(mon, sPartyMenuInternal->data);
+    if (!ModsExperienceFlowApply(gPartyMenu.slotId, &before, &after, &applied))
+    { Task_ClosePartyMenu(taskId); return; }
+    BufferMonStatsToTaskData(mon, &sPartyMenuInternal->data[NUM_STATS]);
+    sInitialLevel = before; sFinalLevel = after;
+    gPartyMenuUseExitCallback = TRUE;
+    UpdateMonDisplayInfoAfterRareCandy(gPartyMenu.slotId, mon);
+    GetMonNickname(mon, gStringVar1);
+    ConvertIntToDecimalStringN(gStringVar2, applied, STR_CONV_MODE_LEFT_ALIGN, 7);
+    if (after > before)
+    {
+        PlayFanfareByFanfareNum(FANFARE_LEVEL_UP);
+        ConvertIntToDecimalStringN(gStringVar3, after, STR_CONV_MODE_LEFT_ALIGN, 3);
+        StringExpandPlaceholders(gStringVar4, gText_PkmnGainedExpAndElevatedToLvVar3);
+        DisplayPartyMenuMessage(gStringVar4, TRUE);
+        ScheduleBgCopyTilemapToVram(2);
+        gTasks[taskId].func = Task_DisplayLevelUpStatsPg1;
+    }
+    else
+    {
+        sInitialLevel = sFinalLevel = 0;
+        PlaySE(SE_USE_ITEM);
+        StringExpandPlaceholders(gStringVar4, gText_PkmnGainedExp);
+        DisplayPartyMenuMessage(gStringVar4, FALSE);
+        ScheduleBgCopyTilemapToVram(2);
+        gTasks[taskId].func = Task_ClosePartyMenuAfterText;
+    }
+}
+bool32 StartPartyExperienceFlow(u32 slot)
+{
+    if (slot >= PARTY_SIZE) return FALSE;
+    sExperienceFlowPreviousItem = gSpecialVar_ItemId;
+    gSpecialVar_ItemId = ITEM_NONE;
+    gPartyMenu.slotId = slot;
+    InitPartyMenu(PARTY_MENU_TYPE_FIELD, PARTY_LAYOUT_SINGLE, PARTY_ACTION_CHOOSE_MON, TRUE,
+                  PARTY_MSG_NONE, Task_StartExperienceFlow, CB2_ReturnFromExperienceFlow);
+    if (!sPartyMenuInternal)
+    { gSpecialVar_ItemId = sExperienceFlowPreviousItem; return FALSE; }
+    return TRUE;
+}
+#endif
+
 static void UpdateMonDisplayInfoAfterRareCandy(u8 slot, struct Pokemon *mon)
 {
     SetPartyMonAilmentGfx(mon, &sPartyMenuBoxes[slot]);
@@ -5981,8 +6280,7 @@ static void Task_TryLearnNewMoves(u8 taskId)
         RemoveLevelUpStatsWindow();
         for (; sInitialLevel <= sFinalLevel; sInitialLevel++)
         {
-            SetMonData(&gParties[B_TRAINER_PLAYER][gPartyMenu.slotId], MON_DATA_LEVEL, &sInitialLevel);
-            learnMove = MonTryLearningNewMove(&gParties[B_TRAINER_PLAYER][gPartyMenu.slotId], TRUE);
+            learnMove = MonTryLearningNewMoveAtLevel(&gParties[B_TRAINER_PLAYER][gPartyMenu.slotId], TRUE, sInitialLevel);
             gPartyMenu.learnMoveState = 1;
             switch (learnMove)
             {
@@ -6011,8 +6309,7 @@ static void Task_TryLearningNextMove(u8 taskId)
     u16 result;
     for (; sInitialLevel <= sFinalLevel; sInitialLevel++)
     {
-        SetMonData(&gParties[B_TRAINER_PLAYER][gPartyMenu.slotId], MON_DATA_LEVEL, &sInitialLevel);
-        result = MonTryLearningNewMove(&gParties[B_TRAINER_PLAYER][gPartyMenu.slotId], FALSE);
+        result = MonTryLearningNewMoveAtLevel(&gParties[B_TRAINER_PLAYER][gPartyMenu.slotId], FALSE, sInitialLevel);
         switch (result)
         {
         case 0: // No moves to learn
@@ -6404,7 +6701,11 @@ bool32 TryItemUseFusionChange(u8 taskId, TaskFunc task)
     }
 }
 
-static void RestoreFusionMon(struct Pokemon *mon)
+static struct BoxPokemon *RestoreFusionMon(struct Pokemon *mon, u32 *partySlot, bool32 *empty
+#ifdef NATIVE
+                                           , bool32 tracked
+#endif
+                                           )
 {
     s32 i;
 
@@ -6416,12 +6717,27 @@ static void RestoreFusionMon(struct Pokemon *mon)
 
     if (i >= PARTY_SIZE)
     {
-        CopyMonToPC(mon);
+        *partySlot = PARTY_SIZE;
+#ifdef NATIVE
+        u8 result = tracked ? CopyMonToPCWithOwnedReceipt(mon) : CopyMonToPC(mon);
+#else
+        u8 result = CopyMonToPC(mon);
+#endif
+        if (result != MON_GIVEN_TO_PC)
+            return NULL;
+        return GetBoxedMonPtr(gSpecialVar_MonBoxId, gSpecialVar_MonBoxPos);
     }
     else
     {
-        CopyMon(&gParties[B_TRAINER_PLAYER][i], mon, sizeof(*mon));
+        *partySlot = i;
+        *empty = !gParties[B_TRAINER_PLAYER][i].box.hasSpecies;
+#ifdef NATIVE
+        if (tracked) CopyMonWithOwnedReceipt(&gParties[B_TRAINER_PLAYER][i], mon, sizeof(*mon));
+        else
+#endif
+            CopyMon(&gParties[B_TRAINER_PLAYER][i], mon, sizeof(*mon));
         gPartiesCount[B_TRAINER_PLAYER] = i + 1;
+        return &gParties[B_TRAINER_PLAYER][i].box;
     }
 }
 
@@ -6509,26 +6825,90 @@ static void Task_TryItemUseFusionChange(u8 taskId)
     switch (gTasks[taskId].tState)
     {
     case 0:
+    {
+#ifdef NATIVE
+        struct RhhFusionTransfer transfer;
+        struct BoxPokemon *destination = NULL;
+        u32 destinationLocation = 0, destinationBox = 0, destinationSlot = 0;
+        bool32 notify;
+        u8 occupied[TOTAL_BOXES_COUNT][IN_BOX_COUNT];
+#endif
         if (gTasks[taskId].fusionType == FUSE_MON)
         {
             mon2 = &gParties[B_TRAINER_PLAYER][gTasks[taskId].secondFusionSlot];
-            CopyMon(&gPokemonStoragePtr->fusions[gTasks[taskId].storageIndex], mon2, sizeof(*mon2));
+#ifdef NATIVE
+            destination = &gPokemonStoragePtr->fusions[gTasks[taskId].storageIndex].box;
+            destinationLocation = RHH_MON_FUSION_STORAGE; destinationSlot = gTasks[taskId].storageIndex;
+            notify = !destination->hasSpecies
+                && ModsFusionTransferCapture(&mon2->box, RHH_FUSION_STORE, RHH_MON_PARTY,
+                                             gTasks[taskId].secondFusionSlot, gTasks[taskId].firstFusionSlot, &transfer);
+#endif
+#ifdef NATIVE
+            if (notify) CopyMonWithOwnedReceipt(&gPokemonStoragePtr->fusions[gTasks[taskId].storageIndex], mon2, sizeof(*mon2));
+            else
+#endif
+                CopyMon(&gPokemonStoragePtr->fusions[gTasks[taskId].storageIndex], mon2, sizeof(*mon2));
+#ifdef NATIVE
+            if (notify) ZeroMonDataWithOwnedReceipt(&gParties[B_TRAINER_PLAYER][gTasks[taskId].secondFusionSlot]);
+            else
+#endif
             ZeroMonData(&gParties[B_TRAINER_PLAYER][gTasks[taskId].secondFusionSlot]);
         }
         else
         {
             mon2 = &gPokemonStoragePtr->fusions[gTasks[taskId].storageIndex];
-            RestoreFusionMon(mon2);
+            u32 restoredSlot; bool32 empty = FALSE;
+#ifdef NATIVE
+            notify = ModsFusionTransferCapture(&mon2->box, RHH_FUSION_RESTORE, RHH_MON_FUSION_STORAGE,
+                                               gTasks[taskId].storageIndex, gTasks[taskId].firstFusionSlot, &transfer);
+            if (notify)
+                for (u32 box = 0; box < TOTAL_BOXES_COUNT; ++box)
+                    for (u32 slot = 0; slot < IN_BOX_COUNT; ++slot)
+                        occupied[box][slot] = gPokemonStoragePtr->boxes[box][slot].hasSpecies;
+#endif
+            struct BoxPokemon *restored = RestoreFusionMon(mon2, &restoredSlot, &empty
+#ifdef NATIVE
+                                                             , notify
+#endif
+                                                             );
+#ifdef NATIVE
+            destination = restored;
+            if (restored && restoredSlot < PARTY_SIZE)
+            { destinationLocation = RHH_MON_PARTY; destinationSlot = restoredSlot; }
+            else if (restored)
+            {
+                destinationLocation = RHH_MON_BOX; destinationBox = gSpecialVar_MonBoxId;
+                destinationSlot = gSpecialVar_MonBoxPos;
+                empty = notify && destinationBox < TOTAL_BOXES_COUNT && destinationSlot < IN_BOX_COUNT
+                    && !occupied[destinationBox][destinationSlot];
+            }
+            notify = notify && restored && empty;
+#else
+            (void)restored;
+#endif
+#ifdef NATIVE
+            if (notify) ZeroMonDataWithOwnedReceipt(&gPokemonStoragePtr->fusions[gTasks[taskId].storageIndex]);
+            else
+#endif
             ZeroMonData(&gPokemonStoragePtr->fusions[gTasks[taskId].storageIndex]);
         }
         targetSpecies = gTasks[taskId].tTargetSpecies;
+#ifdef NATIVE
+        if (notify) SetMonSpeciesWithOwnedReceipt(mon, &targetSpecies);
+        else
+#endif
         SetMonData(mon, MON_DATA_SPECIES, &targetSpecies);
         CalculateMonStats(mon);
+#ifdef NATIVE
+        if (notify) ModsFusionTransferCommitted(destination, destinationLocation, destinationBox, destinationSlot, &transfer);
+        else NativeOwnedTrackerUnsupported();
+#endif
         CompactPartySlots();
         CalculatePlayerPartyCount();
         gTasks[taskId].tState++;
         PlaySE(SE_M_TELEPORT);
         break;
+    }
     case 1:
         targetSpecies = gTasks[taskId].tTargetSpecies;
         if (gTasks[taskId].tAnimWait == 0)
@@ -6635,6 +7015,24 @@ static void Task_TryItemUseFusionChange(u8 taskId)
         break;
     }
 }
+
+#if defined(NATIVE) && defined(RHH_OWNED_IDENTITY_TEST)
+bool32 ModsOwnedFusionTestStep(u32 cause, u32 primary, u32 secondary, u32 storage, u32 species)
+{
+    if (primary >= PARTY_SIZE || secondary >= PARTY_SIZE || storage >= MAX_FUSION_STORAGE
+        || (cause != RHH_FUSION_STORE && cause != RHH_FUSION_RESTORE) || sPartyMenuBoxes) return FALSE;
+    struct PartyMenuBox boxes[PARTY_SIZE] = {0};
+    struct Task saved = gTasks[0];
+    sPartyMenuBoxes = boxes;
+    gTasks[0] = (struct Task){0};
+    gTasks[0].fusionType = cause == RHH_FUSION_STORE ? FUSE_MON : UNFUSE_MON;
+    gTasks[0].firstFusionSlot = primary; gTasks[0].secondFusionSlot = secondary;
+    gTasks[0].storageIndex = storage; gTasks[0].tTargetSpecies = species;
+    Task_TryItemUseFusionChange(0);
+    gTasks[0] = saved; sPartyMenuBoxes = NULL;
+    return TRUE;
+}
+#endif
 
 void ItemUseCB_Fusion(u8 taskId, TaskFunc taskFunc)
 {
@@ -7499,6 +7897,7 @@ static u8 GetPartyLayoutFromBattleType(void)
 
 void OpenPartyMenuInBattle(u8 partyAction)
 {
+    bool32 followerCatch = BeginFollowerCatchMenu(partyAction);
     if (IS_FRLG && !BtlCtrl_OakOldMan_TestState2Flag(FIRST_BATTLE_MSG_FLAG_PARTY_MENU) && (gBattleTypeFlags & BATTLE_TYPE_FIRST_BATTLE))
     {
         InitPartyMenu(PARTY_MENU_TYPE_IN_BATTLE, GetPartyLayoutFromBattleType(), partyAction, FALSE, PARTY_MSG_NONE, Task_FirstBattleEnterParty_WaitFadeIn, CB2_SetUpReshowBattleScreenAfterMenu);
@@ -7507,7 +7906,7 @@ void OpenPartyMenuInBattle(u8 partyAction)
     else
     {
         if (partyAction == PARTY_ACTION_SEND_MON_TO_BOX)
-            InitPartyMenu(PARTY_MENU_TYPE_IN_BATTLE, GetPartyLayoutFromBattleType(), partyAction, FALSE, PARTY_MSG_CHOOSE_MON_FOR_BOX, Task_HandleChooseMonInput, ReshowBlankBattleScreenAfterMenu);
+            InitPartyMenu(PARTY_MENU_TYPE_IN_BATTLE, followerCatch ? PARTY_LAYOUT_SINGLE : GetPartyLayoutFromBattleType(), partyAction, FALSE, PARTY_MSG_CHOOSE_MON_FOR_BOX, Task_HandleChooseMonInput, ReshowBlankBattleScreenAfterMenu);
         else
             InitPartyMenu(PARTY_MENU_TYPE_IN_BATTLE, GetPartyLayoutFromBattleType(), partyAction, FALSE, PARTY_MSG_CHOOSE_MON, Task_HandleChooseMonInput, CB2_SetUpReshowBattleScreenAfterMenu);
     }
@@ -7844,6 +8243,50 @@ static void UpdatePartyToBattleOrder(void)
 {
     struct Pokemon *partyBuffer = Alloc(sizeof(gParties[B_TRAINER_PLAYER]));
     u8 i;
+#ifdef NATIVE
+    bool32 alreadyInView = sModsBattlePartyView;
+    sModsBattlePartyView = TRUE;
+    sModsBattlePartyLayout = gPartyMenu.layout;
+    bool32 fullMultiParty = gPartyMenu.layout == PARTY_LAYOUT_MULTI_FULL || gPartyMenu.layout == PARTY_LAYOUT_MULTI_FULL_PARTNER;
+    sModsBattlePartyFollower = ModsOwnedFollowerPartyReady() && gPartyMenu.layout == PARTY_LAYOUT_MULTI
+        && (gBattleTypeFlags & (BATTLE_TYPE_MULTI | BATTLE_TYPE_INGAME_PARTNER | BATTLE_TYPE_DOUBLE))
+            == (BATTLE_TYPE_MULTI | BATTLE_TYPE_INGAME_PARTNER | BATTLE_TYPE_DOUBLE);
+    sModsBattlePartyLinkMulti = ModsOwnedLinkMultiPartyReady() && gPartyMenu.layout == PARTY_LAYOUT_MULTI
+        && (gBattleTypeFlags & (BATTLE_TYPE_LINK | BATTLE_TYPE_MULTI | BATTLE_TYPE_DOUBLE))
+            == (BATTLE_TYPE_LINK | BATTLE_TYPE_MULTI | BATTLE_TYPE_DOUBLE)
+        && !(gBattleTypeFlags & BATTLE_TYPE_INGAME_PARTNER);
+    sModsBattlePartyFrontierMulti = ((gPartyMenu.layout == PARTY_LAYOUT_MULTI && ModsOwnedFrontierMultiPartyReady())
+        || (fullMultiParty && ModsOwnedFrontierPartyReady()))
+        && (gBattleTypeFlags & (BATTLE_TYPE_BATTLE_TOWER | BATTLE_TYPE_MULTI | BATTLE_TYPE_DOUBLE))
+            == (BATTLE_TYPE_BATTLE_TOWER | BATTLE_TYPE_MULTI | BATTLE_TYPE_DOUBLE)
+        && (((gBattleTypeFlags & (BATTLE_TYPE_LINK | BATTLE_TYPE_INGAME_PARTNER | BATTLE_TYPE_TOWER_LINK_MULTI))
+                == BATTLE_TYPE_INGAME_PARTNER)
+            || (!fullMultiParty && (gBattleTypeFlags & (BATTLE_TYPE_LINK | BATTLE_TYPE_INGAME_PARTNER | BATTLE_TYPE_TOWER_LINK_MULTI))
+                == (BATTLE_TYPE_LINK | BATTLE_TYPE_TOWER_LINK_MULTI)));
+    sModsBattlePartyFullMulti = fullMultiParty && !ModsOwnedProjectedPartyActive()
+        && (gBattleTypeFlags & (BATTLE_TYPE_MULTI | BATTLE_TYPE_DOUBLE | BATTLE_TYPE_INGAME_PARTNER))
+            == (BATTLE_TYPE_MULTI | BATTLE_TYPE_DOUBLE | BATTLE_TYPE_INGAME_PARTNER)
+        && !(gBattleTypeFlags & BATTLE_TYPE_LINK);
+    bool32 mixedParty = sModsBattlePartyFollower || sModsBattlePartyLinkMulti || sModsBattlePartyFrontierMulti || sModsBattlePartyFullMulti;
+    sModsBattlePartyCatchFull = ModsOwnedFollowerCatchFullActive() && IsFollowerCatchFullParty()
+        && gPartyMenu.layout == PARTY_LAYOUT_SINGLE && gPartyMenu.action == PARTY_ACTION_SEND_MON_TO_BOX;
+    bool32 unionParty = ModsOwnedUnionPartyReady() && gPartyMenu.layout == PARTY_LAYOUT_SINGLE
+        && (gBattleTypeFlags & BATTLE_TYPE_LINK)
+        && !(gBattleTypeFlags & (BATTLE_TYPE_DOUBLE | BATTLE_TYPE_MULTI | BATTLE_TYPE_INGAME_PARTNER));
+    bool32 frontierParty = ModsOwnedFrontierPartyReady()
+        && (gPartyMenu.layout == PARTY_LAYOUT_SINGLE || gPartyMenu.layout == PARTY_LAYOUT_DOUBLE)
+        && (gBattleTypeFlags & BATTLE_TYPE_FRONTIER)
+        && !(gBattleTypeFlags & (BATTLE_TYPE_LINK | BATTLE_TYPE_MULTI | BATTLE_TYPE_INGAME_PARTNER));
+    sModsBattlePartyMapValid = !alreadyInView && !(gBattleTypeFlags & (BATTLE_TYPE_RECORDED | BATTLE_TYPE_RECORDED_LINK
+        | BATTLE_TYPE_TRAINER_HILL
+        | BATTLE_TYPE_EREADER_TRAINER | BATTLE_TYPE_FIRST_BATTLE | BATTLE_TYPE_CATCH_TUTORIAL))
+        && (sModsBattlePartyFrontierMulti || !(gBattleTypeFlags & BATTLE_TYPE_TOWER_LINK_MULTI))
+        && (frontierParty || sModsBattlePartyFrontierMulti || !(gBattleTypeFlags & BATTLE_TYPE_FRONTIER))
+        && (unionParty || sModsBattlePartyLinkMulti || sModsBattlePartyFrontierMulti || !(gBattleTypeFlags & BATTLE_TYPE_LINK))
+        && (mixedParty || sModsBattlePartyCatchFull
+            || !(gBattleTypeFlags & (BATTLE_TYPE_MULTI | BATTLE_TYPE_INGAME_PARTNER)));
+    u32 seen = 0, destinations = 0;
+#endif
     const u8 *multiBattlePartyIdToMenuId = sMultiBattlePartyIdToMenuId_Left;
 
     if ((gBattleTypeFlags & BATTLE_TYPE_LINK) && ((gBattlerInMenuId & BIT_FLANK) != B_FLANK_LEFT))
@@ -7861,6 +8304,11 @@ static void UpdatePartyToBattleOrder(void)
             srcMenuId = multiBattlePartyIdToMenuId[battlePartyId];
 
         GetPartyAndSlotFromPartyMenuId(srcMenuId, &srcParty, &srcPartySlot);
+#ifdef NATIVE
+        int ref = ModsBattlePartyRef(srcParty, srcPartySlot, mixedParty);
+        if (ref < 0 || (seen & (1u << ref))) sModsBattlePartyMapValid = FALSE;
+        else { seen |= 1u << ref; sModsBattlePartyFieldSlots[i] = ref; }
+#endif
         memcpy(&partyBuffer[i], &srcParty[srcPartySlot], sizeof(struct Pokemon));
     }
     for (i = 0; i < PARTY_SIZE; i++)
@@ -7868,8 +8316,22 @@ static void UpdatePartyToBattleOrder(void)
         struct Pokemon *dstParty = NULL;
         s8 dstPartySlot = 0;
         GetPartyAndSlotFromPartyMenuId(i, &dstParty, &dstPartySlot);
+#ifdef NATIVE
+        int ref = ModsBattlePartyRef(dstParty, dstPartySlot, mixedParty);
+        if (ref < 0 || (destinations & (1u << ref)) || (!mixedParty && ref != i))
+            sModsBattlePartyMapValid = FALSE;
+        else
+        {
+            destinations |= 1u << ref;
+            if (mixedParty && ((ref < PARTY_SIZE) != (sModsBattlePartyFieldSlots[i] < PARTY_SIZE)))
+                sModsBattlePartyMapValid = FALSE;
+        }
+#endif
         memcpy(&dstParty[dstPartySlot], &partyBuffer[i], sizeof(struct Pokemon));
     }
+#ifdef NATIVE
+    if (!sModsBattlePartyMapValid) ModsInvalidateBattlePartyMap();
+#endif
     Free(partyBuffer);
 }
 
@@ -7877,6 +8339,9 @@ static void UpdatePartyToFieldOrder(void)
 {
     struct Pokemon *partyBuffer = Alloc(sizeof(gParties[B_TRAINER_PLAYER]));
     u8 i;
+#ifdef NATIVE
+    if (gPartyMenu.layout != sModsBattlePartyLayout) ModsInvalidateBattlePartyMap();
+#endif
 
     const u8 *multiBattlePartyIdToMenuId = sMultiBattlePartyIdToMenuId_Left;
 
@@ -7905,11 +8370,61 @@ static void UpdatePartyToFieldOrder(void)
             dstMenuId = multiBattlePartyIdToMenuId[battlePartyId];
 
         GetPartyAndSlotFromPartyMenuId(dstMenuId, &dstParty, &dstPartySlot);
+#ifdef NATIVE
+        if (!sModsBattlePartyMapValid
+            || ModsBattlePartyRef(dstParty, dstPartySlot, sModsBattlePartyFollower || sModsBattlePartyLinkMulti || sModsBattlePartyFrontierMulti || sModsBattlePartyFullMulti) != sModsBattlePartyFieldSlots[i])
+            ModsInvalidateBattlePartyMap();
+#endif
         memcpy(&dstParty[dstPartySlot], &partyBuffer[i], sizeof(struct Pokemon));
     }
 
     Free(partyBuffer);
+#ifdef NATIVE
+    sModsBattlePartyView = sModsBattlePartyMapValid = sModsBattlePartyFollower = sModsBattlePartyLinkMulti = sModsBattlePartyFrontierMulti = sModsBattlePartyFullMulti = sModsBattlePartyCatchFull = sModsBattlePartySummary = FALSE;
+#endif
 }
+
+#if defined(NATIVE) && defined(RHH_OWNED_IDENTITY_TEST)
+bool32 ModsOwnedPartyBattleTestSummary(bool32 begin)
+{
+    if (!ModsOwnedBattlePartyViewActive() || gPartyMenu.layout != PARTY_LAYOUT_MULTI
+        || !!begin == !!sModsBattlePartySummary) return FALSE;
+    if (begin) GetMultiPartyForSummaryScreen();
+    else RestoreMultiPartyFromSummaryScreen();
+    return TRUE;
+}
+bool32 ModsOwnedPartyBattleTestOrder(bool32 battleOrder)
+{
+    if (!gMain.inBattle || !!battleOrder == !!sModsBattlePartyView) return FALSE;
+    if (battleOrder) UpdatePartyToBattleOrder();
+    else UpdatePartyToFieldOrder();
+    return TRUE;
+}
+bool32 ModsOwnedPartyBattleTestSwitch(u32 first, u32 second)
+{
+    if (!gMain.inBattle || !sModsBattlePartyView || first >= PARTY_SIZE || second >= PARTY_SIZE || first == second)
+        return FALSE;
+    struct Pokemon *firstParty = NULL, *secondParty = NULL; s8 firstSlot = 0, secondSlot = 0;
+    GetPartyAndSlotFromPartyMenuId(first, &firstParty, &firstSlot);
+    GetPartyAndSlotFromPartyMenuId(second, &secondParty, &secondSlot);
+    if (!firstParty || !secondParty || firstSlot < 0 || secondSlot < 0) return FALSE;
+    SwitchPartyMonSlots(first, second);
+    SwapPartyPokemon(&firstParty[firstSlot], &secondParty[secondSlot]);
+    return TRUE;
+}
+bool32 ModsOwnedFollowerCatchTestMenu(bool32 begin)
+{
+    if (!gMain.inBattle || !!begin == !!sModsBattlePartyView || !IsFollowerCatchFullParty()) return FALSE;
+    if (begin)
+    {
+        if (!BeginFollowerCatchMenu(PARTY_ACTION_SEND_MON_TO_BOX)) return FALSE;
+        gPartyMenu.layout = PARTY_LAYOUT_SINGLE; gPartyMenu.action = PARTY_ACTION_SEND_MON_TO_BOX;
+        UpdatePartyToBattleOrder();
+    }
+    else { UpdatePartyToFieldOrder(); EndFollowerCatchMenu(); }
+    return TRUE;
+}
+#endif
 
 static void UNUSED SwitchAliveMonIntoLeadSlot(void)
 {
@@ -8223,7 +8738,7 @@ void MoveDeleterForgetMove(void)
     enum Move move = MOVE_NONE;
     struct BoxPokemon *boxmon = GetSelectedBoxMonFromPcOrParty();
     SetBoxMonData(boxmon, MON_DATA_MOVE1 + gSpecialVar_0x8005, &move);
-    SetBoxMonData(boxmon, MON_DATA_PP1 + gSpecialVar_0x8005, &gMovesInfo[MOVE_NONE].pp);
+    SetBoxMonData(boxmon, MON_DATA_PP1 + gSpecialVar_0x8005, &GetMoveInfo(MOVE_NONE)->pp);
     u8 ppBonuses = GetBoxMonData(boxmon, MON_DATA_PP_BONUSES);
     ppBonuses &= gPPUpClearMask[gSpecialVar_0x8005];
     SetBoxMonData(boxmon, MON_DATA_PP_BONUSES, &ppBonuses);
@@ -8470,17 +8985,28 @@ static struct Pokemon *GetPartyMonFromPartyMenuId(s8 menuId)
 
 static void GetMultiPartyForSummaryScreen(void)
 {
+#ifdef NATIVE
+    memcpy(sModsSummaryOwnedParty, gParties[B_TRAINER_PLAYER], sizeof(sModsSummaryOwnedParty));
+#endif
     // Consolidate player and partner party into player party for summary screen
     gParties[B_TRAINER_PLAYER][3] = gParties[B_TRAINER_PLAYER][2];
     gParties[B_TRAINER_PLAYER][2] = gParties[B_TRAINER_PLAYER][1];
     gParties[B_TRAINER_PLAYER][1] = gParties[B_TRAINER_PARTNER][0];
     gParties[B_TRAINER_PLAYER][4] = gParties[B_TRAINER_PARTNER][1];
     gParties[B_TRAINER_PLAYER][5] = gParties[B_TRAINER_PARTNER][2];
+#ifdef NATIVE
+    sModsBattlePartySummary = TRUE;
+#endif
 }
 
 
 static void RestoreMultiPartyFromSummaryScreen(void)
 {
+#ifdef NATIVE
+    ModsOwnedBattlePartySummaryCheck();
+    bool32 checkedSummary = sModsBattlePartySummary;
+    sModsBattlePartySummary = FALSE;
+#endif
     // Restore player mons
     gParties[B_TRAINER_PLAYER][1] = gParties[B_TRAINER_PLAYER][2];
     gParties[B_TRAINER_PLAYER][2] = gParties[B_TRAINER_PLAYER][3];
@@ -8488,6 +9014,10 @@ static void RestoreMultiPartyFromSummaryScreen(void)
     // Clear partner mons from back of player party
     for (u32 i = MULTI_PARTY_SIZE; i < PARTY_SIZE; i++)
     {
+#ifdef NATIVE
+        if (checkedSummary) ZeroMonDataWithOwnedReceipt(&gParties[B_TRAINER_PLAYER][i]);
+        else
+#endif
         ZeroMonData(&gParties[B_TRAINER_PLAYER][i]);
     }
 }

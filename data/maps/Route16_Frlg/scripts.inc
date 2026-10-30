@@ -35,7 +35,9 @@ Route16_EventScript_Snorlax::
 	msgbox Text_WantToUsePokeFlute, MSGBOX_YESNO
 	goto_if_eq VAR_RESULT, NO, Route16_EventScript_DontUsePokeFlute
 	call EventScript_AwakenSnorlax
+	identifywildencounter "rhh:encounter/route16_frlg/snorlax"
 	setwildbattle SPECIES_SNORLAX, 30
+	guardwildbattle release
 	waitse
 	playmoncry SPECIES_SNORLAX, CRY_MODE_ENCOUNTER
 	delay 40
@@ -84,14 +86,14 @@ Route16_Text_LaoPostBattle::
 	.string "What's it to you?$"
 
 Route16_Text_KojiIntro::
-	.string "Nice BIKE!\n"
+	.string "Nice Bike!\n"
 	.string "Hand it over!$"
 
 Route16_Text_KojiDefeat::
 	.string "Knockout!$"
 
 Route16_Text_KojiPostBattle::
-	.string "Forget it, who needs your BIKE!$"
+	.string "Forget it, who needs your Bike!$"
 
 Route16_Text_LukeIntro::
 	.string "Come out and play, little mouse!$"
@@ -123,7 +125,7 @@ Route16_Text_CamronDefeat::
 	.string "Bad, bad, bad!$"
 
 Route16_Text_CamronPostBattle::
-	.string "If I'm going to have POKéMON, they\n"
+	.string "If I'm going to have Pokémon, they\n"
 	.string "may as well be ferocious.\p"
 	.string "I'd use them to leave my enemies\n"
 	.string "in tatters.$"
@@ -137,12 +139,12 @@ Route16_Text_RubenDefeat::
 
 Route16_Text_RubenPostBattle::
 	.string "I get my kicks by harassing people\n"
-	.string "with my stinking POKéMON.\p"
+	.string "with my stinking Pokémon.\p"
 	.string "They're great for startling people.\n"
 	.string "And, they bite, too.$"
 
 Route16_Text_MonSprawledOutInSlumber::
-	.string "A POKéMON is sprawled out in\n"
+	.string "A Pokémon is sprawled out in\n"
 	.string "a deep and comfortable slumber.$"
 
 Route16_Text_CyclingRoadSign::
@@ -150,8 +152,8 @@ Route16_Text_CyclingRoadSign::
 	.string "CYCLING ROAD$"
 
 Route16_Text_RouteSign::
-	.string "ROUTE 16\n"
-	.string "CELADON CITY - FUCHSIA CITY$"
+	.string "Route 16\n"
+	.string "CELADON City - FUCHSIA City$"
 
 Route16_Text_JedIntro::
 	.string "JED: Our love knows no bounds.\n"
@@ -166,7 +168,7 @@ Route16_Text_JedPostBattle::
 	.string "You need to focus less on me.$"
 
 Route16_Text_JedNotEnoughMons::
-	.string "JED: You have just one POKéMON?\n"
+	.string "JED: You have just one Pokémon?\n"
 	.string "Is there no love in your heart?$"
 
 Route16_Text_LeaIntro::
@@ -183,6 +185,6 @@ Route16_Text_LeaPostBattle::
 
 Route16_Text_LeaNotEnoughMons::
 	.string "LEA: Oh, you don't have two\n"
-	.string "POKéMON with you?\p"
+	.string "Pokémon with you?\p"
 	.string "Doesn't it feel lonely for you or\n"
-	.string "your POKéMON?$"
+	.string "your Pokémon?$"

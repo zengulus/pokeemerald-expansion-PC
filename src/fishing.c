@@ -4,6 +4,7 @@
 #include "fieldmap.h"
 #include "field_effect_helpers.h"
 #include "field_player_avatar.h"
+#include "fishing.h"
 #include "menu.h"
 #include "metatile_behavior.h"
 #include "random.h"
@@ -14,6 +15,9 @@
 #include "tv.h"
 #include "wild_encounter.h"
 #include "config/fishing.h"
+#ifdef NATIVE
+#include "mods.h"
+#endif
 
 static void Task_Fishing(u8);
 static bool32 Fishing_Init(struct Task *);
@@ -37,8 +41,7 @@ static bool32 Fishing_EndNoMon(struct Task *);
 static void AlignFishingAnimationFrames(void);
 static bool32 DoesFishingMinigameAllowCancel(void);
 static bool32 Fishing_DoesFirstMonInPartyHaveSuctionCupsOrStickyHold(void);
-static bool32 Fishing_RollForBite(u32, bool32);
-static u32 CalculateFishingBiteOdds(u32, bool32);
+static u32 CalculateFishingBiteOdds(u32, bool32, bool32);
 static u32 CalculateFishingFollowerBoost(void);
 static u32 CalculateFishingProximityBoost(void);
 static u32 CalculateFishingTimeOfDayBoost(void);
@@ -62,7 +65,7 @@ static u32 CalculateFishingTimeOfDayBoost(void);
 #endif
 
 static const u8 sText_OhABite[] = _("Oh! A bite!");
-static const u8 sText_PokemonOnHook[] = _("A POKéMON's on the hook!{PAUSE_UNTIL_PRESS}");
+static const u8 sText_PokemonOnHook[] = _("A Pokémon's on the hook!{PAUSE_UNTIL_PRESS}");
 static const u8 sText_NotEvenANibble[] = _("Not even a nibble…{PAUSE_UNTIL_PRESS}");
 static const u8 sText_ItGotAway[] = _("It got away…{PAUSE_UNTIL_PRESS}");
 
@@ -268,11 +271,7 @@ static bool32 Fishing_CheckForBite(struct Task *task)
 
     firstMonHasSuctionOrSticky = Fishing_DoesFirstMonInPartyHaveSuctionCupsOrStickyHold();
 
-    if (firstMonHasSuctionOrSticky && I_FISHING_STICKY_BOOST < GEN_4)
-        bite = RandomPercentage(RNG_FISHING_GEN3_STICKY, FISHING_GEN3_STICKY_CHANCE);
-
-    if (!bite)
-        bite = Fishing_RollForBite(task->tFishingRod, firstMonHasSuctionOrSticky);
+    bite = FishingRollForBite(task->tFishingRod, firstMonHasSuctionOrSticky, I_FISHING_STICKY_BOOST < GEN_4);
 
     if (!bite)
         task->tStep = FISHING_NOT_EVEN_NIBBLE;
@@ -400,7 +399,16 @@ static bool32 Fishing_StartEncounter(struct Task *task)
     {
         gPlayerAvatar.preventStep = FALSE;
         UnlockPlayerFieldControls();
-        FishingWildEncounter(task->tFishingRod);
+        if (!FishingWildEncounter(task->tFishingRod))
+        {
+            gChainFishingDexNavStreak = 0;
+            LockPlayerFieldControls(); gPlayerAvatar.preventStep = TRUE;
+            LoadMessageBoxAndFrameGfx(0, TRUE);
+            FillWindowPixelBuffer(0, PIXEL_FILL(1));
+            AddTextPrinterParameterized2(0, FONT_NORMAL, sText_ItGotAway, 1, 0, TEXT_COLOR_DARK_GRAY, TEXT_COLOR_WHITE, TEXT_COLOR_LIGHT_GRAY);
+            task->tStep = FISHING_END_NO_MON;
+            return FALSE;
+        }
         RecordFishingAttemptForTV(TRUE);
         DestroyTask(FindTaskIdByFunc(Task_Fishing));
     }
@@ -494,12 +502,26 @@ static bool32 Fishing_DoesFirstMonInPartyHaveSuctionCupsOrStickyHold(void)
     return (ability == ABILITY_SUCTION_CUPS || ability == ABILITY_STICKY_HOLD);
 }
 
-static bool32 Fishing_RollForBite(u32 rod, bool32 isStickyHold)
+bool32 FishingRollForBite(u32 rod, bool32 isStickyHold, bool32 legacySticky)
 {
-    return ((RandomUniform(RNG_FISHING_BITE, 1, 100)) <= CalculateFishingBiteOdds(rod, isStickyHold));
+    if (isStickyHold && legacySticky)
+    {
+        u32 chance = FISHING_GEN3_STICKY_CHANCE;
+#ifdef NATIVE
+        chance = ModsFishingBiteRate(rod, isStickyHold, RHH_FISHING_BITE_STICKY, chance);
+#endif
+        /* Keep the legacy weighted roll, including when a mod offers 0 or 100. */
+        const u16 weights[] = {100 - chance, chance};
+        if (RandomWeightedArray(RNG_FISHING_GEN3_STICKY, 100, ARRAY_COUNT(weights), weights)) return TRUE;
+    }
+    u32 odds = CalculateFishingBiteOdds(rod, isStickyHold, legacySticky);
+#ifdef NATIVE
+    odds = ModsFishingBiteRate(rod, isStickyHold, RHH_FISHING_BITE_REGULAR, odds);
+#endif
+    return RandomUniform(RNG_FISHING_BITE, 1, 100) <= odds;
 }
 
-static u32 CalculateFishingBiteOdds(u32 rod, bool32 isStickyHold)
+static u32 CalculateFishingBiteOdds(u32 rod, bool32 isStickyHold, bool32 legacySticky)
 {
     u32 odds;
 
@@ -514,7 +536,7 @@ static u32 CalculateFishingBiteOdds(u32 rod, bool32 isStickyHold)
     odds += CalculateFishingProximityBoost();
     odds += CalculateFishingTimeOfDayBoost();
 
-    if (isStickyHold && I_FISHING_STICKY_BOOST >= GEN_4)
+    if (isStickyHold && !legacySticky)
         odds *= 2;
 
     odds = min(100, odds);

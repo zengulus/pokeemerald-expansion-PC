@@ -94,6 +94,9 @@ BattleScript_ItemCureStatusAfterItemMsg:
 	itemcurestatus BattleScript_ItemCureStatusEnd, BattleScript_CureStatus_Battler
 	printfromtable gPartyCureStatusStringIds
 	waitmessage B_WAIT_TIME_LONG
+#ifdef NATIVE
+	callnative BS_ModBagStatusReactions
+#endif
 BattleScript_ItemCureStatusEnd:
 	end
 
@@ -101,6 +104,9 @@ BattleScript_CureStatus_Battler::
 	updatestatusicon BS_SCRIPTING
 	printfromtable gCureStatusStringIds
 	waitmessage B_WAIT_TIME_LONG
+#ifdef NATIVE
+	callnative BS_ModBagStatusReactions
+#endif
 	end
 
 BattleScript_ItemHealAndCureStatus::

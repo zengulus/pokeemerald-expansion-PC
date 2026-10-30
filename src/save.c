@@ -81,10 +81,12 @@ struct
 
 // These will produce an error if a save struct is larger than the space
 // alloted for it in the flash.
+#ifndef NATIVE
 STATIC_ASSERT(sizeof(struct SaveBlock3) <= SAVE_BLOCK_3_CHUNK_SIZE * NUM_SECTORS_PER_SLOT, SaveBlock3FreeSpace);
 STATIC_ASSERT(sizeof(struct SaveBlock2) <= SECTOR_DATA_SIZE, SaveBlock2FreeSpace);
 STATIC_ASSERT(sizeof(struct SaveBlock1) <= SECTOR_DATA_SIZE * (SECTOR_ID_SAVEBLOCK1_END - SECTOR_ID_SAVEBLOCK1_START + 1), SaveBlock1FreeSpace);
 STATIC_ASSERT(sizeof(struct PokemonStorage) <= SECTOR_DATA_SIZE * (SECTOR_ID_PKMN_STORAGE_END - SECTOR_ID_PKMN_STORAGE_START + 1), PokemonStorageFreeSpace);
+#endif
 
 COMMON_DATA u16 gLastWrittenSector = 0;
 COMMON_DATA u32 gLastSaveCounter = 0;
@@ -102,6 +104,9 @@ EWRAM_DATA struct SaveSector gSaveDataBuffer = {0}; // Buffer used for reading/w
 
 void ClearSaveData(void)
 {
+#ifdef NATIVE
+    if (NativeSaveEraseGame()) gDamagedSaveSectors = 1;
+#else
     u16 i;
 
     // Clear the full save two sectors at a time
@@ -110,6 +115,7 @@ void ClearSaveData(void)
         EraseFlashSector(i);
         EraseFlashSector(i + SECTORS_COUNT / 2);
     }
+#endif
 }
 
 void Save_ResetSaveCounters(void)
@@ -722,14 +728,61 @@ static void UpdateSaveAddresses(void)
     }
 }
 
+#ifdef NATIVE
+static int StageNativeGame(bool32 retainStorage)
+{
+    const void *regions[4] = {gSaveBlock2Ptr, gSaveBlock1Ptr, gPokemonStoragePtr, gSaveBlock3Ptr};
+    const size_t sizes[4] = {sizeof(*gSaveBlock2Ptr), sizeof(*gSaveBlock1Ptr),
+                             sizeof(*gPokemonStoragePtr), sizeof(*gSaveBlock3Ptr)};
+    return NativeSaveStageGame(regions, sizes, retainStorage);
+}
+
+static int LoadNativeGame(u32 *generation)
+{
+    void *regions[4] = {gSaveBlock2Ptr, gSaveBlock1Ptr, gPokemonStoragePtr, gSaveBlock3Ptr};
+    const size_t sizes[4] = {sizeof(*gSaveBlock2Ptr), sizeof(*gSaveBlock1Ptr),
+                             sizeof(*gPokemonStoragePtr), sizeof(*gSaveBlock3Ptr)};
+    return NativeSaveLoadGame(regions, sizes, generation);
+}
+static u32 sNativeIncrementalPrevious;
+#endif
+
 u8 HandleSavingData(u8 saveType)
 {
+#ifdef NATIVE
+    u32 *backupVar = gTrainerHillVBlankCounter;
+    u32 previousCounter = gSaveCounter;
+    if (NativeSaveBegin()) { gDamagedSaveSectors = 1; return 1; }
+    gTrainerHillVBlankCounter = NULL;
+    gDamagedSaveSectors = 0;
+    if (saveType == SAVE_HALL_OF_FAME_ERASE_BEFORE || saveType == SAVE_OVERWRITE_DIFFERENT_FILE)
+    {
+        if (NativeSaveSpecialWrite(SECTOR_ID_HOF_1, NULL, 0)
+            || NativeSaveSpecialWrite(SECTOR_ID_TRAINER_HILL, NULL, 0)
+            || NativeSaveSpecialWrite(SECTOR_ID_RECORDED_BATTLE, NULL, 0)) gDamagedSaveSectors = 1;
+    }
+    if (saveType == SAVE_HALL_OF_FAME || saveType == SAVE_HALL_OF_FAME_ERASE_BEFORE)
+    {
+        if (GetGameStat(GAME_STAT_ENTERED_HOF) < 999) IncrementGameStat(GAME_STAT_ENTERED_HOF);
+        if (gHoFSaveBuffer && gHoFSaveCount)
+        {
+            if (NativeSaveSpecialWrite(SECTOR_ID_HOF_1, gHoFSaveBuffer, HALL_OF_FAME_STORAGE_SIZE))
+                gDamagedSaveSectors = 1;
+        }
+        else gDamagedSaveSectors = 1;
+    }
+    CopyPartyAndObjectsToSave();
+    if (saveType != SAVE_LINK && saveType != SAVE_EREADER) ++gSaveCounter;
+    if (!gSaveCounter) ++gSaveCounter;
+    if (StageNativeGame(saveType == SAVE_LINK || saveType == SAVE_EREADER)) gDamagedSaveSectors = 1;
+    gTrainerHillVBlankCounter = backupVar;
+    if (NativeSaveEnd(gSaveCounter, !gDamagedSaveSectors))
+    { gSaveCounter = previousCounter; gDamagedSaveSectors = 1; }
+    else ModsAfterSave();
+    return 0;
+#else
     u8 i;
     u32 *backupVar = gTrainerHillVBlankCounter;
-
-#ifdef NATIVE
-    if (NativeSaveBegin()) { gDamagedSaveSectors = 1; return 1; }
-#endif
 
     gTrainerHillVBlankCounter = NULL;
     UpdateSaveAddresses();
@@ -783,11 +836,8 @@ u8 HandleSavingData(u8 saveType)
         break;
     }
     gTrainerHillVBlankCounter = backupVar;
-#ifdef NATIVE
-    if (NativeSaveEnd(gSaveCounter, !gDamagedSaveSectors)) gDamagedSaveSectors = 1;
-    else ModsAfterSave();
-#endif
     return 0;
+#endif
 }
 
 u8 TrySavingData(u8 saveType)
@@ -818,15 +868,25 @@ bool8 LinkFullSave_Init(void)
         return TRUE;
 #ifdef NATIVE
     if (NativeSaveBegin()) return TRUE;
-#endif
+    CopyPartyAndObjectsToSave();
+    sNativeIncrementalPrevious = gSaveCounter;
+    ++gSaveCounter;
+    if (!gSaveCounter) ++gSaveCounter;
+    gIncrementalSectorId = 0; gDamagedSaveSectors = 0;
+    return FALSE;
+#else
     UpdateSaveAddresses();
     CopyPartyAndObjectsToSave();
     RestoreSaveBackupVarsAndIncrement(gRamSaveSectorLocations);
     return FALSE;
+#endif
 }
 
 bool8 LinkFullSave_WriteSector(void)
 {
+#ifdef NATIVE
+    return ++gIncrementalSectorId >= NUM_SECTORS_PER_SLOT;
+#else
     u8 status = HandleWriteIncrementalSector(NUM_SECTORS_PER_SLOT, gRamSaveSectorLocations);
     if (gDamagedSaveSectors)
         DoSaveFailedScreen(SAVE_NORMAL);
@@ -838,22 +898,28 @@ bool8 LinkFullSave_WriteSector(void)
         return TRUE;
     else
         return FALSE;
+#endif
 }
 
 bool8 LinkFullSave_ReplaceLastSector(void)
 {
+#ifndef NATIVE
     HandleReplaceSectorAndVerify(NUM_SECTORS_PER_SLOT, gRamSaveSectorLocations);
     if (gDamagedSaveSectors)
         DoSaveFailedScreen(SAVE_NORMAL);
+#endif
     return FALSE;
 }
 
 bool8 LinkFullSave_SetLastSectorSignature(void)
 {
-    CopySectorSignatureByte(NUM_SECTORS_PER_SLOT, gRamSaveSectorLocations);
 #ifdef NATIVE
+    if (StageNativeGame(FALSE)) gDamagedSaveSectors = 1;
     if (NativeSaveEnd(gSaveCounter, !gDamagedSaveSectors)) gDamagedSaveSectors = 1;
     else ModsAfterSave();
+    if (gDamagedSaveSectors) gSaveCounter = sNativeIncrementalPrevious;
+#else
+    CopySectorSignatureByte(NUM_SECTORS_PER_SLOT, gRamSaveSectorLocations);
 #endif
     if (gDamagedSaveSectors)
         DoSaveFailedScreen(SAVE_NORMAL);
@@ -866,8 +932,12 @@ bool8 WriteSaveBlock2(void)
         return TRUE;
 #ifdef NATIVE
     if (NativeSaveBegin()) return TRUE;
-#endif
-
+    CopyPartyAndObjectsToSave();
+    sNativeIncrementalPrevious = gSaveCounter;
+    if (!gSaveCounter) ++gSaveCounter;
+    gIncrementalSectorId = 0; gDamagedSaveSectors = 0;
+    return FALSE;
+#else
     UpdateSaveAddresses();
     CopyPartyAndObjectsToSave();
     RestoreSaveBackupVars(gRamSaveSectorLocations);
@@ -876,6 +946,7 @@ bool8 WriteSaveBlock2(void)
     // so this function only saves the first sector (SECTOR_ID_SAVEBLOCK2)
     HandleReplaceSectorAndVerify(gIncrementalSectorId + 1, gRamSaveSectorLocations);
     return FALSE;
+#endif
 }
 
 // Used in conjunction with WriteSaveBlock2 to write both for certain link saves.
@@ -883,6 +954,18 @@ bool8 WriteSaveBlock2(void)
 // It returns TRUE when finished.
 bool8 WriteSaveBlock1Sector(void)
 {
+#ifdef NATIVE
+    if (++gIncrementalSectorId <= SECTOR_ID_SAVEBLOCK1_END) return FALSE;
+    if (StageNativeGame(TRUE)) gDamagedSaveSectors = 1;
+    if (NativeSaveEnd(gSaveCounter, !gDamagedSaveSectors))
+    {
+        gSaveCounter = sNativeIncrementalPrevious;
+        gDamagedSaveSectors = 1;
+        DoSaveFailedScreen(SAVE_LINK);
+    }
+    else ModsAfterSave();
+    return TRUE;
+#else
     bool32 finished = FALSE;
     u16 sectorId = ++gIncrementalSectorId; // Because WriteSaveBlock2 will have been called prior, this will be SECTOR_ID_SAVEBLOCK1_START
     if (sectorId <= SECTOR_ID_SAVEBLOCK1_END)
@@ -903,15 +986,8 @@ bool8 WriteSaveBlock1Sector(void)
     if (gDamagedSaveSectors)
         DoSaveFailedScreen(SAVE_LINK);
 
-#ifdef NATIVE
-    if (finished && NativeSaveEnd(gSaveCounter, !gDamagedSaveSectors))
-    {
-        gDamagedSaveSectors = 1;
-        DoSaveFailedScreen(SAVE_LINK);
-    }
-    else if (finished) ModsAfterSave();
-#endif
     return finished;
+#endif
 }
 
 u8 LoadGameSave(u8 saveType)
@@ -924,6 +1000,23 @@ u8 LoadGameSave(u8 saveType)
         return SAVE_STATUS_ERROR;
     }
 
+#ifdef NATIVE
+    if (saveType != SAVE_HALL_OF_FAME)
+    {
+        if (!NativeSaveGameAvailable())
+        { gSaveFileStatus = SAVE_STATUS_EMPTY; return SAVE_STATUS_EMPTY; }
+        if (LoadNativeGame(&gSaveCounter))
+        { gSaveFileStatus = SAVE_STATUS_CORRUPT; return SAVE_STATUS_ERROR; }
+        CopyPartyAndObjectsFromSave();
+        ModsAfterLoad();
+        gSaveFileStatus = SAVE_STATUS_OK;
+        gGameContinueCallback = NULL;
+        return SAVE_STATUS_OK;
+    }
+    if (!gHoFSaveBuffer) return SAVE_STATUS_ERROR;
+    return NativeSaveSpecialRead(SECTOR_ID_HOF_1, gHoFSaveBuffer, HALL_OF_FAME_STORAGE_SIZE)
+        ? SAVE_STATUS_ERROR : SAVE_STATUS_OK;
+#endif
     UpdateSaveAddresses();
     switch (saveType)
     {
@@ -965,6 +1058,12 @@ u8 LoadGameSave(u8 saveType)
 
 u16 GetSaveBlocksPointersBaseOffset(void)
 {
+#ifdef NATIVE
+    u8 trainerId[4];
+    if (NativeSaveReadGameRegion(0, offsetof(struct SaveBlock2, playerTrainerId), trainerId, sizeof(trainerId)))
+        return 0;
+    return trainerId[0] + trainerId[1] + trainerId[2] + trainerId[3];
+#else
     u16 i, slotOffset;
     struct SaveSector *sector;
 
@@ -986,6 +1085,7 @@ u16 GetSaveBlocksPointersBaseOffset(void)
                    sector->data[offsetof(struct SaveBlock2, playerTrainerId[3])];
     }
     return 0;
+#endif
 }
 
 u32 TryReadSpecialSaveSector(u8 sector, u8 *dst)

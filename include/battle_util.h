@@ -38,7 +38,20 @@ struct DamageContext
     u32 terrain:4;
     u32 useStoredTypeEffectiveness:1;
     u32 padding:17;
+#ifdef NATIVE
+    enum Species beatUpContributorSpecies;
+    u8 beatUpContributorFlags, beatUpContributorIndex, beatUpContributorSlot;
+#endif
 };
+
+#ifdef NATIVE
+#define BEAT_UP_CONTRIBUTOR_VALID       (1u << 0)
+#define BEAT_UP_CONTRIBUTOR_AI          (1u << 1)
+#define BEAT_UP_CONTRIBUTOR_ESTIMATED   (1u << 2)
+#define BEAT_UP_CONTRIBUTOR_APPARENT    (1u << 3)
+#define BEAT_UP_CONTRIBUTOR_OWN_PARTY   (1u << 4)
+#define BEAT_UP_CONTRIBUTOR_SLOT_KNOWN  (1u << 5)
+#endif
 
 // Helper struct to keep the arg list small and prevent constant recalculations of abilities/hold effects.
 struct BattleCalcValues
@@ -96,7 +109,16 @@ bool32 IsAbilityAndRecord(enum BattlerId battler, enum Ability battlerAbility, e
 bool32 HandleFaintedMonActions(void);
 bool32 HasNoMonsToSwitch(enum BattlerId battler, u8 partyIdBattlerOn1, u8 partyIdBattlerOn2);
 enum WeatherFailure TryChangeBattleWeather(enum BattlerId battler, u32 battleWeatherId, enum Ability ability);
+enum WeatherFailure TryChangeBattleWeatherFromMove(enum BattlerId battler, u32 battleWeatherId, enum Move move);
+#ifdef NATIVE
+enum WeatherFailure TryChangeBattleWeatherFromInnate(enum BattlerId battler, u32 battleWeatherId, u64 ability);
+#endif
 bool32 TryChangeBattleTerrain(enum BattlerId battler, enum BattleTerrain terrain);
+bool32 TryChangeBattleTerrainFromAbility(enum BattlerId battler, enum BattleTerrain terrain, enum Ability ability);
+bool32 TryChangeBattleTerrainFromMove(enum BattlerId battler, enum BattleTerrain terrain, enum Move move);
+#ifdef NATIVE
+bool32 TryChangeBattleTerrainFromInnate(enum BattlerId battler, enum BattleTerrain terrain, u64 ability);
+#endif
 bool32 IsPowderMoveBlocked(struct DamageContext *ctx);
 bool32 CanTargetBlockPranksterMove(struct DamageContext *ctx, s32 movePriority);
 bool32 CanPsychicTerrainProtectTarget(struct DamageContext *ctx, s32 movePriority);
@@ -110,6 +132,7 @@ bool32 IsMoldBreakerTypeAbility(enum BattlerId battler, enum Ability ability, en
 enum Ability GetBattlerAbilityIgnoreMoldBreaker(enum BattlerId battler);
 enum Ability GetBattlerAbilityNoAbilityShield(enum BattlerId battler);
 enum Ability GetBattlerAbilityInternal(enum BattlerId battler, bool32 ignoreMoldBreaker, bool32 noAbilityShield);
+enum Ability GetBattlerAbilityReadOnly(enum BattlerId battler, bool32 ignoreMoldBreaker);
 enum Ability GetBattlerAbility(enum BattlerId battler);
 u32 IsAbilityOnSide(enum BattlerId battler, enum Ability ability);
 u32 IsAbilityOnField(enum Ability ability);
@@ -128,13 +151,19 @@ enum HoldEffect GetBattlerHoldEffect(enum BattlerId battler);
 enum HoldEffect GetBattlerHoldEffectIgnoreAbility(enum BattlerId battler);
 enum HoldEffect GetBattlerHoldEffectIgnoreNegation(enum BattlerId battler);
 enum HoldEffect GetBattlerHoldEffectInternal(enum BattlerId battler, enum Ability ability);
+enum HoldEffect GetBattlerHoldEffectIgnoreAbilityReadOnly(enum BattlerId battler);
 u32 GetBattlerHoldEffectParam(enum BattlerId battler);
 bool32 CanBattlerAvoidContactEffects(enum BattlerId battlerAtk, enum BattlerId battlerDef, enum Ability abilityAtk, enum HoldEffect holdEffectAtk, enum Move move);
 bool32 IsMoveMakingContact(enum BattlerId battlerAtk, enum BattlerId battlerDef, enum Ability abilityAtk, enum HoldEffect holdEffectAtk, enum Move move);
 bool32 IsBattlerGrounded(enum BattlerId battler, enum Ability ability, enum HoldEffect holdEffect);
+#ifdef NATIVE
+bool32 IsBattlerGroundedAssumingFlying(enum BattlerId battler, enum Ability ability, enum HoldEffect holdEffect, bool32 flying);
+enum HoldEffect GetBattlerHoldEffectReadOnly(enum BattlerId battler, enum Ability ability);
+#endif
 u32 GetMoveSlot(enum Move *moves, enum Move move);
 u32 GetBattlerWeight(enum BattlerId battler, enum Ability ability, enum HoldEffect holdEffect);
 u32 GetCriticalHitOdds(u32 critChance);
+u32 GetCriticalHitOddsForGeneration(u32 critChance, u32 generation);
 s32 CalcCritChanceStage(struct DamageContext *ctx);
 s32 CalcCritChanceStageGen1(struct DamageContext *ctx);
 s32 CalculateMoveDamage(struct DamageContext *ctx);
@@ -142,12 +171,16 @@ s32 CalculateMoveDamageVars(struct DamageContext *ctx);
 s32 DoFixedDamageMoveCalc(struct DamageContext *ctx);
 s32 ApplyModifiersAfterDmgRoll(struct DamageContext *ctx, s32 dmg);
 uq4_12_t CalcTypeEffectivenessMultiplier(struct DamageContext *ctx);
+uq4_12_t GetTypeEffectivenessForTypes(struct DamageContext *ctx, uq4_12_t initial, const enum Type *types, u32 count);
+uq4_12_t GetTypeModifierForTypes(enum Type attack, const enum Type *types, u32 count);
 uq4_12_t CalcPartyMonTypeEffectivenessMultiplier(enum Move move, enum Species speciesDef, enum Ability abilityDef);
 uq4_12_t GetTypeModifier(enum Type atkType, enum Type defType);
 uq4_12_t GetOverworldTypeEffectiveness(struct Pokemon *mon, enum Type moveType);
 void UpdateMoveResultFlags(uq4_12_t modifier, u32 *resultFlags);
 s32 GetStealthHazardDamage(enum TypeSideHazard hazardType, enum BattlerId battler);
 s32 GetStealthHazardDamageByTypesAndHP(enum TypeSideHazard hazardType, enum Type type1, enum Type type2, u32 maxHp);
+/* Compose all distinct types before rounding the final hazard damage. */
+s32 GetStealthHazardDamageForTypes(enum TypeSideHazard hazardType, const enum Type *types, u32 count, u32 maxHp);
 bool32 CanMegaEvolve(enum BattlerId battler);
 bool32 CanUltraBurst(enum BattlerId battler);
 void ActivateMegaEvolution(enum BattlerId battler);
@@ -245,6 +278,12 @@ bool32 AreBattlersOfSameGender(enum BattlerId battler1, enum BattlerId battler2)
 u32 CalcSecondaryEffectChance(enum BattlerId battler, enum Ability battlerAbility, const struct AdditionalEffect *additionalEffect);
 bool32 MoveEffectIsGuaranteed(enum BattlerId battler, enum Ability battlerAbility, const struct AdditionalEffect *additionalEffect);
 void GetBattlerTypes(enum BattlerId battler, bool32 ignoreTera, enum Type types[static 3]);
+struct BattleTypeList;
+void GetBattlerTypeList(enum BattlerId battler, bool32 ignoreTera, struct BattleTypeList *list);
+void GetBattlerRawTypeList(enum BattlerId battler, struct BattleTypeList *list);
+void ApplyRoostToTypeList(struct BattleTypeList *list);
+bool32 IsBattlerRawType(enum BattlerId battler, enum Type type);
+void ApplyRoostToTypes(enum Type types[static 3]);
 bool32 CanMonParticipateInSkyBattle(struct Pokemon *mon);
 void RemoveBattlerType(enum BattlerId battler, enum Type type);
 enum Type GetBattleMoveType(enum Move move);

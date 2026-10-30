@@ -12,6 +12,9 @@
 #include "sprite.h"
 #include "trig.h"
 #include "wild_encounter_ow.h"
+#ifdef NATIVE
+#include "mods.h"
+#endif
 #include "constants/event_objects.h"
 #include "constants/field_effects.h"
 #include "constants/rgb.h"
@@ -250,6 +253,10 @@ static void UpdateObjectReflectionSprite(struct Sprite *reflectionSprite)
 
     if (objectEvent->hideReflection == TRUE)
         reflectionSprite->invisible = TRUE;
+#ifdef NATIVE
+    s32 coverY;
+    if (ModsWildActorPresentation(objectEvent->spriteId, &coverY)) reflectionSprite->invisible = TRUE;
+#endif
 
     // Support "virtual" sprites which can't be rotated via affines
     if (reflectionSprite->subspriteTables[0].subsprites)
@@ -395,6 +402,10 @@ void UpdateShadowFieldEffect(struct Sprite *sprite)
         sprite->y = linkedSprite->y + sprite->sYOffset;
         #endif
         sprite->invisible = linkedSprite->invisible;
+#ifdef NATIVE
+        s32 coverY;
+        if (ModsWildActorPresentation(objectEvent->spriteId, &coverY) == 1) sprite->invisible = TRUE;
+#endif
         if (objectEvent->jumpDone)
         {
             //  Ugly signaling to disable shadows after a jump

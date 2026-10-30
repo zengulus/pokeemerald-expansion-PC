@@ -24,7 +24,9 @@ MtEmber_Summit_EventScript_ShowMoltres::
 MtEmber_Summit_EventScript_Moltres::
 	lock
 	faceplayer
+	identifywildencounter "rhh:encounter/mt_ember_summit_frlg/moltres"
 	setwildbattle SPECIES_MOLTRES, 50
+	guardwildbattle release
 	waitse
 	playmoncry SPECIES_MOLTRES, CRY_MODE_ENCOUNTER
 	message Text_Gyaoo

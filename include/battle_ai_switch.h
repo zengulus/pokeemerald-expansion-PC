@@ -83,5 +83,6 @@ void ModifySwitchAfterMoveScoring(enum BattlerId battler);
 u32 AI_SelectRevivalBlessingMon(enum BattlerId battler);
 bool32 IsSwitchinValid(enum BattlerId battler);
 bool32 IsAceMon(enum BattlerId battler, u32 monPartyId);
+uq4_12_t AI_GetBattlerTypeMatchup(enum BattlerId opposingBattler, enum BattlerId battler);
 
 #endif // GUARD_BATTLE_AI_SWITCH_H

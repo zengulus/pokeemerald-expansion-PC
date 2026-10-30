@@ -117,7 +117,7 @@ u32 GetSynchronizedNature(enum GeneratedMonOrigin origin, enum Species species)
         return NATURE_RANDOM;
     if (!(sSynchronizeModes[origin](species)))
         return NATURE_RANDOM;
-    return GetMonData(&gParties[B_TRAINER_PLAYER][0], MON_DATA_PERSONALITY) % NUM_NATURES;
+    return GetNature(&gParties[B_TRAINER_PLAYER][0]);
 }
 
 u32 GetSynchronizedGender(enum GeneratedMonOrigin origin, enum Species species)

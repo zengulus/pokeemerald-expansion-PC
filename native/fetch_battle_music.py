@@ -42,6 +42,12 @@ def definitions():
                 author=author, format='midi', id=f'rhh:midi/gen{gen}/{role}',
                 source_catalogue=CATALOGUES[platform]))
     files.extend([
+        dict(path='gameboy/gen1.gbs', source='https://fi.zophar.net/soundfiles/gameboy-gbs/pokemon-red/Pokemon%20Red%20%28EMU%29.zophar.zip',
+             zip_entry='DMG-APAE-USA.gbs', zip_archive_small=True, format='gbs', id='rhh:gameboy/gen1',
+             source_sha256='dfba721f7e8b0300e14f5e4d8135a2117c2fdf10052f6a643b6e21b51223e7c4'),
+        dict(path='gameboy/gen2.gbs', source='https://fi.zophar.net/soundfiles/gameboy-gbs/pokemon-gold/Pokemon%20Gold%20%28EMU%29.zophar.zip',
+             zip_entry='DMG-AAUJ-JPN.gbs', zip_archive_small=True, format='gbs', id='rhh:gameboy/gen2',
+             source_sha256='2af120a66272675ae69c287d6608f6fb9bca106758b4b18a807bc277c0bb87e5'),
         dict(path='fonts/gen12.sf2', source=GM_MIRROR + 'Gameboy_GM_Soundfont_2.sf2', format='sf2', id='rhh:soundfont/gen12'),
         dict(path='fonts/gen3.sf2', source='https://archive.org/download/soundfonts-collection/The%20Ultimate%20SoundFont%20Pack.zip',
              zip_entry='Pokémon Emerald.sf2', archive_size=3226345874,
@@ -106,19 +112,43 @@ def main():
     old = json.loads(manifest_path.read_text()) if manifest_path.exists() else None
     if not old and not args.record:
         parser.error('No lock manifest; choosing assets requires --record')
-    files = definitions() if args.record else old['files']
+    if args.record:
+        files = definitions()
+        # Derived DS exports require both the original sequence and its exact
+        # instrument bank. Keep their recorded provenance when refreshing the
+        # download catalog rather than replacing them with GM arrangements.
+        derived = [entry.copy() for entry in old['files'] if entry.get('derived')] if old else []
+        paths = {entry['path'] for entry in derived}
+        files = [entry for entry in files if entry['path'] not in paths] + derived
+    else:
+        files = old['files']
     def fetch(entry):
         dest = ASSETS / entry['path']
         if dest.exists() and (args.record or hashlib.sha256(dest.read_bytes()).hexdigest() == entry['sha256']):
             data = dest.read_bytes()
         else:
-            if entry.get('zip_entry'):
+            if entry.get('derived'):
+                raise ValueError(f"{entry['path']} is a derived DS export; see THIRD_PARTY.md for regeneration")
+            if entry.get('zip_archive_small'):
+                request = urllib.request.Request(entry['source'], headers={'User-Agent': 'RHH-native-asset-fetch/1.0'})
+                with urllib.request.urlopen(request, timeout=60) as response:
+                    archive = response.read(2 * 1024 * 1024 + 1)
+                if len(archive) > 2 * 1024 * 1024: raise ValueError('Music archive exceeds bounds')
+                if entry.get('source_sha256') and hashlib.sha256(archive).hexdigest() != entry['source_sha256']:
+                    raise ValueError(f"Archive hash changed: {entry['path']}")
+                with zipfile.ZipFile(io.BytesIO(archive)) as zipped:
+                    info = zipped.getinfo(entry['zip_entry'])
+                    if info.file_size > 1024 * 1024: raise ValueError('GBS file exceeds bounds')
+                    data = zipped.read(info)
+            elif entry.get('zip_entry'):
                 data = fetch_zip_member(entry)
             else:
                 request = urllib.request.Request(entry['source'], headers={'User-Agent': 'RHH-native-asset-fetch/1.0'})
                 data = urllib.request.urlopen(request, timeout=60).read()
         if entry['format'] == 'midi' and not data.startswith(b'MThd'):
             raise ValueError(f"Not a MIDI file: {entry['path']}")
+        if entry['format'] == 'gbs' and (len(data) < 112 or data[:4] != b'GBS\1'):
+            raise ValueError(f"Not a GBS file: {entry['path']}")
         if entry['format'] == 'sf2' and (data[:4] != b'RIFF' or data[8:12] != b'sfbk'):
             rejected = Path('/tmp/rhh-music-research') / (Path(entry['path']).name + '.response')
             rejected.write_bytes(data)
@@ -132,9 +162,19 @@ def main():
         return entry
     with ThreadPoolExecutor(max_workers=4) as pool:
         results = list(pool.map(fetch, files))
-    manifest = dict(version=1, files=results, packs=[dict(id=f'rhh:music/gen{g}', generation=g,
+    packs = [dict(id=f'rhh:music/gen{g}', generation=g,
         font=f'fonts/gen{12 if g < 3 else g}.sf2',
-        tracks={r:f'gen{g}/{r}.mid' for r in ['wild','trainer','gym','champion']}) for g in range(1,6)])
+        tracks={r:f'gen{g}/{r}.mid' for r in ['wild','trainer','gym','champion']}) for g in range(1,6)]
+    if any(entry['path'] == 'fonts/gen4-native.sf2' for entry in results):
+        packs[3]['font'] = 'fonts/gen4-native.sf2'
+    if any(entry['path'] == 'fonts/gen5-wild.sf2' for entry in results):
+        packs[4].pop('font')
+        packs[4]['fonts'] = {role:f'fonts/gen5-{role}.sf2' for role in ['wild','trainer','gym','champion']}
+    for generation, tracks in [(1, [23, 22, 21, 24]), (2, [40, 41, 45, 46])]:
+        if any(entry['path'] == f'gameboy/gen{generation}.gbs' for entry in results):
+            packs[generation - 1]['gameboy'] = {'file': f'gameboy/gen{generation}.gbs',
+                'tracks': dict(zip(['wild', 'trainer', 'gym', 'champion'], tracks))}
+    manifest = dict(version=1, files=results, packs=packs)
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     manifest_path.write_text(json.dumps(manifest, indent=2) + '\n')
 

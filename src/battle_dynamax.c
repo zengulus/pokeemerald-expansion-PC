@@ -231,17 +231,44 @@ static enum Move GetTypeBasedMaxMove(enum BattlerId battler, enum Type type)
     }
 
     // Regular Max Move
-    if (gTypesInfo[type].maxMove == MOVE_NONE) // failsafe
+    if (type >= NUMBER_OF_MON_TYPES || gTypesInfo[type].maxMove == MOVE_NONE) // failsafe
         return gTypesInfo[0].maxMove;
     return gTypesInfo[type].maxMove;
 }
+
+#ifdef NATIVE
+enum Type GetMaxMoveSourceType(enum BattlerId battler, enum Move baseMove)
+{
+    enum Type savedType = gBattleStruct->dynamicMoveType;
+    enum DamageCategory savedCategory = gBattleStruct->dynamicMoveCategory;
+    enum Gimmick savedGimmick = GetActiveGimmick(battler);
+    bool32 savedAte = gBattleStruct->battlerState[battler].ateBoost;
+    bool32 savedGem = gSpecialStatuses[battler].gemBoost;
+    u32 savedGemParam = gSpecialStatuses[battler].gemParam;
+    gBattleStruct->dynamicMoveType = TYPE_NONE;
+    SetActiveGimmick(battler, GIMMICK_DYNAMAX);
+    SetTypeBeforeUsingMove(baseMove, battler, GetBattlerAbility(battler), GetBattlerHoldEffect(battler));
+    enum Type type = GetBattleMoveType(baseMove);
+    SetActiveGimmick(battler, savedGimmick);
+    gBattleStruct->dynamicMoveType = savedType;
+    gBattleStruct->dynamicMoveCategory = savedCategory;
+    gBattleStruct->battlerState[battler].ateBoost = savedAte;
+    gSpecialStatuses[battler].gemBoost = savedGem;
+    gSpecialStatuses[battler].gemParam = savedGemParam;
+    return type;
+}
+#endif
 
 // Returns the appropriate Max Move or G-Max Move for a battler to use.
 enum Move GetMaxMove(enum BattlerId battler, enum Move baseMove)
 {
     enum Type moveType;
+#ifdef NATIVE
+    moveType = GetMaxMoveSourceType(battler, baseMove);
+#else
     SetTypeBeforeUsingMove(baseMove, battler, GetBattlerAbility(battler), GetBattlerHoldEffect(battler));
     moveType = GetBattleMoveType(baseMove);
+#endif
 
     if (baseMove == MOVE_NONE) // for move display
         return MOVE_NONE;

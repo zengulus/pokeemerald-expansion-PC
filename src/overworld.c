@@ -1716,6 +1716,15 @@ const struct BlendSettings gTimeOfDayBlend[] =
 
 #define MORNING_HOUR_MIDDLE (MORNING_HOUR_BEGIN + ((MORNING_HOUR_END - MORNING_HOUR_BEGIN) / 2))
 
+u32 GetTimeOfDayForHour(s32 hours)
+{
+    if (IsBetweenHours(hours, MORNING_HOUR_BEGIN, MORNING_HOUR_END)) return TIME_MORNING;
+    if (IsBetweenHours(hours, EVENING_HOUR_BEGIN, EVENING_HOUR_END)) return TIME_EVENING;
+    if (IsBetweenHours(hours, NIGHT_HOUR_BEGIN, NIGHT_HOUR_END)) return TIME_NIGHT;
+    return TIME_DAY;
+}
+u32 GetTimeOfDayOverride(void) { return sHoursOverride; }
+
 void UpdateTimeOfDay(bool32 updateBlend)
 {
     s32 hours, minutes;
@@ -1732,7 +1741,6 @@ void UpdateTimeOfDay(bool32 updateBlend)
             gTimeBlend.weight = TIME_BLEND_WEIGHT(MORNING_HOUR_BEGIN, MORNING_HOUR_MIDDLE);
             gTimeBlend.altWeight = (DEFAULT_WEIGHT - gTimeBlend.weight) / 2;
         }
-        gTimeOfDay = TIME_MORNING;
     }
     else if (IsBetweenHours(hours, MORNING_HOUR_MIDDLE, MORNING_HOUR_END)) // morning->day
     {
@@ -1743,7 +1751,6 @@ void UpdateTimeOfDay(bool32 updateBlend)
             gTimeBlend.weight = TIME_BLEND_WEIGHT(MORNING_HOUR_MIDDLE, MORNING_HOUR_END);
             gTimeBlend.altWeight = (DEFAULT_WEIGHT - gTimeBlend.weight) / 2 + (DEFAULT_WEIGHT / 2);
         }
-        gTimeOfDay = TIME_MORNING;
     }
     else if (IsBetweenHours(hours, EVENING_HOUR_BEGIN, EVENING_HOUR_END)) // evening
     {
@@ -1754,7 +1761,6 @@ void UpdateTimeOfDay(bool32 updateBlend)
             gTimeBlend.weight = TIME_BLEND_WEIGHT(EVENING_HOUR_BEGIN, EVENING_HOUR_END);
             gTimeBlend.altWeight = gTimeBlend.weight / 2 + (DEFAULT_WEIGHT / 2);
         }
-        gTimeOfDay = TIME_EVENING;
     }
     else if (IsBetweenHours(hours, NIGHT_HOUR_BEGIN, NIGHT_HOUR_BEGIN + 1)) // evening->night
     {
@@ -1765,7 +1771,6 @@ void UpdateTimeOfDay(bool32 updateBlend)
             gTimeBlend.weight = TIME_BLEND_WEIGHT(NIGHT_HOUR_BEGIN, NIGHT_HOUR_BEGIN + 1);
             gTimeBlend.altWeight = gTimeBlend.weight / 2;
         }
-        gTimeOfDay = TIME_NIGHT;
     }
     else if (IsBetweenHours(hours, NIGHT_HOUR_BEGIN, NIGHT_HOUR_END)) // night
     {
@@ -1775,7 +1780,6 @@ void UpdateTimeOfDay(bool32 updateBlend)
             gTimeBlend.altWeight = 0;
             gTimeBlend.startBlend = gTimeBlend.endBlend = gTimeOfDayBlend[TIME_NIGHT];
         }
-        gTimeOfDay = TIME_NIGHT;
     }
     else // day
     {
@@ -1784,8 +1788,8 @@ void UpdateTimeOfDay(bool32 updateBlend)
             gTimeBlend.weight = gTimeBlend.altWeight = DEFAULT_WEIGHT;
             gTimeBlend.startBlend = gTimeBlend.endBlend = gTimeOfDayBlend[TIME_DAY];
         }
-        gTimeOfDay = TIME_DAY;
     }
+    gTimeOfDay = GetTimeOfDayForHour(hours);
 }
 
 #undef MORNING_HOUR_MIDDLE

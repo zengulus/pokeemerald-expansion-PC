@@ -190,6 +190,10 @@ void NewGameInitData(void)
     PlayTimeCounter_Reset();
     ClearPokedexFlags();
     InitEventData();
+#ifdef NATIVE
+    FlagSet(FLAG_SYS_B_DASH);
+    FlagSet(FLAG_RECEIVED_RUNNING_SHOES);
+#endif
     ClearTVShowData();
     ResetGabbyAndTy();
     ClearSecretBases();

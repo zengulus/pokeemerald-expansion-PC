@@ -46,7 +46,9 @@ SkyPillar_Top_EventScript_Rayquaza::
 	playmoncry SPECIES_RAYQUAZA, CRY_MODE_ENCOUNTER
 	delay 40
 	waitmoncry
+	identifywildencounter "rhh:encounter/sky_pillar_top/rayquaza"
 	setwildbattle SPECIES_RAYQUAZA, 70
+	guardwildbattle releaseall
 	setflag FLAG_SYS_CTRL_OBJ_DELETE
 	special BattleSetup_StartLegendaryBattle
 	clearflag FLAG_SYS_CTRL_OBJ_DELETE

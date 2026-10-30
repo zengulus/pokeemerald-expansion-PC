@@ -18,6 +18,9 @@ struct SetEffect
 };
 
 void SetMoveEffect(struct BattleCalcValues *cv, struct SetEffect *se);
+#ifdef NATIVE
+void ModsApplyDrainAmount(struct BattleCalcValues *cv, const u8 *resume, s32 amount);
+#endif
 void SetMoveEffectHelper(enum BattlerId battlerAtk, enum BattlerId effectBattler, enum MoveEffect moveEffect, const u8 *battleScript, enum SetMoveEffectFlags effectFlags);
 u32 NumAffectedSpreadMoveTargets(void);
 

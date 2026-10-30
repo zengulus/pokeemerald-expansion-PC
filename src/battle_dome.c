@@ -1,5 +1,6 @@
 #include "global.h"
 #include "battle_dome.h"
+#include "battle_type_set.h"
 #include "battle.h"
 #include "battle_ai_util.h"
 #include "battle_main.h"
@@ -25,6 +26,7 @@
 #include "decompress.h"
 #include "party_menu.h"
 #include "menu.h"
+#include "mods.h"
 #include "sound.h"
 #include "pokemon_icon.h"
 #include "data.h"
@@ -79,12 +81,6 @@ struct TourneyTreeLineSection
 #define tMode               data[2]
 #define tPrevTaskId         data[3]
 
-enum {
-    EFFECTIVENESS_MODE_GOOD,
-    EFFECTIVENESS_MODE_BAD,
-    EFFECTIVENESS_MODE_AI_VS_AI,
-};
-
 // Window IDs for the tourney tree
 enum {
     TOURNEYWIN_NAMES_LEFT,
@@ -113,7 +109,7 @@ static void CalcDomeMonStats(const struct TrainerMon *fmon, int level, u8 ivs, i
 static void CreateDomeOpponentMons(u16);
 static int SelectOpponentMons_Good(u16, bool8);
 static int SelectOpponentMons_Bad(u16, bool8);
-static int GetTypeEffectivenessPoints(enum Move, enum Species, int);
+static void AddDomeSpeciesTypes(struct BattleTypeSet *set, enum Species species);
 static int SelectOpponentMonsFromParty(int *, bool8);
 static void Task_ShowTourneyInfoCard(u8);
 static void Task_HandleInfoCardInput(u8);
@@ -959,7 +955,7 @@ static const u8 *const sBattleDomeOpponentStatsTexts[] =
     COMPOUND_STRING("Neglects SPEED."),
     COMPOUND_STRING("Neglects SP. ATTACK."),
     COMPOUND_STRING("Neglects SP. DEFENSE."),
-    [DOME_TEXT_WELL_BALANCED] = COMPOUND_STRING("Raises POKéMON in a well-balanced way."),
+    [DOME_TEXT_WELL_BALANCED] = COMPOUND_STRING("Raises Pokémon in a well-balanced way."),
 };
 
 static const u8 sInfoTrainerMonX[FRONTIER_PARTY_SIZE] = {104, 136, 104};
@@ -1913,7 +1909,8 @@ static void InitDomeTrainers(void)
     int i, j, k;
     int monLevel;
     enum Species species[FRONTIER_PARTY_SIZE];
-    int monTypesBits, monTypesCount;
+    struct BattleTypeSet monTypes;
+    int monTypesCount;
     int trainerId;
     int monId;
     u16 *rankingScores;
@@ -2007,7 +2004,7 @@ static void InitDomeTrainers(void)
     // rankingScores[0] is for the player, rankingScores[1-15] are for the opponent trainers
 
     // Calculate player's ranking score
-    monTypesBits = 0;
+    monTypes = (struct BattleTypeSet){0};
     rankingScores[0] = 0;
     for (i = 0; i < FRONTIER_PARTY_SIZE; i++)
     {
@@ -2019,17 +2016,11 @@ static void InitDomeTrainers(void)
         rankingScores[0] += GetMonData(&gParties[B_TRAINER_PLAYER][trainerId], MON_DATA_SPDEF);
         rankingScores[0] += GetMonData(&gParties[B_TRAINER_PLAYER][trainerId], MON_DATA_SPEED);
         rankingScores[0] += GetMonData(&gParties[B_TRAINER_PLAYER][trainerId], MON_DATA_MAX_HP);
-        monTypesBits |= 1u << GetSpeciesType(GetMonData(&gParties[B_TRAINER_PLAYER][trainerId], MON_DATA_SPECIES), 0);
-        monTypesBits |= 1u << GetSpeciesType(GetMonData(&gParties[B_TRAINER_PLAYER][trainerId], MON_DATA_SPECIES), 1);
+        AddDomeSpeciesTypes(&monTypes, GetMonData(&gParties[B_TRAINER_PLAYER][trainerId], MON_DATA_SPECIES));
     }
 
     // Count the number of types in the players party, to factor into the ranking
-    for (monTypesCount = 0, j = 0; j < 32; j++)
-    {
-        if (monTypesBits & 1)
-            monTypesCount++;
-        monTypesBits >>= 1;
-    }
+    monTypesCount = BattleTypeSetCount(&monTypes);
 
     monLevel = SetFacilityPtrsGetLevel();
     rankingScores[0] += (monTypesCount * monLevel) / 20;
@@ -2037,7 +2028,7 @@ static void InitDomeTrainers(void)
     // Calculate rankingScores for the opponent trainers
     for (i = 1; i < DOME_TOURNAMENT_TRAINERS_COUNT; i++)
     {
-        monTypesBits = 0;
+        monTypes = (struct BattleTypeSet){0};
         rankingScores[i] = 0;
         ivs = GetDomeTrainerMonIvs(DOME_TRAINERS[i].trainerId);
         for (j = 0; j < FRONTIER_PARTY_SIZE; j++)
@@ -2051,16 +2042,10 @@ static void InitDomeTrainers(void)
             rankingScores[i] += statValues[STAT_SPDEF];
             rankingScores[i] += statValues[STAT_SPEED];
             rankingScores[i] += statValues[STAT_HP];
-            monTypesBits |= 1u << GetSpeciesType(gFacilityTrainerMons[DOME_MONS[i][j]].species, 0);
-            monTypesBits |= 1u << GetSpeciesType(gFacilityTrainerMons[DOME_MONS[i][j]].species, 1);
+            AddDomeSpeciesTypes(&monTypes, gFacilityTrainerMons[DOME_MONS[i][j]].species);
         }
 
-        for (monTypesCount = 0, j = 0; j < 32; j++)
-        {
-            if (monTypesBits & 1)
-                monTypesCount++;
-            monTypesBits >>= 1;
-        }
+        monTypesCount = BattleTypeSetCount(&monTypes);
         rankingScores[i] += (monTypesCount * monLevel) / 20;
     }
 
@@ -2270,12 +2255,12 @@ static int SelectOpponentMons_Good(u16 tournamentTrainerId, bool8 allowRandom)
             {
                 if (DOME_TRAINERS[tournamentTrainerId].trainerId == TRAINER_FRONTIER_BRAIN)
                 {
-                    partyMovePoints[i] += GetTypeEffectivenessPoints(GetFrontierBrainMonMove(i, moveIndex),
+                    partyMovePoints[i] += GetDomeTypeEffectivenessPoints(GetFrontierBrainMonMove(i, moveIndex),
                                             GetMonData(&gParties[B_TRAINER_PLAYER][playerMonId], MON_DATA_SPECIES), EFFECTIVENESS_MODE_GOOD);
                 }
                 else
                 {
-                    partyMovePoints[i] += GetTypeEffectivenessPoints(gFacilityTrainerMons[DOME_MONS[tournamentTrainerId][i]].moves[moveIndex],
+                    partyMovePoints[i] += GetDomeTypeEffectivenessPoints(gFacilityTrainerMons[DOME_MONS[tournamentTrainerId][i]].moves[moveIndex],
                                             GetMonData(&gParties[B_TRAINER_PLAYER][playerMonId], MON_DATA_SPECIES), EFFECTIVENESS_MODE_GOOD);
                 }
             }
@@ -2299,12 +2284,12 @@ static int SelectOpponentMons_Bad(u16 tournamentTrainerId, bool8 allowRandom)
             {
                 if (DOME_TRAINERS[tournamentTrainerId].trainerId == TRAINER_FRONTIER_BRAIN)
                 {
-                    partyMovePoints[i] += GetTypeEffectivenessPoints(GetFrontierBrainMonMove(i, moveIndex),
+                    partyMovePoints[i] += GetDomeTypeEffectivenessPoints(GetFrontierBrainMonMove(i, moveIndex),
                                             GetMonData(&gParties[B_TRAINER_PLAYER][playerMonId], MON_DATA_SPECIES), EFFECTIVENESS_MODE_BAD);
                 }
                 else
                 {
-                    partyMovePoints[i] += GetTypeEffectivenessPoints(gFacilityTrainerMons[DOME_MONS[tournamentTrainerId][i]].moves[moveIndex],
+                    partyMovePoints[i] += GetDomeTypeEffectivenessPoints(gFacilityTrainerMons[DOME_MONS[tournamentTrainerId][i]].moves[moveIndex],
                                             GetMonData(&gParties[B_TRAINER_PLAYER][playerMonId], MON_DATA_SPECIES), EFFECTIVENESS_MODE_BAD);
                 }
             }
@@ -2372,23 +2357,32 @@ static int SelectOpponentMonsFromParty(int *partyMovePoints, bool8 allowRandom)
 }
 
 #define TYPE_x0     0
+#define TYPE_x0_125 2
 #define TYPE_x0_25  5
 #define TYPE_x0_50  10
 #define TYPE_x1     20
 #define TYPE_x2     40
 #define TYPE_x4     80
+#define TYPE_x8     160
 
-static int GetTypeEffectivenessPoints(enum Move move, enum Species targetSpecies, int mode)
+static void AddDomeSpeciesTypes(struct BattleTypeSet *set, enum Species species)
 {
-    enum Type defType1, defType2, moveType;
+    struct BattleTypeList types;
+    GetSpeciesTypeList(species, &types);
+    for (u32 i = 0; i < types.count; ++i) BattleTypeSetAdd(set, types.types[i]);
+}
+
+int GetDomeTypeEffectivenessPoints(enum Move move, enum Species targetSpecies, enum DomeEffectivenessMode mode)
+{
+    struct BattleTypeList defTypes;
+    enum Type moveType;
     int typePower = TYPE_x1;
     enum Ability defAbility;
 
     if (move == MOVE_NONE || move == MOVE_UNAVAILABLE || IsBattleMoveStatus(move))
         return 0;
 
-    defType1 = GetSpeciesType(targetSpecies, 0);
-    defType2 = GetSpeciesType(targetSpecies, 1);
+    GetSpeciesTypeList(targetSpecies, &defTypes);
     defAbility = GetSpeciesAbility(targetSpecies, 0);
     moveType = GetMoveType(move);
 
@@ -2406,15 +2400,17 @@ static int GetTypeEffectivenessPoints(enum Move move, enum Species targetSpecies
     }
     else
     {
-        u32 typeEffectiveness1 = UQ_4_12_TO_INT(GetTypeModifier(moveType, defType1) * 2) * 5;
-        u32 typeEffectiveness2 = UQ_4_12_TO_INT(GetTypeModifier(moveType, defType2) * 2) * 5;
-
-        typePower = (typeEffectiveness1 * typePower) / 10;
-        if (defType2 != defType1)
-            typePower = (typeEffectiveness2 * typePower) / 10;
-
-        if (defAbility == ABILITY_WONDER_GUARD && typeEffectiveness1 != TYPE_x1 && typeEffectiveness2 != TYPE_x1)
-            typePower = 0;
+        uq4_12_t effectiveness = GetTypeModifierForTypes(moveType, defTypes.types, defTypes.count);
+        u64 scaled = (u64)effectiveness * TYPE_x1 / UQ_4_12(1.0);
+        typePower = scaled > TYPE_x8 ? TYPE_x8 : scaled;
+        if (effectiveness && typePower < TYPE_x0_125) typePower = TYPE_x0_125;
+        if (defAbility == ABILITY_WONDER_GUARD)
+        {
+            bool32 allNonNeutral = defTypes.count != 0;
+            for (u32 i = 0; i < defTypes.count; ++i)
+                if (GetTypeModifier(moveType, defTypes.types[i]) == UQ_4_12(1.0)) allNonNeutral = FALSE;
+            if (allNonNeutral) typePower = 0;
+        }
     }
 
     switch (mode)
@@ -2438,6 +2434,9 @@ static int GetTypeEffectivenessPoints(enum Move move, enum Species targetSpecies
         case TYPE_x4:
             typePower = 8;
             break;
+        case TYPE_x8:
+            typePower = 16;
+            break;
         }
         break;
     case EFFECTIVENESS_MODE_BAD:
@@ -2450,6 +2449,9 @@ static int GetTypeEffectivenessPoints(enum Move move, enum Species targetSpecies
             break;
         case TYPE_x0_25:
             typePower = 4;
+            break;
+        case TYPE_x0_125:
+            typePower = 6;
             break;
         case TYPE_x0_50:
             typePower = 2;
@@ -2464,6 +2466,9 @@ static int GetTypeEffectivenessPoints(enum Move move, enum Species targetSpecies
         case TYPE_x4:
             typePower = -4;
             break;
+        case TYPE_x8:
+            typePower = -8;
+            break;
         }
         break;
     case EFFECTIVENESS_MODE_AI_VS_AI:
@@ -2477,6 +2482,9 @@ static int GetTypeEffectivenessPoints(enum Move move, enum Species targetSpecies
         case TYPE_x0_25:
             typePower = -8;
             break;
+        case TYPE_x0_125:
+            typePower = -12;
+            break;
         case TYPE_x0_50:
         default:
             typePower = 0;
@@ -2489,6 +2497,9 @@ static int GetTypeEffectivenessPoints(enum Move move, enum Species targetSpecies
             break;
         case TYPE_x4:
             typePower = 20;
+            break;
+        case TYPE_x8:
+            typePower = 28;
             break;
         }
         break;
@@ -5673,7 +5684,13 @@ static void RestoreDomePlayerPartyHeldItems(void)
 
 static void ReduceDomePlayerPartyToSelectedMons(void)
 {
+#ifdef NATIVE
+    ModsOwnedFrontierPartyReselect(gSelectedOrderFromParty, DOME_BATTLE_PARTY_SIZE, MAX_FRONTIER_PARTY_SIZE);
+#endif
     ReducePlayerPartyToSelectedMons();
+#ifdef NATIVE
+    if (ModsOwnedFrontierPartyActive()) ModsOwnedUnionPartyPrepared();
+#endif
 }
 
 static void GetPlayerSeededBeforeOpponent(void)
@@ -5704,7 +5721,7 @@ static void InitRandomTourneyTreeResults(void)
     int i, j, k;
     int monLevel;
     enum Species species[FRONTIER_PARTY_SIZE];
-    int monTypesBits;
+    struct BattleTypeSet monTypes;
     int trainerId;
     int monId;
     int zero1;
@@ -5777,7 +5794,7 @@ static void InitRandomTourneyTreeResults(void)
     monLevel = FRONTIER_MAX_LEVEL_50;
     for (i = 0; i < DOME_TOURNAMENT_TRAINERS_COUNT; i++)
     {
-        monTypesBits = 0;
+        monTypes = (struct BattleTypeSet){0};
         statSums[i] = 0;
         ivs = GetDomeTrainerMonIvs(DOME_TRAINERS[i].trainerId);
         for (j = 0; j < FRONTIER_PARTY_SIZE; j++)
@@ -5791,17 +5808,11 @@ static void InitRandomTourneyTreeResults(void)
             statSums[i] += statValues[STAT_SPDEF];
             statSums[i] += statValues[STAT_SPEED];
             statSums[i] += statValues[STAT_HP];
-            monTypesBits |= 1u << GetSpeciesType(gFacilityTrainerMons[DOME_MONS[i][j]].species, 0);
-            monTypesBits |= 1u << GetSpeciesType(gFacilityTrainerMons[DOME_MONS[i][j]].species, 1);
+            AddDomeSpeciesTypes(&monTypes, gFacilityTrainerMons[DOME_MONS[i][j]].species);
         }
 
         // Because GF hates temporary vars, trainerId acts like monTypesCount here.
-        for (trainerId = 0, j = 0; j < 32; j++)
-        {
-            if (monTypesBits & 1)
-                trainerId++;
-            monTypesBits >>= 1;
-        }
+        trainerId = BattleTypeSetCount(&monTypes);
         statSums[i] += (trainerId * monLevel) / 20;
     }
 
@@ -5913,7 +5924,7 @@ static void DecideRoundWinners(u8 roundId)
                 {
                     for (monId2 = 0; monId2 < FRONTIER_PARTY_SIZE; monId2++)
                     {
-                        points1 += GetTypeEffectivenessPoints(gFacilityTrainerMons[DOME_MONS[tournamentId1][monId1]].moves[moveSlot],
+                        points1 += GetDomeTypeEffectivenessPoints(gFacilityTrainerMons[DOME_MONS[tournamentId1][monId1]].moves[moveSlot],
                                                 gFacilityTrainerMons[DOME_MONS[tournamentId2][monId2]].species, EFFECTIVENESS_MODE_AI_VS_AI);
                     }
                 }
@@ -5931,7 +5942,7 @@ static void DecideRoundWinners(u8 roundId)
                 {
                     for (monId2 = 0; monId2 < FRONTIER_PARTY_SIZE; monId2++)
                     {
-                        points2 += GetTypeEffectivenessPoints(gFacilityTrainerMons[DOME_MONS[tournamentId2][monId1]].moves[moveSlot],
+                        points2 += GetDomeTypeEffectivenessPoints(gFacilityTrainerMons[DOME_MONS[tournamentId2][monId1]].moves[moveSlot],
                                                 gFacilityTrainerMons[DOME_MONS[tournamentId1][monId2]].species, EFFECTIVENESS_MODE_AI_VS_AI);
                     }
                 }

@@ -54,7 +54,6 @@ SouthernIsland_Interior_EventScript_Lati::
 	goto_if_set FLAG_DEFEATED_LATIAS_OR_LATIOS, SouthernIsland_Interior_EventScript_Sign
 	goto_if_set FLAG_CAUGHT_LATIAS_OR_LATIOS, SouthernIsland_Interior_EventScript_Sign
 	goto_if_unset FLAG_ENABLE_SHIP_SOUTHERN_ISLAND, SouthernIsland_Interior_EventScript_Sign
-	setflag FLAG_ENCOUNTERED_LATIAS_OR_LATIOS
 	setflag FLAG_TEMP_2
 	special SpawnCameraObject
 	applymovement LOCALID_CAMERA, SouthernIsland_Interior_Movement_CameraPanUp
@@ -72,8 +71,12 @@ SouthernIsland_Interior_EventScript_Lati::
 	delay 50
 	special RemoveCameraObject
 	setvar VAR_LAST_TALKED, LOCALID_SOUTHERN_ISLAND_LATI
+SouthernIsland_Interior_EventScript_PrepareLati::
 	call_if_eq VAR_ROAMER_POKEMON, 0, SouthernIsland_Interior_EventScript_SetLatiosBattleVars
 	call_if_ne VAR_ROAMER_POKEMON, 0, SouthernIsland_Interior_EventScript_SetLatiasBattleVars
+	specialvar VAR_RESULT, ScriptedWildBattleAllowed
+	goto_if_eq VAR_RESULT, FALSE, SouthernIsland_Interior_EventScript_LatiCancelled
+	setflag FLAG_ENCOUNTERED_LATIAS_OR_LATIOS
 	setflag FLAG_SYS_CTRL_OBJ_DELETE
 	special BattleSetup_StartLatiBattle
 	clearflag FLAG_SYS_CTRL_OBJ_DELETE
@@ -82,6 +85,13 @@ SouthernIsland_Interior_EventScript_Lati::
 	goto_if_eq VAR_RESULT, B_OUTCOME_RAN, SouthernIsland_Interior_EventScript_RanFromLati
 	goto_if_eq VAR_RESULT, B_OUTCOME_PLAYER_TELEPORTED, SouthernIsland_Interior_EventScript_RanFromLati
 	setflag FLAG_CAUGHT_LATIAS_OR_LATIOS
+	releaseall
+	end
+
+SouthernIsland_Interior_EventScript_LatiCancelled::
+	setvar VAR_0x8004, LOCALID_SOUTHERN_ISLAND_LATI
+	special ScriptRemoveObjectWithoutFlag
+	clearflag FLAG_TEMP_2
 	releaseall
 	end
 
@@ -102,10 +112,12 @@ SouthernIsland_Interior_EventScript_Sign::
 	end
 
 SouthernIsland_Interior_EventScript_SetLatiosBattleVars::
+	identifywildencounter "rhh:encounter/southern_island_interior/lati"
 	seteventmon SPECIES_LATIOS, 50, ITEM_SOUL_DEW
 	return
 
 SouthernIsland_Interior_EventScript_SetLatiasBattleVars::
+	identifywildencounter "rhh:encounter/southern_island_interior/lati"
 	seteventmon SPECIES_LATIAS, 50, ITEM_SOUL_DEW
 	return
 

@@ -21,7 +21,7 @@ def main():
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(path, destination)
     shutil.copyfile(source / 'manifest.json', args.destination / 'manifest.json')
-    print(f"Verified {len(manifest['files'])} MIDI/SF2 assets: {args.destination}")
+    print(f"Verified {len(manifest['files'])} music assets: {args.destination}")
 
 if __name__ == '__main__':
     main()

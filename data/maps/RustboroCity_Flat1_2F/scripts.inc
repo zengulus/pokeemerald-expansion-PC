@@ -158,18 +158,18 @@ RustboroCity_Flat1_2F_Text_ThankYouIllGiveYouWallpaper:
 	.string "Thanks to you, my darling WALDA\n"
 	.string "laughed for me!\p"
 	.string "Actually, I may not look all that\n"
-	.string "special, but I'm one of DEVON\l"
+	.string "special, but I'm one of Devon\l"
 	.string "CORPORATION's top researchers.\p"
 	.string "So, how about I do something in return\n"
 	.string "for you?\p"
 	.string "I know, I'll add some new wallpaper\n"
 	.string "patterns for the BOXES in the PC\l"
-	.string "POKéMON Storage System.\p"
+	.string "Pokémon Storage System.\p"
 	.string "In the wallpaper pattern menu,\n"
 	.string "select “FRIENDS.”\p"
 	.string "That will give you access to the new\n"
 	.string "wallpaper patterns.$"
 
 RustboroCity_Flat1_2F_Text_ItsAPokemonPlushDoll:
-	.string "It's a POKéMON plush DOLL!$"
+	.string "It's a Pokémon plush DOLL!$"
 

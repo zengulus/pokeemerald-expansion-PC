@@ -4,6 +4,7 @@
 #include "native.h"
 #include "agb_flash.h"
 #include "gba/flash_internal.h"
+#include "save.h"
 
 #define CHECK(expr) do { if (!(expr)) { fprintf(stderr, "%s:%d: %s\n", __FILE__, __LINE__, #expr); exit(1); } } while (0)
 
@@ -63,16 +64,17 @@ int main(int argc, char **argv)
             CHECK(gNativeFlash[i] == 0xff);
         u8 sector[4096];
         for (unsigned i = 0; i < sizeof(sector); ++i) sector[i] = i * 31;
-        CHECK(ProgramFlashSectorAndVerify(17, sector) == 0);
-        CHECK(ProgramFlashByte(31, 4095, 0x5a) == 0);
-        CHECK(ProgramFlashByte(32, 0, 0) != 0);
+        CHECK(!NativeSaveSpecialWrite(SECTOR_ID_TRAINER_HILL, sector, sizeof(sector)));
+        u8 marker = 0x5a;
+        CHECK(!NativeSaveSpecialWrite(SECTOR_ID_RECORDED_BATTLE, &marker, sizeof(marker)));
+        CHECK(NativeSaveSpecialWrite(32, &marker, sizeof(marker)) != 0);
     }
     else
     {
-        for (unsigned i = 0; i < 4096; ++i)
-            CHECK(gNativeFlash[17 * 4096 + i] == (u8)(i * 31));
-        CHECK(gNativeFlash[131071] == 0x5a);
-        CHECK(gNativeFlash[0] == 0xff);
+        u8 sector[4096], marker;
+        CHECK(!NativeSaveSpecialRead(SECTOR_ID_TRAINER_HILL, sector, sizeof(sector)));
+        for (unsigned i = 0; i < sizeof(sector); ++i) CHECK(sector[i] == (u8)(i * 31));
+        CHECK(!NativeSaveSpecialRead(SECTOR_ID_RECORDED_BATTLE, &marker, sizeof(marker)) && marker == 0x5a);
     }
     NativeSaveClose();
     puts("native platform checks passed");

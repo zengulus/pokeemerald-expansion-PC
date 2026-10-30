@@ -2,12 +2,12 @@
 #include <SDL2/SDL.h>
 #include <string.h>
 
-static void *sLibraries[32];
+static void *sLibraries[RHH_HOST_MAX_MODS];
 static unsigned sLibraryCount;
 
 int RhhModsLoadLibrary(const char *path)
 {
-    if (sLibraryCount == 32) return -1;
+    if (sLibraryCount == RHH_HOST_MAX_MODS) return -1;
     void *library = SDL_LoadObject(path);
     if (!library) { fprintf(stderr, "Mod load failed: %s\n", SDL_GetError()); return -1; }
     RhhModEntryV1 entry = (RhhModEntryV1)SDL_LoadFunction(library, "RHH_ModEntry_v1");

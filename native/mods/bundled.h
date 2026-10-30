@@ -9,4 +9,5 @@ const struct RhhModDefinition *RhhBundledEqualBST(const struct RhhModHostV1 *);
 const struct RhhModDefinition *RhhBundledLevelCap(const struct RhhModHostV1 *);
 const struct RhhModDefinition *RhhBundledFollower(const struct RhhModHostV1 *);
 const struct RhhModDefinition *RhhBundledBattleMusic(const struct RhhModHostV1 *);
+const struct RhhModDefinition *RhhBundledBattleEnvironment(const struct RhhModHostV1 *);
 #endif

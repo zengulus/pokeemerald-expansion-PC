@@ -15,19 +15,31 @@
 #include "money.h"
 #include "event_data.h"
 #include "battle.h"
+#include "battle_anim.h"
 #include "mod_host.h"
 #include "mods.h"
 #include "mod_music.h"
+#include "battle_shader.h"
 #include "event_object_movement.h"
+#include "field_player_avatar.h"
+#include "palette.h"
+#include "overworld.h"
+#include "native_controls.h"
+#include "native_text_input.h"
+#include "mod_ui.h"
+#include "owned_identity_ledger.h"
 
 static SDL_Window *sWindow;
 static SDL_Renderer *sRenderer;
 static SDL_Texture *sTexture;
+static int sShader;
+static int sBattleHudVisible;
 static SDL_AudioDeviceID sAudio;
 static FILE *sModTrace;
 static float *sMixedAudio;
 static size_t sMixedAudioCapacity;
 static u16 sPixels[DISPLAY_WIDTH * DISPLAY_HEIGHT];
+static u16 sOverlayPixels[DISPLAY_WIDTH * DISPLAY_HEIGHT], sDisplayPixels[DISPLAY_WIDTH * DISPLAY_HEIGHT];
 static unsigned sFrame;
 static unsigned sLimit;
 static const char *sScreenshot;
@@ -35,10 +47,12 @@ static FILE *sAudioCapture;
 static FILE *sInputReplay;
 static FILE *sTrace;
 static const char *sVideoState;
+static const char *sSceneCapture;
 static const char *sReport;
 static int sRealtime;
 static u64 sAudioSamplesGenerated;
 static u64 sAudioSamplesQueued;
+static u32 sBattleAnimationFrames;
 static unsigned sNextInputFrame;
 static unsigned sNextInputMask;
 static u16 sReplayKeys;
@@ -53,7 +67,7 @@ void gInitialMainCB2(void) { CB2_InitCopyrightScreenAfterBootup(); }
 
 void Platform_QueueAudio(float *samples, s32 bytes)
 {
-    if (NativeMusicActive())
+    if (NativeMusicHasAudio())
     {
         /* MP2K retains its output for reverb. Mix into a separate delivery
          * buffer so the replacement BGM never feeds back into its SFX mixer. */
@@ -73,18 +87,23 @@ void Platform_QueueAudio(float *samples, s32 bytes)
             sAudioSamplesQueued += bytes / sizeof(float);
 }
 
-static void Input(void)
+static u16 Input(void)
 {
     SDL_Event event;
     while (SDL_PollEvent(&event))
+    {
         if (event.type == SDL_QUIT) sLimit = sFrame + 1;
-    const u8 *keys = SDL_GetKeyboardState(NULL);
-    u16 value = 0;
-#define KEY(sdl, gba) if (keys[SDL_SCANCODE_##sdl]) value |= gba
-    KEY(Z, A_BUTTON); KEY(X, B_BUTTON); KEY(RETURN, START_BUTTON);
-    KEY(BACKSPACE, SELECT_BUTTON); KEY(A, L_BUTTON); KEY(S, R_BUTTON);
-    KEY(UP, DPAD_UP); KEY(DOWN, DPAD_DOWN); KEY(LEFT, DPAD_LEFT); KEY(RIGHT, DPAD_RIGHT);
-#undef KEY
+        else if (event.type == SDL_KEYDOWN)
+        {
+            if (!NativeTextKey(event.key.keysym.scancode, event.key.repeat))
+                NativeControlsKeyDown(event.key.keysym.scancode, event.key.repeat);
+        }
+        else if (event.type == SDL_TEXTINPUT) NativeTextUtf8(event.text.text);
+    }
+    int keyCount;
+    const u8 *keys = SDL_GetKeyboardState(&keyCount);
+    u16 value = NativeControlsRead(keys, keyCount);
+    if (NativeTextActive()) value = 0;
     if (sInputReplay)
     {
         while (sFrame >= sNextInputFrame)
@@ -99,23 +118,96 @@ static void Input(void)
         value = sReplayKeys;
     }
     REG_KEYINPUT = value ^ KEYS_MASK;
+    return value;
 }
 
 void NativeFrame(void)
 {
-    Input();
+    RhhEcologyOnFrame();
+    u16 keys = Input();
+    if (RhhUiActive() || RhhUiOverlayActive()) NativeOwnedTrackerAudit();
+    RhhUiOverlayReconcile();
+    RhhUiOverlayAdvance(keys);
+    if (RhhUiActive())
+    {
+        RhhUiAdvance(keys);
+        RhhModsObserveOwnedMons();
+        /* Keep audio playing without advancing scripts, NPCs, or callbacks. */
+        m4aSoundMain(); m4aSoundVSync();
+        if (RhhUiActive()) RhhUiRender(sPixels); else RhhUiRestore(sPixels);
+        goto present;
+    }
+    REG_KEYINPUT = RhhUiFilterKeys(keys) ^ KEYS_MASK;
     REG_VCOUNT = 160;
     REG_DISPSTAT |= DISPSTAT_VBLANK;
     AgbMainLoop();
+    RhhUiOverlayReconcile();
+    RhhModsObserveBattleHealth();
+    RhhModsObserveBattleAbilities();
+    RhhModsObserveBattleInnates();
+    RhhModsObserveBattleTypes();
+    RhhModsObserveBattleEnvironment();
+    ModsWildActorsUpdate();
+    NativeOwnedTrackerAudit();
+    if (gMain.inBattle && gAnimScriptActive) ++sBattleAnimationFrames;
+    if (RhhModsHasActiveRun() && !gMain.inBattle && !gPaletteFade.active && !gPaletteFade.y
+        && !ScriptContext_IsEnabled() && gMain.callback2 == CB2_Overworld)
+    {
+        RhhModsEnvironmentOnFrame();
+        RhhModsObserveNaturalWeather();
+        struct RhhModEvent event = {.struct_size = sizeof(event), .kind = RHH_MOD_UPDATE,
+            .run_seed = RhhModsRunSeed(), .ordinal = sFrame};
+        struct RhhModDecision decision = {.struct_size = sizeof(decision), .allowed = 1};
+        RhhModsDispatch(&event, &decision);
+    }
     ModsEnforceParty();
+    RhhModsObserveOwnedMons();
     NativeRunDma(1);
     if (REG_IME && (REG_IE & INTR_FLAG_VBLANK)) gIntrTable[4]();
     REG_DISPSTAT &= ~DISPSTAT_VBLANK;
+    ModsBattleShaderUpdateUiPalettes();
     DrawFrame(sPixels);
-    SDL_UpdateTexture(sTexture, NULL, sPixels, DISPLAY_WIDTH * 2);
-    SDL_RenderClear(sRenderer);
-    SDL_RenderCopy(sRenderer, sTexture, NULL, NULL);
-    SDL_RenderPresent(sRenderer);
+    if (RhhUiActive()) RhhUiRender(sPixels);
+present:
+    ;
+    RhhUiAccessibilityFlush();
+    NativeMusicFlushBattleCue();
+    NativeMusicFlushLifecycle();
+    struct NativeBattleEnvironment environment = ModsBattleEnvironment();
+    if (RhhUiActive()) environment.battle_scene = 0;
+    int field = !RhhUiActive() && !gMain.inBattle && !gPaletteFade.active && !gPaletteFade.y
+        && (gMain.callback2 == CB2_Overworld || gMain.callback2 == CB2_OverworldBasic);
+    int world = field && !RhhUiKeysBlocked() && !ScriptContext_IsEnabled();
+    int overlay = world && RhhUiOverlayRender(sOverlayPixels);
+    sBattleHudVisible = !RhhUiActive() && RhhUiRenderBattleConditions(sOverlayPixels, sFrame);
+    if (sShader)
+    {
+        if (field) environment = ModsWorldEnvironment();
+        if (sBattleHudVisible)
+            NativeShaderPresentBattleOverlay(sPixels, &environment, sFrame, sOverlayPixels);
+        else if (overlay)
+            NativeShaderPresentWorldOverlay(sPixels, &environment, sFrame, sOverlayPixels);
+        else if (world)
+            NativeShaderPresentWorld(sPixels, &environment, sFrame);
+        else if (field)
+            NativeShaderPresentField(sPixels, &environment, sFrame);
+        else NativeShaderPresent(sPixels, &environment, sFrame);
+    }
+    else
+    {
+        const u16 *display = sPixels;
+        if (overlay || sBattleHudVisible)
+        {
+            RhhUiOverlayComposite(sDisplayPixels, sPixels, sOverlayPixels);
+            display = sDisplayPixels;
+        }
+        SDL_UpdateTexture(sTexture, NULL, display, DISPLAY_WIDTH * 2);
+        SDL_RenderClear(sRenderer);
+        SDL_RenderCopy(sRenderer, sTexture, NULL, NULL);
+        SDL_RenderPresent(sRenderer);
+    }
+    if (!sShader || !world) RhhModsProjectedVisibilityFinish(NULL, sFrame, 0, world);
+    RhhModsPhotoPresent(sPixels, sShader, world, sFrame);
     ++sFrame;
     if (sTrace && (sFrame % 30 == 0))
     {
@@ -179,11 +271,30 @@ static int WriteReport(const char *path)
     FILE *file = fopen(path, "w");
     if (!file) return -1;
     struct ModConfig mods = ModsGetConfig();
-    fprintf(file, "{\"mods\":{\"flags\":%u,\"wild_mode\":%u,\"music\":%u,\"seed\":\"%016llx\",\"starter_key\":\"%016llx\",\"level_cap\":%u,\"follower_present\":%s,\"run_failed\":%s,\"music_asset\":%u},",
+    struct NativeBattleEnvironment environment = ModsBattleEnvironment();
+    const struct RhhWorldClockService *worldClock = (const void *)RhhModsHostAPI()->get_service(
+        "rhh:service/world_clock", RHH_SERVICE_VERSION(1, 0));
+    struct RhhWorldClockSnapshot clock = {.struct_size = sizeof(clock)};
+    if (worldClock && !worldClock->current(&clock))
+        fprintf(file, "{\"world_steps\":%llu,", (unsigned long long)clock.steps);
+    else
+        fprintf(file, "{\"world_steps\":null,");
+    fprintf(file, "\"battle_environment\":{\"renderer\":\"%s\",\"enabled\":%s,\"shader_ready\":%s,\"weather\":%u,\"terrain\":%u,\"suppressed\":%u},",
+        sShader ? "OpenGL" : "SDL", ModsBattleEnvironmentEnabled() ? "true" : "false", NativeShaderReady(environment.shader) ? "true" : "false",
+        environment.weather, environment.terrain, environment.suppressed);
+    fprintf(file, "\"mods\":{\"flags\":%u,\"wild_mode\":%u,\"music\":%u,\"seed\":\"%016llx\",\"starter_key\":\"%016llx\",\"level_cap\":%u,\"follower_present\":%s,\"run_failed\":%s,\"music_asset\":%u},",
         mods.flags, mods.wildMode, mods.music, (unsigned long long)mods.seed,
         (unsigned long long)mods.starter, ModsLevelCap(), GetFollowerObject() ? "true" : "false",
         ModsRunFailed() ? "true" : "false", NativeMusicAsset());
     fprintf(file, "\"code_anchor\":\"%p\",", (void *)AgbMain);
+    fprintf(file, "\"speed\":{\"text\":%u,\"overworld\":%u,\"battle\":%u},",
+        gSaveBlock2Ptr ? gSaveBlock2Ptr->optionsTextSpeed : 0,
+        gSaveBlock2Ptr ? gSaveBlock2Ptr->optionsOverworldSpeed : 0,
+        gSaveBlock2Ptr ? gSaveBlock2Ptr->optionsBattleSpeed : 0);
+    fprintf(file, "\"battle_animation_frames\":%u,\"battle_animation_steps\":%u,", sBattleAnimationFrames, gNativeAnimStepCount);
+    if (gPlayerAvatar.objectEventId < OBJECT_EVENTS_COUNT && gObjectEvents[gPlayerAvatar.objectEventId].isPlayer)
+        fprintf(file, "\"player\":{\"x\":%d,\"y\":%d},", gObjectEvents[gPlayerAvatar.objectEventId].currentCoords.x,
+            gObjectEvents[gPlayerAvatar.objectEventId].currentCoords.y);
     fprintf(file, "\"pointer_bits\":%u,\"frames\":%u,\"map_group\":%d,\"map_num\":%d,\"x\":%d,\"y\":%d,",
         (unsigned)(sizeof(void *) * CHAR_BIT), sFrame,
         gSaveBlock1Ptr ? gSaveBlock1Ptr->location.mapGroup : -1,
@@ -195,11 +306,12 @@ static int WriteReport(const char *path)
     if (gSaveBlock2Ptr)
         for (unsigned i = 0; i < sizeof(gSaveBlock2Ptr->playerName); ++i)
             fprintf(file, "%02x", gSaveBlock2Ptr->playerName[i]);
-    fprintf(file, "\",\"money\":%u,\"intro_state\":%u,\"wall_clock_set\":%u,\"rescued_birch\":%u,\"party\":[",
+    fprintf(file, "\",\"money\":%u,\"intro_state\":%u,\"wall_clock_set\":%u,\"rescued_birch\":%u,\"running_shoes\":%u,\"party\":[",
         gSaveBlock1Ptr ? GetMoney(&gSaveBlock1Ptr->money) : 0,
         gSaveBlock1Ptr ? VarGet(VAR_LITTLEROOT_INTRO_STATE) : 0,
         gSaveBlock1Ptr ? FlagGet(FLAG_SET_WALL_CLOCK) : 0,
-        gSaveBlock1Ptr ? FlagGet(FLAG_RESCUED_BIRCH) : 0);
+        gSaveBlock1Ptr ? FlagGet(FLAG_RESCUED_BIRCH) : 0,
+        gSaveBlock1Ptr ? FlagGet(FLAG_SYS_B_DASH) : 0);
     for (unsigned i = 0; i < gPlayerPartyCount; ++i)
         fprintf(file, "%s{\"species\":%u,\"level\":%u,\"hp\":%u,\"max_hp\":%u}",
             i ? "," : "", GetMonData(&gPlayerParty[i], MON_DATA_SPECIES),
@@ -216,6 +328,7 @@ static int WriteReport(const char *path)
 int main(int argc, char **argv)
 {
     const char *save = "pokeemerald-expansion.sav";
+    const char *controlsPath = NULL;
     RhhModsInit();
     for (int i = 1; i + 1 < argc; ++i)
         if (!strcmp(argv[i], "--external-bundled-mods")) ModsSetExternalBuiltinDirectory(argv[i + 1]);
@@ -234,10 +347,12 @@ int main(int argc, char **argv)
         }
         else if (!strcmp(argv[i], "--frames") && i + 1 < argc) sLimit = strtoul(argv[++i], NULL, 10);
         else if (!strcmp(argv[i], "--save") && i + 1 < argc) save = argv[++i];
+        else if (!strcmp(argv[i], "--controls") && i + 1 < argc) controlsPath = argv[++i];
         else if (!strcmp(argv[i], "--screenshot") && i + 1 < argc) sScreenshot = argv[++i];
         else if (!strcmp(argv[i], "--audio-capture") && i + 1 < argc) sAudioCapture = fopen(argv[++i], "wb");
         else if (!strcmp(argv[i], "--trace") && i + 1 < argc) sTrace = fopen(argv[++i], "w");
         else if (!strcmp(argv[i], "--video-state") && i + 1 < argc) sVideoState = argv[++i];
+        else if (!strcmp(argv[i], "--scene-capture") && i + 1 < argc) sSceneCapture = argv[++i];
         else if (!strcmp(argv[i], "--report") && i + 1 < argc) sReport = argv[++i];
         else if (!strcmp(argv[i], "--realtime")) sRealtime = 1;
         else if (!strcmp(argv[i], "--fixed-rtc") && i + 1 < argc)
@@ -260,6 +375,17 @@ int main(int argc, char **argv)
     if (NativeSaveOpen(save)) return 1;
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMECONTROLLER))
         goto failed;
+    char *musicLibrary = SDL_GetPrefPath("RHH", "PokeemeraldExpansion");
+    if (musicLibrary) { NativeMusicSetImportRoot(musicLibrary); SDL_free(musicLibrary); }
+    if (controlsPath) NativeControlsInit(controlsPath);
+    else
+    {
+        char *pref = SDL_GetPrefPath("RHH", "PokeemeraldExpansion");
+        char *path = pref ? malloc(strlen(pref) + sizeof("controls.cfg")) : NULL;
+        if (path) { sprintf(path, "%scontrols.cfg", pref); NativeControlsInit(path); free(path); }
+        else NativeControlsInit(NULL);
+        SDL_free(pref);
+    }
     char *base = SDL_GetBasePath();
     if (base)
     {
@@ -267,15 +393,30 @@ int main(int argc, char **argv)
         if (music) { sprintf(music, "%smusic", base); NativeMusicSetAssetRoot(music); free(music); }
         SDL_free(base);
     }
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 1);
+    SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
     sWindow = SDL_CreateWindow("Pokémon Emerald Expansion", SDL_WINDOWPOS_CENTERED,
-        SDL_WINDOWPOS_CENTERED, 720, 480, SDL_WINDOW_RESIZABLE);
+        SDL_WINDOWPOS_CENTERED, 720, 480, SDL_WINDOW_RESIZABLE | SDL_WINDOW_OPENGL);
+    if (sWindow && !NativeShaderInit(sWindow)) sShader = 1;
+    else
+    {
+        NativeShaderShutdown();
+        SDL_DestroyWindow(sWindow);
+        sWindow = SDL_CreateWindow("Pokémon Emerald Expansion", SDL_WINDOWPOS_CENTERED,
+            SDL_WINDOWPOS_CENTERED, 720, 480, SDL_WINDOW_RESIZABLE);
+    }
     if (!sWindow) goto failed;
-    sRenderer = SDL_CreateRenderer(sWindow, -1, 0);
-    if (!sRenderer) goto failed;
-    SDL_RenderSetLogicalSize(sRenderer, DISPLAY_WIDTH, DISPLAY_HEIGHT);
-    sTexture = SDL_CreateTexture(sRenderer, SDL_PIXELFORMAT_ABGR1555,
-        SDL_TEXTUREACCESS_STREAMING, DISPLAY_WIDTH, DISPLAY_HEIGHT);
-    if (!sTexture) goto failed;
+    RhhFileDialogSetWindow(sWindow);
+    if (!sShader)
+    {
+        sRenderer = SDL_CreateRenderer(sWindow, -1, 0);
+        if (!sRenderer) goto failed;
+        SDL_RenderSetLogicalSize(sRenderer, DISPLAY_WIDTH, DISPLAY_HEIGHT);
+        sTexture = SDL_CreateTexture(sRenderer, SDL_PIXELFORMAT_ABGR1555,
+            SDL_TEXTUREACCESS_STREAMING, DISPLAY_WIDTH, DISPLAY_HEIGHT);
+        if (!sTexture) goto failed;
+    }
     SDL_AudioSpec spec = {.freq = 42060, .format = AUDIO_F32SYS, .channels = 2, .samples = 1024};
     sAudio = SDL_OpenAudioDevice(NULL, 0, &spec, NULL, 0);
     if (!sAudio) fprintf(stderr, "Audio device unavailable: %s\n", SDL_GetError());
@@ -300,7 +441,18 @@ int main(int argc, char **argv)
     }
     if (sScreenshot)
     {
-        SDL_Surface *surface = SDL_CreateRGBSurfaceFrom(sPixels, DISPLAY_WIDTH,
+        u8 rgb[DISPLAY_WIDTH * DISPLAY_HEIGHT * 3];
+        SDL_Surface *surface;
+        int captured = -1;
+        if (sShader)
+        {
+            if (sBattleHudVisible) captured = NativeShaderCapturePreview(rgb);
+            if (captured) captured = NativeShaderCapture(rgb);
+        }
+        if (sShader && !captured)
+            surface = SDL_CreateRGBSurfaceWithFormatFrom(rgb, DISPLAY_WIDTH, DISPLAY_HEIGHT, 24,
+                DISPLAY_WIDTH * 3, SDL_PIXELFORMAT_RGB24);
+        else surface = SDL_CreateRGBSurfaceFrom(!sShader && sBattleHudVisible ? sDisplayPixels : sPixels, DISPLAY_WIDTH,
             DISPLAY_HEIGHT, 16, DISPLAY_WIDTH * 2, 31, 31 << 5, 31 << 10, 0);
         if (!surface || SDL_SaveBMP(surface, sScreenshot)) goto failed;
         SDL_FreeSurface(surface);
@@ -315,6 +467,18 @@ int main(int argc, char **argv)
         fwrite(gNativeOam, 1, sizeof(gNativeOam), file);
         fclose(file);
     }
+    if (sSceneCapture)
+    {
+        FILE *file = fopen(sSceneCapture, "wb");
+        if (!file) return 1;
+        fwrite("RHHSCN01", 1, 8, file);
+        for (unsigned i = 0; i < DISPLAY_WIDTH * DISPLAY_HEIGHT; ++i)
+        { fputc(sPixels[i] & 255, file); fputc(sPixels[i] >> 8, file); }
+        fwrite(gNativeShaderSceneMask, 1, sizeof(gNativeShaderSceneMask), file);
+        int failed = ferror(file);
+        if (fclose(file)) failed = 1;
+        if (failed) return 1;
+    }
     printf("native frames=%u callback=%p\n", sFrame, (void *)gMain.callback2);
     if (sReport && WriteReport(sReport))
     {
@@ -327,12 +491,16 @@ int main(int argc, char **argv)
     SDL_CloseAudioDevice(sAudio);
     SDL_DestroyTexture(sTexture);
     SDL_DestroyRenderer(sRenderer);
+    if (sShader) RhhModsShutdownWorldPresenters();
+    NativeShaderShutdown();
+    RhhFileDialogShutdown();
+    RhhModsUnloadLibraries();
+    NativeMusicShutdown();
     SDL_DestroyWindow(sWindow);
     SDL_Quit();
+    NativeControlsShutdown();
     NativeSaveClose();
-    NativeMusicShutdown();
     free(sMixedAudio); sMixedAudio = NULL; sMixedAudioCapacity = 0;
-    RhhModsUnloadLibraries();
     RhhModsSetTrace(NULL);
     if (sModTrace) fclose(sModTrace);
     return 0;

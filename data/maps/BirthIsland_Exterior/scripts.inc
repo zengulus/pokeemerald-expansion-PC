@@ -42,11 +42,12 @@ BirthIsland_Exterior_EventScript_Triangle::
 	lock
 	faceplayer
 	special DoDeoxysRockInteraction
+BirthIsland_Exterior_EventScript_RockResult::
 	switch VAR_RESULT
 	case DEOXYS_ROCK_FAILED,     BirthIsland_Exterior_EventScript_Failed
 	case DEOXYS_ROCK_PROGRESSED, BirthIsland_Exterior_EventScript_Progressed
 	case DEOXYS_ROCK_SOLVED,     BirthIsland_Exterior_EventScript_Deoxys
-	case DEOXYS_ROCK_COMPLETE,   BirthIsland_Exterior_EventScript_Complete
+	case DEOXYS_ROCK_COMPLETE,   BirthIsland_Exterior_EventScript_Deoxys
 	end
 
 @ The actual rock triangle movement is handled by DoDeoxysRockInteraction.
@@ -80,7 +81,11 @@ BirthIsland_Exterior_EventScript_Deoxys::
 	delay 40
 	waitmoncry
 	setvar VAR_LAST_TALKED, LOCALID_BIRTH_ISLAND_DEOXYS
+BirthIsland_Exterior_EventScript_PrepareDeoxys::
+	identifywildencounter "rhh:encounter/birth_island_exterior/deoxys"
 	seteventmon SPECIES_DEOXYS_NORMAL, 30
+	specialvar VAR_RESULT, ScriptedWildBattleAllowed
+	goto_if_eq VAR_RESULT, FALSE, BirthIsland_Exterior_EventScript_DeoxysCancelled
 	setflag FLAG_SYS_CTRL_OBJ_DELETE
 	special BattleSetup_StartLegendaryBattle
 	clearflag FLAG_SYS_CTRL_OBJ_DELETE
@@ -89,6 +94,17 @@ BirthIsland_Exterior_EventScript_Deoxys::
 	goto_if_eq VAR_RESULT, B_OUTCOME_RAN, BirthIsland_Exterior_EventScript_RanFromDeoxys
 	goto_if_eq VAR_RESULT, B_OUTCOME_PLAYER_TELEPORTED, BirthIsland_Exterior_EventScript_RanFromDeoxys
 	setflag FLAG_BATTLED_DEOXYS
+	release
+	end
+
+BirthIsland_Exterior_EventScript_DeoxysCancelled::
+	setvar VAR_0x8004, LOCALID_BIRTH_ISLAND_DEOXYS
+	special ScriptRemoveObjectWithoutFlag
+	clearflag FLAG_HIDE_BIRTH_ISLAND_DEOXYS_TRIANGLE
+	addobject LOCALID_BIRTH_ISLAND_EXTERIOR_ROCK
+	setobjectxy LOCALID_BIRTH_ISLAND_EXTERIOR_ROCK, 15, 10
+	special ScriptRestoreDeoxysRockPalette
+	fadedefaultbgm
 	release
 	end
 

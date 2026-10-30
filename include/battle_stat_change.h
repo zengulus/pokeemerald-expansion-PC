@@ -29,7 +29,8 @@ struct StatChange
     u32 ignoreCertainFailure:1; // for mirror armor and substitute
     u32 mirrorHerbActivation:1;
     u32 opportunistActivation:1;
-    u32 padding:17;
+    u32 ignoreSubstitute:1;
+    u32 padding:16;
 };
 
 extern enum Stat const sAccurateStatOrder[NUM_BATTLE_STATS];
@@ -47,6 +48,11 @@ u32 GetStatStage(enum Stat stat, const struct AdditionalEffect *additionalEffect
 bool32 ShouldDefiantCompetitiveActivate(enum BattlerId battler, enum Ability ability);
 enum MoveResult DoStatChangeResolution(struct BattleCalcValues *cv);
 bool32 CanStatChange(struct BattleCalcValues *cv, struct StatChange *st);
+#ifdef NATIVE
+enum ModAbilityStatPreview { MOD_ABILITY_STAT_BLOCKED, MOD_ABILITY_STAT_APPLIED, MOD_ABILITY_STAT_REFLECTED };
+enum ModAbilityStatPreview PreviewAbilityStatChange(struct BattleCalcValues *cv, enum Stat stat, s32 *stage,
+                                                     bool32 certain, bool32 ignoreMirror, bool32 ignoreSubstitute);
+#endif
 bool32 IsStatChangeStatusMove(enum Move move, bool32 (*isStatChange)(const struct AdditionalEffect *effect));
 bool32 IsAtkStatUpMove(const struct AdditionalEffect *effect);
 bool32 IsAtkSpAtkStatUpMove(const struct AdditionalEffect *effect);

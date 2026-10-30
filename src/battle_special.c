@@ -11,6 +11,7 @@
 #include "frontier_util.h"
 #include "new_game.h"
 #include "overworld.h"
+#include "pokemon.h"
 #include "recorded_battle.h"
 #include "string_util.h"
 #include "task.h"
@@ -49,7 +50,7 @@ void CB2_EndSpecialTrainerBattle(void)
             for (i = 0; i < 3; i++)
             {
                 if (GetMonData(&gParties[B_TRAINER_PLAYER][i], MON_DATA_SPECIES))
-                    gSaveBlock1Ptr->playerParty[i] = gParties[B_TRAINER_PLAYER][i];
+                    SavePlayerPartyMon(i, &gParties[B_TRAINER_PLAYER][i]);
             }
         }
         gSpecialVar_Result = gBattleOutcome;

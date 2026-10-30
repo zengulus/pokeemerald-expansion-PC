@@ -7,6 +7,15 @@
 #define DBGPRINTF(...) fprintf(stderr, __VA_ARGS__)
 #include <stdbool.h>
 #include "native.h"
+#include "battle.h"
+#include "battle_shader.h"
+#include "main.h"
+#include "overworld.h"
+#include "mod_ui.h"
+#include "mod_host.h"
+#include "mods.h"
+#include "photo_visibility.h"
+#include "display_capture.h"
 #define DMA_HBLANK 2
 #define RunDMAs NativeRunDma
 
@@ -35,9 +44,106 @@
 
 extern void (*gIntrTable[])(void);
 
+static uint8_t sOamPendingOwner[128], sOamOwner[128];
+static struct OamData sOamPendingExpected[128], sOamExpected[128];
+static bool sOamPendingBuilt;
+static uint64_t sOamGeneration;
+static uint8_t sBattleBattlerMask[DISPLAY_WIDTH * DISPLAY_HEIGHT];
+static const uint16_t *sBattleBattlerMaskPixels;
+static bool sBattleBattlerMaskCapturing;
+const uint8_t *NativeBattleBattlerMask(const uint16_t *pixels)
+{ return pixels && pixels == sBattleBattlerMaskPixels ? sBattleBattlerMask : NULL; }
+static struct {
+    uint64_t ticket, generation;
+    unsigned sprite;
+    bool active, valid;
+    const uint16_t *pixels;
+    uint8_t coverage[DISPLAY_WIDTH * DISPLAY_HEIGHT];
+    uint8_t visible[DISPLAY_WIDTH * DISPLAY_HEIGHT];
+    bool footprintValid, stable;
+    struct RhhPhotoFootprint footprint;
+} sPhotoVisibility;
+enum { PHOTO_FULL_LEFT = -272, PHOTO_FULL_TOP = -96, PHOTO_FULL_WIDTH = 640, PHOTO_FULL_HEIGHT = 384 };
+static uint8_t sPhotoFullMask[PHOTO_FULL_WIDTH * PHOTO_FULL_HEIGHT];
+static uint8_t sPhotoObjTiles[0x8000];
+static struct OamData sPhotoOam[128];
+static uint16_t sPhotoDisplayControl, sPhotoMosaic;
+_Static_assert(RHH_WORLD_DISPLAY_SCANLINES == DISPLAY_HEIGHT, "display capture height");
+static struct {
+    bool valid;
+    uint32_t map_id;
+    uint64_t sequence, run_id;
+    struct RhhWorldDisplayScanline rows[RHH_WORLD_DISPLAY_SCANLINES];
+} sDisplayCapture;
+static bool DisplayCaptureAllowed(void)
+{
+    return !gMain.inBattle && !RhhUiActive()
+        && (gMain.callback2 == CB2_Overworld || gMain.callback2 == CB2_OverworldBasic);
+}
+int NativeDisplayFrameCopy(struct RhhWorldDisplayScanline *rows, uint32_t capacity,
+                           uint32_t *map_id, uint64_t *sequence, uint64_t *run_id)
+{
+    if (!sDisplayCapture.valid || !rows || capacity < RHH_WORLD_DISPLAY_SCANLINES || !map_id || !sequence || !run_id) return -1;
+    memcpy(rows, sDisplayCapture.rows, sizeof(sDisplayCapture.rows));
+    *map_id = sDisplayCapture.map_id; *sequence = sDisplayCapture.sequence; *run_id = sDisplayCapture.run_id; return 0;
+}
+
+void NativePhotoOamBegin(void)
+{
+    memset(sOamPendingOwner, 255, sizeof(sOamPendingOwner));
+    sOamPendingBuilt = true;
+}
+void NativePhotoOamAdd(unsigned first, unsigned end, unsigned sprite)
+{
+    while (first < end && first < 128)
+    {
+        sOamPendingOwner[first] = sprite;
+        sOamPendingExpected[first] = gMain.oamBuffer[first];
+        ++first;
+    }
+}
+void NativePhotoOamLoaded(const struct OamData *oam)
+{
+    (void)oam;
+    if (!sOamPendingBuilt) { memset(sOamOwner, 255, sizeof(sOamOwner)); return; }
+    memcpy(sOamOwner, sOamPendingOwner, sizeof(sOamOwner));
+    memcpy(sOamExpected, sOamPendingExpected, sizeof(sOamExpected));
+    ++sOamGeneration;
+}
+void NativePhotoVisibilityRequest(unsigned sprite, uint64_t ticket)
+{
+    sPhotoVisibility.active = true; sPhotoVisibility.valid = false; sPhotoVisibility.footprintValid = false;
+    sPhotoVisibility.sprite = sprite; sPhotoVisibility.ticket = ticket;
+    sPhotoVisibility.generation = sOamGeneration;
+}
+void NativePhotoVisibilityCancel(void) { sPhotoVisibility.active = false; sPhotoVisibility.valid = false; sPhotoVisibility.footprintValid = false; }
+int NativePhotoVisibilityResult(uint64_t ticket, const uint16_t *pixels,
+                                uint32_t *total, uint32_t *visible, uint8_t *mask, uint8_t *silhouette)
+{
+    if (!sPhotoVisibility.active || !sPhotoVisibility.valid || ticket != sPhotoVisibility.ticket
+        || pixels != sPhotoVisibility.pixels) return -1;
+    uint32_t count = 0, shown = 0;
+    for (unsigned i = 0; i < DISPLAY_WIDTH * DISPLAY_HEIGHT; ++i)
+    { count += sPhotoVisibility.coverage[i]; shown += sPhotoVisibility.visible[i]; }
+    if (!count) return -1;
+    *total = count; *visible = shown;
+    if (mask) memcpy(mask, sPhotoVisibility.visible, sizeof(sPhotoVisibility.visible));
+    if (silhouette) memcpy(silhouette, sPhotoVisibility.coverage, sizeof(sPhotoVisibility.coverage));
+    return 0;
+}
+int NativePhotoVisibilityFootprint(uint64_t ticket, const uint16_t *pixels, struct RhhPhotoFootprint *out)
+{
+    if (!out || out->struct_size < sizeof(*out) || !sPhotoVisibility.active || !sPhotoVisibility.valid
+        || !sPhotoVisibility.footprintValid || ticket != sPhotoVisibility.ticket || pixels != sPhotoVisibility.pixels) return -1;
+    *out = sPhotoVisibility.footprint; return 0;
+}
+
 struct scanlineData {
     uint16_t layers[4][DISPLAY_WIDTH];
     uint16_t spriteLayers[4][DISPLAY_WIDTH];
+    uint8_t spriteMasks[4][DISPLAY_WIDTH];
+    uint8_t spriteBattlers[4][DISPLAY_WIDTH];
+    uint8_t photoSprites[4][DISPLAY_WIDTH], photoCoverage[DISPLAY_WIDTH], photoVisible[DISPLAY_WIDTH];
     uint16_t bgcnts[4];
     uint16_t winMask[DISPLAY_WIDTH];
     //priority bookkeeping
@@ -477,6 +583,23 @@ static void DrawSprites(struct scanlineData* scanline, uint16_t vcount, bool win
     for (i = 127; i >= 0; i--)
     {
         struct OamData *oam = &((struct OamData *)OAM)[i];
+        if (!gMain.inBattle && sOamOwner[i] < MAX_SPRITES && gSprites[sOamOwner[i]].inUse
+            && !memcmp(oam, &sOamExpected[i], 6))
+        {
+            s32 coverY = 0;
+            u32 presentation = ModsWildActorPresentation(sOamOwner[i], &coverY);
+            if (presentation == 1 || (presentation == 2 && vcount >= coverY)) continue;
+        }
+        u8 battleBattler = 0;
+        if (sBattleBattlerMaskCapturing && sOamOwner[i] < MAX_SPRITES
+            && gSprites[sOamOwner[i]].inUse && !memcmp(oam, &sOamExpected[i], 6))
+        {
+            for (u32 b = 0; b < gBattlersCount; ++b)
+                if (gBattlerSpriteIds[b] == sOamOwner[i])
+                { if (battleBattler) { battleBattler = 0; break; } battleBattler = b + 1; }
+        }
+        bool photoTarget = sPhotoVisibility.active && sOamOwner[i] == sPhotoVisibility.sprite;
+        if (photoTarget && memcmp(oam, &sOamExpected[i], 6)) sPhotoVisibility.valid = false;
         unsigned int width;
         unsigned int height;
         uint16_t *pixels;
@@ -669,11 +792,115 @@ static void DrawSprites(struct scanlineData* scanline, uint16_t vcount, bool win
                         
                         //write pixel to pixel framebuffer
                         pixels[global_x] = color | (1 << 15);
+                        if (sPhotoVisibility.active)
+                        {
+                            if (photoTarget) scanline->photoCoverage[global_x] = 1;
+                            scanline->photoSprites[oam->priority][global_x] = photoTarget;
+                        }
+                        scanline->spriteMasks[oam->priority][global_x] =
+                            (gNativeShaderUiPalettes & (1u << oam->paletteNum)) ? 0 : 128;
+                        if (sBattleBattlerMaskCapturing)
+                            scanline->spriteBattlers[oam->priority][global_x] =
+                                (gNativeShaderUiPalettes & (1u << oam->paletteNum)) ? 0 : battleBattler;
                     }
                 }
             }
         }
     }
+}
+
+/* Extrapolate the subject's OAM silhouette beyond the viewport using the
+ * same source tiles and transform as DrawSprites. A frame whose OAM, OBJ tile
+ * data or relevant registers change between scanlines is not reproducible. */
+static void PhotoFootprintCheckStable(void)
+{
+    if (sPhotoVisibility.stable && (REG_DISPCNT != sPhotoDisplayControl || REG_MOSAIC != sPhotoMosaic
+        || memcmp(sPhotoOam, OAM, sizeof(sPhotoOam))
+        || memcmp(sPhotoObjTiles, gNativeVram + 0x10000, sizeof(sPhotoObjTiles))))
+        sPhotoVisibility.stable = false;
+}
+static void BuildPhotoFootprint(void)
+{
+    sPhotoVisibility.footprintValid = false;
+    if (!sPhotoVisibility.active || !sPhotoVisibility.valid || !sPhotoVisibility.stable) return;
+    memset(sPhotoFullMask, 0, sizeof(sPhotoFullMask));
+    s32 coverY = 0;
+    u32 presentation = ModsWildActorPresentation(sPhotoVisibility.sprite, &coverY);
+    for (unsigned i = 0; i < 128; ++i)
+    {
+        const struct OamData *oam = &sPhotoOam[i];
+        if (sOamOwner[i] != sPhotoVisibility.sprite || memcmp(oam, &sOamExpected[i], 6)
+            || oam->objMode == 2 || oam->shape >= 3) continue;
+        bool affine = oam->affineMode & 1, doubleSize = (oam->affineMode >> 1) & 1;
+        if (!affine && doubleSize) continue;
+        int width = oam->shape == 0 ? (1 << oam->size) * 8
+            : spriteSizes[oam->size][oam->shape == 1 ? 1 : 0];
+        int height = oam->shape == 0 ? width
+            : spriteSizes[oam->size][oam->shape == 1 ? 0 : 1];
+        int halfWidth = width / 2, halfHeight = height / 2;
+        int matrix[2][2] = {{0x100, 0}, {0, 0x100}};
+        if (affine)
+        {
+            unsigned base = oam->matrixNum * 4;
+            matrix[0][0] = sPhotoOam[base].affineParam; matrix[0][1] = sPhotoOam[base + 1].affineParam;
+            matrix[1][0] = sPhotoOam[base + 2].affineParam; matrix[1][1] = sPhotoOam[base + 3].affineParam;
+            if (doubleSize) { halfWidth *= 2; halfHeight *= 2; }
+        }
+        int x = oam->x, y = oam->y;
+        if (x >= DISPLAY_WIDTH) x -= 512;
+        if (y >= DISPLAY_HEIGHT) y -= 256;
+        x += halfWidth; y += halfHeight;
+        bool flipX = !affine && ((oam->matrixNum >> 3) & 1);
+        bool flipY = !affine && ((oam->matrixNum >> 4) & 1);
+        for (int localY = -halfHeight; localY < halfHeight; ++localY)
+            for (int localX = -halfWidth; localX <= halfWidth; ++localX)
+            {
+                int gx = x + localX, gy = y + localY;
+                if (presentation == 1 || (presentation == 2 && gy >= coverY)) continue;
+                int sampleX = localX, sampleY = localY;
+                if (oam->mosaic)
+                {
+                    int mx = ((sPhotoMosaic >> 8) & 15) + 1, my = ((sPhotoMosaic >> 12) & 15) + 1;
+                    sampleX = gx - gx % mx - x; sampleY = gy - gy % my - y;
+                }
+                int tx = ((matrix[0][0] * sampleX + matrix[0][1] * sampleY) >> 8) + width / 2;
+                int ty = ((matrix[1][0] * sampleX + matrix[1][1] * sampleY) >> 8) + height / 2;
+                if (tx < 0 || tx >= width || ty < 0 || ty >= height) continue;
+                if (flipX) tx = width - tx - 1;
+                if (flipY) ty = height - ty - 1;
+                int block = (ty / 8) * ((sPhotoDisplayControl & 0x40) ? width / 8 : 16) + tx / 8;
+                unsigned offset = oam->bpp ? (block * 2 + oam->tileNum) * 32 + (ty % 8) * 8 + tx % 8
+                    : (block + oam->tileNum) * 32 + (ty % 8) * 4 + (tx % 8) / 2;
+                if (offset >= sizeof(sPhotoObjTiles) || gx < PHOTO_FULL_LEFT || gy < PHOTO_FULL_TOP
+                    || gx >= PHOTO_FULL_LEFT + PHOTO_FULL_WIDTH || gy >= PHOTO_FULL_TOP + PHOTO_FULL_HEIGHT) return;
+                unsigned pixel = sPhotoObjTiles[offset];
+                if (!oam->bpp) pixel = (pixel >> ((tx & 1) * 4)) & 15;
+                if (pixel) sPhotoFullMask[(gy - PHOTO_FULL_TOP) * PHOTO_FULL_WIDTH + gx - PHOTO_FULL_LEFT] = 1;
+            }
+    }
+    struct RhhPhotoFootprint result = {.struct_size = sizeof(result), .ticket = sPhotoVisibility.ticket};
+    bool found = false;
+    for (int y = 0; y < PHOTO_FULL_HEIGHT; ++y)
+        for (int x = 0; x < PHOTO_FULL_WIDTH; ++x)
+        {
+            int gx = x + PHOTO_FULL_LEFT, gy = y + PHOTO_FULL_TOP;
+            bool occupied = sPhotoFullMask[y * PHOTO_FULL_WIDTH + x];
+            if (gx >= 0 && gx < DISPLAY_WIDTH && gy >= 0 && gy < DISPLAY_HEIGHT)
+            {
+                if (occupied != !!sPhotoVisibility.coverage[gy * DISPLAY_WIDTH + gx]) return;
+                result.inside_pixels += occupied;
+            }
+            if (!occupied) continue;
+            ++result.total_pixels;
+            if (!found) { result.left = gx; result.top = gy; result.right = gx + 1; result.bottom = gy + 1; found = true; }
+            else
+            {
+                result.left = min(result.left, gx); result.top = min(result.top, gy);
+                result.right = max(result.right, gx + 1); result.bottom = max(result.bottom, gy + 1);
+            }
+        }
+    if (found && result.inside_pixels)
+    { sPhotoVisibility.footprint = result; sPhotoVisibility.footprintValid = true; }
 }
 
 static void DrawScanline(uint16_t *pixels, uint16_t vcount)
@@ -690,6 +917,13 @@ static void DrawScanline(uint16_t *pixels, uint16_t vcount)
     memset(scanline.layers, 0, sizeof(scanline.layers));
     memset(scanline.winMask, 0, sizeof(scanline.winMask));
     memset(scanline.spriteLayers, 0, sizeof(scanline.spriteLayers));
+    if (sBattleBattlerMaskCapturing) memset(scanline.spriteBattlers, 0, sizeof(scanline.spriteBattlers));
+    if (sPhotoVisibility.active)
+    {
+        memset(scanline.photoSprites, 0, sizeof(scanline.photoSprites));
+        memset(scanline.photoCoverage, 0, sizeof(scanline.photoCoverage));
+        memset(scanline.photoVisible, 0, sizeof(scanline.photoVisible));
+    }
     memset(scanline.prioritySortedBgsCount, 0, sizeof(scanline.prioritySortedBgsCount));
 
     for (bgnum = 0; bgnum < numOfBgs; bgnum++)
@@ -868,6 +1102,9 @@ static void DrawScanline(uint16_t *pixels, uint16_t vcount)
                     }
                     //write the pixel to scanline buffer output
                     pixels[xpos] = color;
+                    if (sPhotoVisibility.active) scanline.photoVisible[xpos] = 0;
+                    gNativeShaderSceneMask[vcount * DISPLAY_WIDTH + xpos] = bgnum == 0 ? 0 : 255;
+                    if (sBattleBattlerMaskCapturing) sBattleBattlerMask[vcount * DISPLAY_WIDTH + xpos] = 0;
                 }
             }
         }
@@ -882,8 +1119,17 @@ static void DrawScanline(uint16_t *pixels, uint16_t vcount)
                         continue;
                 //draw the pixel
                 pixels[xpos] = src[xpos];
+                if (sPhotoVisibility.active) scanline.photoVisible[xpos] = scanline.photoSprites[prnum][xpos];
+                gNativeShaderSceneMask[vcount * DISPLAY_WIDTH + xpos] = scanline.spriteMasks[prnum][xpos];
+                if (sBattleBattlerMaskCapturing)
+                    sBattleBattlerMask[vcount * DISPLAY_WIDTH + xpos] = scanline.spriteBattlers[prnum][xpos];
             }
         }
+    }
+    if (sPhotoVisibility.active)
+    {
+        memcpy(sPhotoVisibility.coverage + vcount * DISPLAY_WIDTH, scanline.photoCoverage, DISPLAY_WIDTH);
+        memcpy(sPhotoVisibility.visible + vcount * DISPLAY_WIDTH, scanline.photoVisible, DISPLAY_WIDTH);
     }
 }
 
@@ -897,6 +1143,25 @@ uint16_t *memsetu16(uint16_t *dst, uint16_t fill, size_t count)
 
 void DrawFrame(uint16_t *pixels)
 {
+    const struct SaveBlock1 *displaySave = gSaveBlock1Ptr;
+    bool captureDisplay = displaySave && DisplayCaptureAllowed();
+    uint64_t displayRun = RhhModsRunId();
+    uint32_t displayMap = captureDisplay ? ((uint8_t)displaySave->location.mapGroup << 8)
+        | (uint8_t)displaySave->location.mapNum : 0;
+    sDisplayCapture.valid = false;
+    if (sPhotoVisibility.active)
+    {
+        sPhotoVisibility.valid = sOamGeneration != sPhotoVisibility.generation;
+        sPhotoVisibility.pixels = pixels;
+        sPhotoVisibility.footprintValid = false; sPhotoVisibility.stable = true;
+        sPhotoDisplayControl = REG_DISPCNT; sPhotoMosaic = REG_MOSAIC;
+        memcpy(sPhotoOam, OAM, sizeof(sPhotoOam));
+        memcpy(sPhotoObjTiles, gNativeVram + 0x10000, sizeof(sPhotoObjTiles));
+    }
+    sBattleBattlerMaskPixels = NULL;
+    sBattleBattlerMaskCapturing = gMain.inBattle && gBattlersCount <= MAX_BATTLERS_COUNT && sOamGeneration;
+    if (sBattleBattlerMaskCapturing) memset(sBattleBattlerMask, 0, sizeof(sBattleBattlerMask));
+    memset(gNativeShaderSceneMask, 255, sizeof(gNativeShaderSceneMask));
     int i;
     int j;
     for (i = 0; i < DISPLAY_HEIGHT; i++)
@@ -911,6 +1176,19 @@ void DrawFrame(uint16_t *pixels)
             if (REG_IME && (REG_IE & INTR_FLAG_VCOUNT))
 #endif
                     gIntrTable[0]();
+        }
+        if (sPhotoVisibility.active) PhotoFootprintCheckStable();
+
+        if (captureDisplay)
+        {
+            if (!DisplayCaptureAllowed() || gSaveBlock1Ptr != displaySave || RhhModsRunId() != displayRun
+                || (((uint8_t)displaySave->location.mapGroup << 8) | (uint8_t)displaySave->location.mapNum) != displayMap)
+                captureDisplay = false;
+            else sDisplayCapture.rows[i] = (struct RhhWorldDisplayScanline){
+                .display_control = REG_DISPCNT, .bg_control = {REG_BG0CNT, REG_BG1CNT, REG_BG2CNT, REG_BG3CNT},
+                .blend_control = REG_BLDCNT, .blend_alpha = REG_BLDALPHA, .blend_y = REG_BLDY, .mosaic = REG_MOSAIC,
+                .win0_h = REG_WIN0H, .win0_v = REG_WIN0V, .win1_h = REG_WIN1H, .win1_v = REG_WIN1V,
+                .win_in = REG_WININ, .win_out = REG_WINOUT};
         }
 
         // Render the backdrop color before the each individual scanline.
@@ -932,6 +1210,9 @@ void DrawFrame(uint16_t *pixels)
 
         memsetu16(&pixels[i * DISPLAY_WIDTH], backdropColor, DISPLAY_WIDTH);
         DrawScanline(&pixels[i * DISPLAY_WIDTH], i);
+        /* The battle dialogue and move/action menus occupy the lower 48 rows. */
+        if (gMain.inBattle && i >= 112) memset(gNativeShaderSceneMask + i * DISPLAY_WIDTH, 0, DISPLAY_WIDTH);
+        if (sBattleBattlerMaskCapturing && i >= 112) memset(sBattleBattlerMask + i * DISPLAY_WIDTH, 0, DISPLAY_WIDTH);
         
         REG_DISPSTAT |= INTR_FLAG_HBLANK;
 
@@ -943,5 +1224,13 @@ void DrawFrame(uint16_t *pixels)
         REG_DISPSTAT &= ~INTR_FLAG_HBLANK;
         REG_DISPSTAT &= ~INTR_FLAG_VCOUNT;
     }
+    if (sBattleBattlerMaskCapturing) sBattleBattlerMaskPixels = pixels;
+    sBattleBattlerMaskCapturing = false;
+    if (sPhotoVisibility.active) { PhotoFootprintCheckStable(); BuildPhotoFootprint(); }
+    if (captureDisplay && DisplayCaptureAllowed() && gSaveBlock1Ptr == displaySave && RhhModsRunId() == displayRun
+        && (((uint8_t)displaySave->location.mapGroup << 8) | (uint8_t)displaySave->location.mapNum) == displayMap
+        && sDisplayCapture.sequence != UINT64_MAX)
+    { sDisplayCapture.map_id = displayMap; sDisplayCapture.run_id = displayRun;
+      ++sDisplayCapture.sequence; sDisplayCapture.valid = true; }
 }
 #endif

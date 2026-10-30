@@ -21,5 +21,6 @@ enum StatChangeResult
 #define STAT_CHANGE_STICKY_WEB          (1 << 9)
 #define STAT_CHANGE_MIRROR_HERB         (1 << 10)
 #define STAT_CHANGE_OPPORTUNIST         (1 << 11)
+#define STAT_CHANGE_IGNORE_SUBSTITUTE   (1 << 12)
 
 #endif // GUARD_BATTLE_MOVE_STAT_CHANGE_H

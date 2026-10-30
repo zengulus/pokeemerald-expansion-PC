@@ -1,4 +1,7 @@
 #include "global.h"
+#ifdef NATIVE
+#include "mods.h"
+#endif
 #include "battle.h"
 #include "event_data.h"
 #include "field_player_avatar.h"
@@ -102,6 +105,9 @@ void CB2_EndSafariBattle(void)
     sSafariZonePkblkUses += gBattleResults.pokeblockThrows;
     if (gBattleOutcome == B_OUTCOME_CAUGHT)
         sSafariZoneCaughtMons++;
+#ifdef NATIVE
+    ModsWildActorBattleFinished(gBattleOutcome);
+#endif
     if (gNumSafariBalls != 0)
     {
         SetMainCallback2(CB2_ReturnToField);

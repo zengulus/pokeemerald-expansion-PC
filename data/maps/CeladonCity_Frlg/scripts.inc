@@ -108,7 +108,7 @@ CeladonCity_Text_GotMyKoffingInCinnabar::
 	.string "poison when it's angry.$"
 
 CeladonCity_Text_GymIsGreatFullOfWomen::
-	.string "Heheh! This GYM is great!\n"
+	.string "Heheh! This Gym is great!\n"
 	.string "It's full of women!$"
 
 CeladonCity_Text_GameCornerIsBadForCitysImage::
@@ -136,10 +136,10 @@ CeladonCity_Text_GetLostOrIllPunchYou::
 	.string "Get lost, or I'll punch you.$"
 
 CeladonCity_Text_KeepOutOfTeamRocketsWay::
-	.string "Keep out of TEAM ROCKET's way!$"
+	.string "Keep out of Team Rocket's way!$"
 
 CeladonCity_Text_ExplainXAccuracyDireHit::
-	.string "TRAINER TIPS\p"
+	.string "Trainer TIPS\p"
 	.string "X ACCURACY boosts the accuracy of\n"
 	.string "techniques.\p"
 	.string "DIRE HIT jacks up the likelihood\n"
@@ -148,12 +148,12 @@ CeladonCity_Text_ExplainXAccuracyDireHit::
 	.string "DEPT. STORE!$"
 
 CeladonCity_Text_CitySign::
-	.string "CELADON CITY\n"
+	.string "CELADON City\n"
 	.string "The City of Rainbow Dreams$"
 
 CeladonCity_Text_GymSign::
-	.string "CELADON CITY POKéMON GYM\n"
-	.string "LEADER: ERIKA\l"
+	.string "CELADON City Pokémon Gym\n"
+	.string "Leader: ERIKA\l"
 	.string "The Nature-Loving Princess!$"
 
 CeladonCity_Text_MansionSign::
@@ -164,8 +164,8 @@ CeladonCity_Text_DeptStoreSign::
 	.string "CELADON DEPT. STORE!$"
 
 CeladonCity_Text_GuardSpecProtectsFromStatus::
-	.string "TRAINER TIPS\p"
-	.string "GUARD SPEC. protects POKéMON\n"
+	.string "Trainer TIPS\p"
+	.string "GUARD SPEC. protects Pokémon\n"
 	.string "from status-reduction moves during\l"
 	.string "battle.\p"
 	.string "Get your items at the\n"
@@ -176,7 +176,7 @@ CeladonCity_Text_PrizeExchangeSign::
 	.string "PRIZE EXCHANGE$"
 
 CeladonCity_Text_GameCornerSign::
-	.string "ROCKET GAME CORNER\n"
+	.string "Rocket GAME CORNER\n"
 	.string "The playground for grown-ups!$"
 
 CeladonCity_Text_ScaldedTongueOnTea::
@@ -202,7 +202,7 @@ Text_SoftboiledDeclined::
 	.string "I hope we can chat again.$"
 
 Text_SoftboiledWhichMon::
-	.string "So, who's the POKéMON that gets\n"
+	.string "So, who's the Pokémon that gets\n"
 	.string "the chance to learn SOFTBOILED?$"
 
 Text_SoftboiledTaught::

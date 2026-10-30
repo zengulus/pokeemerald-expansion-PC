@@ -57,16 +57,37 @@ u8 ChooseWildMonLevel(const struct WildPokemon *wildPokemon, u8 wildMonIndex, en
 bool8 StandardWildEncounter(u16 curMetatileBehavior, u16 prevMetatileBehavior);
 bool8 SweetScentWildEncounter(void);
 bool8 DoesCurrentMapHaveFishingMons(void);
-void FishingWildEncounter(u8 rod);
+bool8 FishingWildEncounter(u8 rod);
 u16 GetLocalWildMon(bool8 *isWaterMon);
 u16 GetLocalWaterMon(void);
 bool8 UpdateRepelCounter(void);
 bool8 IsWildLevelAllowedByRepel(u8 wildLevel);
+bool8 IsEncounterAbilityFilterPossible(u8 level);
 bool8 IsAbilityAllowingEncounter(u8 level);
 bool8 TryDoDoubleWildBattle(void);
 u32 CalculateChainFishingShinyRolls(void);
 void CreateWildMon(enum Species species, u8 level);
 bool8 TryGenerateWildMon(const struct WildPokemonInfo *wildMonInfo, enum WildPokemonArea area, u8 flags);
+#ifdef NATIVE
+/* Copies the configured slot interval widths for the native weight hook and
+ * authored catalog; area uses enum WildPokemonArea, rod uses RhhWildRod. */
+bool32 ModsWildBaseSlotWeights(u32 area, u32 rod, u16 *weights, u32 *first, u32 *count);
+/* Shared ordinary-map selection. variant is source-header order; a cave value
+ * outside the supported range falls back to zero and sets clamped. */
+u16 ModsWildHeaderForMap(u8 group, u8 number, u32 *variant, bool32 *clamped);
+enum TimeOfDay ModsWildResolveTime(const struct WildPokemonHeader *header, enum WildPokemonArea area,
+                                   enum TimeOfDay requested, bool32 facility, u32 *flags);
+enum TimeOfDay ModsWildTimePolicy(enum TimeOfDay requested, enum TimeOfDay mapped, bool32 present,
+                                  bool32 enabled, bool32 disableFallback, bool32 facility,
+                                  enum TimeOfDay fallback, u32 *flags);
+/* Coordinates are map-local, identifying the actual overworld spawn tile. */
+bool8 TryGenerateWildMonAt(const struct WildPokemonInfo *wildMonInfo, enum WildPokemonArea area, u8 flags, s32 x, s32 y);
+bool8 TryGenerateWildMonAtStatus(const struct WildPokemonInfo *wildMonInfo, enum WildPokemonArea area, u8 flags,
+                                 s32 x, s32 y, bool8 *cancelled);
+bool32 TryGenerateFacilityWild(const struct WildPokemonInfo *table, u32 flags, bool32 pike,
+                               bool32 checkPikeAbility, u32 time, s32 x, s32 y,
+                               bool32 overworld, bool8 *cancelled);
+#endif
 bool8 AreLegendariesInSootopolisPreventingEncounters(void);
 u16 GetCurrentMapWildMonHeaderId(void);
 bool8 CheckFeebasAtCoords(s16 x, s16 y);

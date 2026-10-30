@@ -595,7 +595,7 @@ void LaunchStatusAnimation(enum BattlerId battler, u8 statusAnimId)
 
 static void Task_DoStatusAnimation(u8 taskId)
 {
-    gAnimScriptCallback();
+    BATTLE_ANIM_STEP();
     if (!gAnimScriptActive)
     {
         gBattleSpritesDataPtr->healthBoxesData[gTasks[taskId].data[0]].statusAnimActive = FALSE;

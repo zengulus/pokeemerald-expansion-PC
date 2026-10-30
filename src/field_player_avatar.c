@@ -1,4 +1,9 @@
 #include "global.h"
+#ifdef NATIVE
+#include "native_speed.h"
+#include "palette.h"
+#include "link.h"
+#endif
 #include "main.h"
 #include "bike.h"
 #include "event_data.h"
@@ -349,7 +354,23 @@ static bool8 (*const sPlayerAvatarSecretBaseMatSpin[])(struct Task *, struct Obj
 
 void MovementType_Player(struct Sprite *sprite)
 {
-    UpdateObjectEventCurrentMovement(&gObjectEvents[sprite->data[0]], sprite, (bool8 (*)(struct ObjectEvent *, struct Sprite *))ObjectEventCB2_NoMovement2);
+    struct ObjectEvent *player = &gObjectEvents[sprite->data[0]];
+    UpdateObjectEventCurrentMovement(player, sprite, (bool8 (*)(struct ObjectEvent *, struct Sprite *))ObjectEventCB2_NoMovement2);
+#ifdef NATIVE
+    static unsigned phase;
+    if (gSaveBlock2Ptr && gPlayerAvatar.runningState == MOVING && !ArePlayerFieldControlsLocked()
+        && !ScriptContext_IsEnabled() && !gPaletteFade.active && !gMain.inBattle && !gReceivedRemoteLinkPlayers && !InUnionRoom()
+        && (gMain.callback2 == CB2_Overworld || gMain.callback2 == CB2_OverworldBasic))
+    {
+        unsigned extra = NativeSpeedExtraSteps(gSaveBlock2Ptr->optionsOverworldSpeed, &phase);
+        while (extra-- && ObjectEventIsHeldMovementActive(player) && !player->heldMovementFinished)
+        {
+            UpdateObjectEventCurrentMovement(player, sprite, (bool8 (*)(struct ObjectEvent *, struct Sprite *))ObjectEventCB2_NoMovement2);
+            AnimateSprite(sprite);
+        }
+    }
+    else phase = 0;
+#endif
 }
 
 static u8 ObjectEventCB2_NoMovement2(void)

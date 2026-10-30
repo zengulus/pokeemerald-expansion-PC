@@ -48,6 +48,7 @@
 #include "wild_encounter.h"
 #include "rtc.h"
 #include "party_menu.h"
+#include "script_pokemon_util.h"
 #include "battle_arena.h"
 #include "battle_pike.h"
 #include "battle_pyramid.h"
@@ -343,8 +344,8 @@ static void PutMonIconOnLvlUpBanner(void);
 static void DrawLevelUpBannerText(void);
 static void SpriteCB_MonIconOnLvlUpBanner(struct Sprite *sprite);
 void ApplyExperienceMultipliers(s32 *expAmount, u8 expGetterMonId, u8 faintedBattler);
-static void RemoveAllWeather(void);
-static void RemoveAllTerrains(void);
+static void RemoveAllWeather(enum BattlerId source, enum Move move, enum Ability ability);
+static void RemoveAllTerrains(enum BattlerId source, enum Move move, enum Ability ability);
 static void ResetValuesForCalledMove(void);
 static bool32 CanAbilityShieldActivateForBattler(enum BattlerId battler);
 static void PlayAnimation(enum BattlerId battler, u8 animId, const u16 *argPtr, const u8 *nextInstr);
@@ -524,6 +525,7 @@ static void Cmd_settoxicspikes(void);
 static void Cmd_setgastroacid(void);
 static void Cmd_setyawn(void);
 static void Cmd_setroom(void);
+static bool32 TrySetFairyLock(void);
 static void Cmd_tryswapabilities(void);
 static void Cmd_tryimprison(void);
 static void Cmd_setstealthrock(void);
@@ -916,7 +918,11 @@ bool32 ProteanTryChangeType(enum BattlerId battler, enum Ability ability, enum M
          && !gBattleMons[battler].volatiles.usedProteanLibero
          && !gBattleStruct->bouncedMoveIsUsed
          && (gBattleMons[battler].types[0] != moveType || gBattleMons[battler].types[1] != moveType
-             || (gBattleMons[battler].types[2] != moveType && gBattleMons[battler].types[2] != TYPE_MYSTERY))
+             || (gBattleMons[battler].types[2] != moveType && gBattleMons[battler].types[2] != TYPE_MYSTERY)
+#ifdef NATIVE
+             || gBattleMons[battler].extraTypeCount
+#endif
+            )
          && move != MOVE_STRUGGLE
          && GetActiveGimmick(battler) != GIMMICK_TERA)
     {
@@ -1224,6 +1230,9 @@ static void Cmd_datahpupdate(void)
     if (gBattleControllerExecFlags)
         return;
 
+#ifdef NATIVE
+    u32 previousHp = gBattleMons[battler].hp;
+#endif
     if (gBattleStruct->passiveHpUpdate[battler] < 0)
     {
         // Negative damage is HP gain
@@ -1242,6 +1251,9 @@ static void Cmd_datahpupdate(void)
             gProtectStructs[battler].assuranceDoubled = TRUE; // Will reset for the next turn
     }
 
+#ifdef NATIVE
+    ModsRecordMoveHealth(battler, previousHp, gBattleMons[battler].hp, TRUE);
+#endif
     gBattleStruct->passiveHpUpdate[battler] = 0;
 
     if (gBattleMons[battler].hp > gBattleMons[battler].maxHP / 2)
@@ -1691,6 +1703,10 @@ void TrySynchronizeActivation(enum BattlerId battlerAtk, enum BattlerId effectBa
 
 void SetNonVolatileStatus(enum BattlerId battlerAtk, enum BattlerId effectBattler, enum MoveEffect effect, const u8 *battleScript, enum StatusTrigger trigger)
 {
+#ifdef NATIVE
+    u32 beforeStatus = gBattleMons[effectBattler].status1;
+    u32 previousStackSize = gBattleResources->battleScriptsStack->size;
+#endif
     gEffectBattler = effectBattler;
 
     if (effect == MOVE_EFFECT_SLEEP || effect == MOVE_EFFECT_FREEZE)
@@ -1752,6 +1768,12 @@ void SetNonVolatileStatus(enum BattlerId battlerAtk, enum BattlerId effectBattle
 
     if ((effect == MOVE_EFFECT_POISON || effect == MOVE_EFFECT_TOXIC) && trigger == TRIGGER_ON_MOVE)
         gSpecialStatuses[effectBattler].poisonPuppeteer = TRUE;
+#ifdef NATIVE
+    bool32 presentationReady = previousStackSize < ARRAY_COUNT(gBattleResources->battleScriptsStack->ptr)
+        && gBattleResources->battleScriptsStack->size == previousStackSize + 1
+        && gBattleResources->battleScriptsStack->ptr[previousStackSize] == battleScript;
+    ModsBattleStatusApplied(battlerAtk, effectBattler, effect, trigger, beforeStatus, presentationReady);
+#endif
 }
 
 static bool32 CanApplyAdditionalEffect(const struct AdditionalEffect *additionalEffect)
@@ -1895,7 +1917,14 @@ static void Cmd_tryfaintmon(void)
         {
             if (gBattleMons[battler].volatiles.neutralizingGas)
             {
+#ifdef NATIVE
+                struct ModsGasChangeCapture gasChange;
+                ModsGasChangeCapture(&gasChange);
+#endif
                 gBattleMons[battler].volatiles.neutralizingGas = FALSE;
+#ifdef NATIVE
+                ModsGasChangeCommitted(&gasChange, RHH_GAS_FAINTED, battler, 0);
+#endif
                 if (!IsNeutralizingGasOnField())
                 {
                     BattleScriptPush(gBattlescriptCurrInstr);
@@ -1927,7 +1956,14 @@ static void Cmd_dofaintanimation(void)
 
     enum BattlerId battler = GetBattlerForBattleScript(cmd->battler);
 
+#ifdef NATIVE
+    struct ModsWeatherPresenceCapture weatherPresence;
+    ModsWeatherPresenceCapture(&weatherPresence);
+#endif
     gBattleStruct->battlerState[battler].notOnField = TRUE;
+#ifdef NATIVE
+    ModsWeatherPresenceCommitted(&weatherPresence, RHH_WEATHER_PRESENCE_FAINTED, battler);
+#endif
 
     BtlController_EmitFaintAnimation(battler, B_COMM_TO_CONTROLLER);
     MarkBattlerForControllerExec(battler);
@@ -3069,7 +3105,8 @@ static void PlayAnimation(enum BattlerId battler, u8 animId, const u16 *argPtr, 
      || animId == B_ANIM_TERA_ACTIVATE
      || animId == B_ANIM_FORM_CHANGE_INSTANT)
     {
-        BtlController_EmitBattleAnimation(battler, B_COMM_TO_CONTROLLER, animId, *argPtr);
+        /* Script macros default this optional argument to NULL. */
+        BtlController_EmitBattleAnimation(battler, B_COMM_TO_CONTROLLER, animId, argPtr ? *argPtr : 0);
         MarkBattlerForControllerExec(battler);
         gBattlescriptCurrInstr = nextInstr;
     }
@@ -3085,7 +3122,7 @@ static void PlayAnimation(enum BattlerId battler, u8 animId, const u16 *argPtr, 
           || animId == B_ANIM_SNOW_CONTINUES
           || animId == B_ANIM_FOG_CONTINUES)
     {
-        BtlController_EmitBattleAnimation(battler, B_COMM_TO_CONTROLLER, animId, *argPtr);
+        BtlController_EmitBattleAnimation(battler, B_COMM_TO_CONTROLLER, animId, argPtr ? *argPtr : 0);
         MarkBattlerForControllerExec(battler);
         gBattlescriptCurrInstr = nextInstr;
     }
@@ -3095,7 +3132,7 @@ static void PlayAnimation(enum BattlerId battler, u8 animId, const u16 *argPtr, 
     }
     else
     {
-        BtlController_EmitBattleAnimation(battler, B_COMM_TO_CONTROLLER, animId, *argPtr);
+        BtlController_EmitBattleAnimation(battler, B_COMM_TO_CONTROLLER, animId, argPtr ? *argPtr : 0);
         MarkBattlerForControllerExec(battler);
         gBattlescriptCurrInstr = nextInstr;
     }
@@ -3143,6 +3180,13 @@ static void Cmd_trainerslidein(void)
 static void Cmd_moveend(void)
 {
     CMD_ARGS(u8 endMode, u8 endState);
+#ifdef NATIVE
+    if (ModsConsumeMoveResolutionResume() && gBattleScripting.moveendState == MOVEEND_COUNT)
+    {
+        gBattlescriptCurrInstr = cmd->nextInstr;
+        return;
+    }
+#endif
     assertf(gBattlerAttacker < MAX_BATTLERS_COUNT, "invalid gBattlerAttacker: %d\nmove: %S", gBattlerAttacker, GetMoveName(gCurrentMove));
     assertf(gBattlerTarget < MAX_BATTLERS_COUNT, "invalid gBattlerTarget: %d\nmove: %S", gBattlerTarget, GetMoveName(gCurrentMove));
 
@@ -3224,7 +3268,8 @@ static void Cmd_switchindataupdate(void)
     CMD_ARGS(u8 battler);
 
     struct BattlePokemon oldData;
-    enum BattlerId battler, i;
+    enum BattlerId battler;
+    u32 i;
     u8 *monData;
 
     if (gBattleControllerExecFlags)
@@ -3233,9 +3278,12 @@ static void Cmd_switchindataupdate(void)
     battler = GetBattlerForBattleScript(cmd->battler);
     oldData = gBattleMons[battler];
     monData = (u8 *)(&gBattleMons[battler]);
+#ifdef NATIVE
+    struct ModsWeatherPresenceCapture weatherPresence;
+    ModsWeatherPresenceCapture(&weatherPresence);
+#endif
 
-    for (i = 0; i < sizeof(struct BattlePokemon); i++)
-        monData[i] = gBattleResources->bufferB[battler][4 + i];
+    memcpy(monData, &gBattleResources->bufferB[battler][4], BATTLE_POKEMON_TRANSFER_SIZE);
 
     enum BattleTrainer trainer = GetBattlerTrainer(battler);
     assertf(IsBattlerAlive(battler))
@@ -3249,6 +3297,10 @@ static void Cmd_switchindataupdate(void)
     gBattleMons[battler].types[0] = GetSpeciesType(gBattleMons[battler].species, 0);
     gBattleMons[battler].types[1] = GetSpeciesType(gBattleMons[battler].species, 1);
     gBattleMons[battler].types[2] = TYPE_MYSTERY;
+#ifdef NATIVE
+    ModsBattleMonSpeciesTypes(&gBattleMons[battler]);
+    CaptureBattlerNature(battler);
+#endif
     gBattleMons[battler].ability = GetAbilityBySpecies(gBattleMons[battler].species, gBattleMons[battler].abilityNum);
     #if TESTING
     if (gTestRunnerEnabled)
@@ -3274,6 +3326,9 @@ static void Cmd_switchindataupdate(void)
     }
 
     SwitchInClearSetData(battler, &oldData.volatiles);
+#ifdef NATIVE
+    ModsWeatherPresenceCommitted(&weatherPresence, RHH_WEATHER_PRESENCE_ENTERED, battler);
+#endif
 
     if (gBattleTypeFlags & BATTLE_TYPE_PALACE
         && gBattleMons[battler].maxHP / 2 >= gBattleMons[battler].hp
@@ -3287,6 +3342,9 @@ static void Cmd_switchindataupdate(void)
 
     PREPARE_MON_NICK_BUFFER(gBattleTextBuff1, battler, gBattlerPartyIndexes[battler]);
 
+#ifdef NATIVE
+    ModsBattleSwitchPrepared(battler);
+#endif
     gBattlescriptCurrInstr = cmd->nextInstr;
 }
 
@@ -3310,6 +3368,9 @@ static void Cmd_switchinanim(void)
 
     gBattlescriptCurrInstr = cmd->nextInstr;
 
+#ifdef NATIVE
+    ModsBattleSwitchEntered(battler);
+#endif
     if (gBattleTypeFlags & BATTLE_TYPE_ARENA)
         BattleArena_InitPoints();
 }
@@ -4368,9 +4429,16 @@ static void Cmd_setgravity(void)
     }
     else
     {
+#ifdef NATIVE
+        struct RhhBattleFieldRules before;
+        bool32 captured = ModsBattleFieldRulesCapture(&before);
+#endif
         gFieldStatuses |= STATUS_FIELD_GRAVITY;
         gFieldTimers.gravityTimer = 5;
         gBattlescriptCurrInstr = cmd->nextInstr;
+#ifdef NATIVE
+        if (captured) ModsBattleFieldRulesCommitted(&before, RHH_BATTLE_FIELD_CAUSE_MOVE, gBattlerAttacker, gCurrentMove);
+#endif
     }
 }
 
@@ -4868,8 +4936,13 @@ bool32 CanUseLastResort(enum BattlerId battler)
     return moveIndex >= 2; // At least two usable moves that are either Last Resort or have been used
 }
 
-static void RemoveAllWeather(void)
+static void RemoveAllWeather(enum BattlerId source, enum Move move, enum Ability ability)
 {
+    (void)source; (void)move; (void)ability;
+#ifdef NATIVE
+    struct RhhBattleEnvironmentState before;
+    bool32 captured = ModsBattleEnvironmentCapture(&before);
+#endif
     gBattleStruct->weatherDuration = 0;
 
     if (gBattleWeather & B_WEATHER_RAIN_PRIMAL)
@@ -4894,10 +4967,18 @@ static void RemoveAllWeather(void)
         gBattleCommunication[MULTISTRING_CHOOSER] = B_MSG_WEATHER_END_COUNT;  // failsafe
 
     gBattleWeather = 0;    // remove the weather
+#ifdef NATIVE
+    if (captured) ModsBattleEnvironmentCommitted(&before, RHH_BATTLE_ENV_CAUSE_CLEARED, source, move, ability);
+#endif
 }
 
-static void RemoveAllTerrains(void)
+static void RemoveAllTerrains(enum BattlerId source, enum Move move, enum Ability ability)
 {
+    (void)source; (void)move; (void)ability;
+#ifdef NATIVE
+    struct RhhBattleEnvironmentState before;
+    bool32 captured = ModsBattleEnvironmentCapture(&before);
+#endif
     if (gFieldTimers.terrain != B_TERRAIN_NONE)
         gBattleCommunication[MULTISTRING_CHOOSER] = gBattleTerrainInfo[gFieldTimers.terrain].endMessage;
     else
@@ -4905,6 +4986,9 @@ static void RemoveAllTerrains(void)
 
     gFieldTimers.terrain = B_TERRAIN_NONE;
     TryToRevertMimicryAndFlags();
+#ifdef NATIVE
+    if (captured) ModsBattleEnvironmentCommitted(&before, RHH_BATTLE_ENV_CAUSE_CLEARED, source, move, ability);
+#endif
 }
 
 #define DEFOG_CLEAR(status, structField, battlescript, move)\
@@ -4972,8 +5056,15 @@ bool32 TryDefogClear(enum BattlerId battlerAtk, bool32 clear)
         {
             if (clear)
             {
+#ifdef NATIVE
+                struct RhhBattleEnvironmentState before;
+                bool32 captured = ModsBattleEnvironmentCapture(&before);
+#endif
                 gBattleWeather &= ~B_WEATHER_FOG;
                 BattleScriptCall(BattleScript_FogEnded);
+#ifdef NATIVE
+                if (captured) ModsBattleEnvironmentCommitted(&before, RHH_BATTLE_ENV_CAUSE_CLEARED, battlerAtk, gCurrentMove, ABILITY_NONE);
+#endif
             }
             return TRUE;
         }
@@ -4981,7 +5072,7 @@ bool32 TryDefogClear(enum BattlerId battlerAtk, bool32 clear)
         {
             if (clear)
             {
-                RemoveAllTerrains();
+                RemoveAllTerrains(battlerAtk, gCurrentMove, ABILITY_NONE);
                 BattleScriptCall(BattleScript_TerrainEnds);
             }
             return TRUE;
@@ -5170,7 +5261,13 @@ static void Cmd_setatkhptozero(void)
     if (gBattleControllerExecFlags)
         return;
 
+#ifdef NATIVE
+    u32 previousHp = gBattleMons[gBattlerAttacker].hp;
+#endif
     gBattleMons[gBattlerAttacker].hp = 0;
+#ifdef NATIVE
+    ModsRecordMoveHealth(gBattlerAttacker, previousHp, 0, TRUE);
+#endif
     BtlController_EmitSetMonData(gBattlerAttacker, B_COMM_TO_CONTROLLER, REQUEST_HP_BATTLE, 0, sizeof(gBattleMons[gBattlerAttacker].hp), &gBattleMons[gBattlerAttacker].hp);
     MarkBattlerForControllerExec(gBattlerAttacker);
 
@@ -5227,7 +5324,7 @@ static void Cmd_setfieldweather(void)
 {
     CMD_ARGS();
 
-    if (TryChangeBattleWeather(gBattlerAttacker, GetMoveWeatherType(gCurrentMove), ABILITY_NONE) == WEATHER_FAILURE_SUCCESS)
+    if (TryChangeBattleWeatherFromMove(gBattlerAttacker, GetMoveWeatherType(gCurrentMove), gCurrentMove) == WEATHER_FAILURE_SUCCESS)
     {
         gBattlescriptCurrInstr = cmd->nextInstr;
         return;
@@ -5705,9 +5802,7 @@ static void Cmd_tryconversiontypechange(void)
                 else
                     moveType = TYPE_NORMAL;
             }
-            if (moveType != gBattleMons[gBattlerAttacker].types[0]
-                && moveType != gBattleMons[gBattlerAttacker].types[1]
-                && moveType != gBattleMons[gBattlerAttacker].types[2])
+            if (!IsBattlerRawType(gBattlerAttacker, moveType))
             {
                 break;
             }
@@ -5733,7 +5828,7 @@ static void Cmd_tryconversiontypechange(void)
                         moveType = TYPE_NORMAL;
                 }
             }
-            while (moveType == gBattleMons[gBattlerAttacker].types[0] || moveType == gBattleMons[gBattlerAttacker].types[1] || moveType == gBattleMons[gBattlerAttacker].types[2]);
+            while (IsBattlerRawType(gBattlerAttacker, moveType));
 
             SET_BATTLER_TYPE(gBattlerAttacker, moveType);
             PREPARE_TYPE_BUFFER(gBattleTextBuff1, moveType);
@@ -5984,6 +6079,13 @@ static void Cmd_transformdataexecution(void)
 
         for (i = 0; i < offsetof(struct BattlePokemon, pp); i++)
             battleMonAttacker[i] = battleMonTarget[i];
+#ifdef NATIVE
+        gBattleMons[gBattlerAttacker].extraTypeCount = gBattleMons[gBattlerTarget].extraTypeCount;
+        gBattleMons[gBattlerAttacker].addedType = gBattleMons[gBattlerTarget].addedType;
+        gBattleMons[gBattlerAttacker].addedTypeValid = gBattleMons[gBattlerTarget].addedTypeValid;
+        memcpy(gBattleMons[gBattlerAttacker].extraTypes, gBattleMons[gBattlerTarget].extraTypes,
+               gBattleMons[gBattlerTarget].extraTypeCount);
+#endif
 
         gBattleMons[gBattlerAttacker].volatiles.overwrittenAbility = GetBattlerAbility(gBattlerTarget);
         for (i = 0; i < MAX_MON_MOVES; i++)
@@ -6259,9 +6361,35 @@ static void Cmd_settypetorandomresistance(void)
             }
         }
 
+#ifdef NATIVE
+        u8 customResistTypes[BATTLE_TYPE_SET_CAPACITY];
+        u32 customCount = ModsConversion2Types(typeToCheck, customResistTypes, ARRAY_COUNT(customResistTypes));
+        while (resistTypes != 0 || customCount)
+        {
+            i = Random() % (NUMBER_OF_MON_TYPES + customCount);
+            if (i >= NUMBER_OF_MON_TYPES)
+            {
+                u32 index = i - NUMBER_OF_MON_TYPES;
+                u32 type = customResistTypes[index];
+                if (IS_BATTLER_OF_TYPE(gBattlerAttacker, type))
+                {
+                    --customCount;
+                    memmove(&customResistTypes[index], &customResistTypes[index + 1], customCount - index);
+                }
+                else
+                {
+                    SET_BATTLER_TYPE(gBattlerAttacker, type);
+                    PREPARE_TYPE_BUFFER(gBattleTextBuff1, type);
+                    gBattlescriptCurrInstr = cmd->nextInstr;
+                    return;
+                }
+                continue;
+            }
+#else
         while (resistTypes != 0)
         {
             i = Random() % NUMBER_OF_MON_TYPES;
+#endif
             if (resistTypes & 1u << i)
             {
                 if (IS_BATTLER_OF_TYPE(gBattlerAttacker, i))
@@ -6449,6 +6577,11 @@ static void Cmd_healpartystatus(void)
     enum BattlerId partner = GetBattlerAtPosition(GetPartnerPosition(GetBattlerPosition(gBattlerAttacker)));
     struct Pokemon *party = GetBattlerParty(gBattlerAttacker);
     bool32 isSoundMove = IsSoundMove(gCurrentMove);
+#ifdef NATIVE
+    const u8 *cureInstruction = gBattlescriptCurrInstr;
+    u32 beforeAttacker = gBattleMons[gBattlerAttacker].status1;
+    u32 beforePartner = partner < MAX_BATTLERS_COUNT ? gBattleMons[partner].status1 : 0;
+#endif
 
     if (GetConfig(B_HEAL_BELL_SOUNDPROOF) == GEN_5
      || GetConfig(B_HEAL_BELL_SOUNDPROOF) >= GEN_8
@@ -6529,11 +6662,18 @@ static void Cmd_healpartystatus(void)
 
     if (toHeal)
     {
+#ifdef NATIVE
+        ModsCaptureScriptPartyCure(gBattlerAttacker, toHeal, cureInstruction);
+#endif
         BtlController_EmitSetMonData(gBattlerAttacker, B_COMM_TO_CONTROLLER, REQUEST_STATUS_BATTLE, toHeal, sizeof(zero), &zero);
         MarkBattlerForControllerExec(gBattlerAttacker);
     }
 
     gBattlescriptCurrInstr = cmd->nextInstr;
+#ifdef NATIVE
+    ModsRecordScriptCure(gBattlerAttacker, beforeAttacker, cureInstruction);
+    if (partner < gBattlersCount && partner != gBattlerAttacker) ModsRecordScriptCure(partner, beforePartner, cureInstruction);
+#endif
 }
 
 static void Cmd_cursetarget(void)
@@ -6927,6 +7067,9 @@ static void Cmd_setforcedtarget(void)
 static void Cmd_curestatuswithmove(void)
 {
     CMD_ARGS(const u8 *failInstr);
+#ifdef NATIVE
+    const u8 *cureInstruction = gBattlescriptCurrInstr;
+#endif
     u32 status = gBattleMons[gBattlerAttacker].status1;
     u32 shouldHeal = status & STATUS1_CAN_MOVE;
 
@@ -6954,6 +7097,9 @@ static void Cmd_curestatuswithmove(void)
         gBattlescriptCurrInstr = cmd->nextInstr;
         BtlController_EmitSetMonData(gBattlerAttacker, B_COMM_TO_CONTROLLER, REQUEST_STATUS_BATTLE, 0, sizeof(gBattleMons[gBattlerAttacker].status1), &gBattleMons[gBattlerAttacker].status1);
         MarkBattlerForControllerExec(gBattlerAttacker);
+#ifdef NATIVE
+        ModsRecordScriptCure(gBattlerAttacker, status, cureInstruction);
+#endif
     }
     else
     {
@@ -7187,11 +7333,18 @@ static void Cmd_trycopyability(void)
     }
     else
     {
+#ifdef NATIVE
+        struct ModsAbilityChangeCapture change;
+        ModsAbilityChangeCapture(battler, &change);
+#endif
         RemoveAbilityFlags(battler);
         gBattleScripting.abilityPopupOverwrite = gBattleMons[battler].ability;
         gBattleMons[battler].ability = gBattleMons[battler].volatiles.overwrittenAbility = defAbility;
         gLastUsedAbility = defAbility;
         gBattlescriptCurrInstr = cmd->nextInstr;
+#ifdef NATIVE
+        ModsAbilityChangesCommitted(&change, 1, RHH_ABILITY_MUTATION_COPY, gBattlerAttacker, gCurrentMove);
+#endif
     }
 }
 
@@ -7248,12 +7401,22 @@ static void Cmd_setgastroacid(void)
     }
     else
     {
+#ifdef NATIVE
+        struct ModsAbilityChangeCapture change;
+        ModsAbilityChangeCapture(gBattlerTarget, &change);
+        struct ModsGasChangeCapture gasChange = {0};
+        if (gBattleMons[gBattlerTarget].volatiles.neutralizingGas) ModsGasChangeCapture(&gasChange);
+#endif
         if (gBattleMons[gBattlerTarget].volatiles.neutralizingGas)
             gSpecialStatuses[gBattlerTarget].neutralizingGasRemoved = TRUE;
 
         RemoveRuinAbilityFlags(gBattlerTarget);
         gBattleMons[gBattlerTarget].volatiles.gastroAcid = TRUE;
         gBattlescriptCurrInstr = cmd->nextInstr;
+#ifdef NATIVE
+        ModsGasChangeCommitted(&gasChange, RHH_GAS_SUPPRESSED, gBattlerTarget, gCurrentMove);
+        ModsAbilityChangesCommitted(&change, 1, RHH_ABILITY_MUTATION_SUPPRESS, gBattlerAttacker, gCurrentMove);
+#endif
     }
 }
 
@@ -7289,6 +7452,10 @@ static void Cmd_setyawn(void)
 
 static void HandleRoomMove(u32 statusFlag, u8 *timer, u8 stringId)
 {
+#ifdef NATIVE
+    struct RhhBattleFieldRules before;
+    bool32 captured = ModsBattleFieldRulesCapture(&before);
+#endif
     if (gFieldStatuses & statusFlag)
     {
         gFieldStatuses &= ~statusFlag;
@@ -7301,6 +7468,9 @@ static void HandleRoomMove(u32 statusFlag, u8 *timer, u8 stringId)
         *timer = 5;
         gBattleCommunication[MULTISTRING_CHOOSER] = stringId;
     }
+#ifdef NATIVE
+    if (captured) ModsBattleFieldRulesCommitted(&before, RHH_BATTLE_FIELD_CAUSE_MOVE, gBattlerAttacker, gCurrentMove);
+#endif
 }
 
 static void Cmd_setroom(void)
@@ -7353,6 +7523,11 @@ static void Cmd_tryswapabilities(void)
         }
         else
         {
+#ifdef NATIVE
+            struct ModsAbilityChangeCapture changes[2];
+            ModsAbilityChangeCapture(gBattlerTarget, &changes[0]);
+            ModsAbilityChangeCapture(gBattlerAttacker, &changes[1]);
+#endif
             if (!IsBattlerAlly(gBattlerAttacker, gBattlerTarget))
                 gBattleScripting.abilityPopupOverwrite = gBattleMons[gBattlerAttacker].ability;
             gLastUsedAbility = gBattleMons[gBattlerTarget].ability;
@@ -7362,6 +7537,9 @@ static void Cmd_tryswapabilities(void)
             gBattleMons[gBattlerAttacker].ability = gBattleMons[gBattlerAttacker].volatiles.overwrittenAbility = gLastUsedAbility;
 
             gBattlescriptCurrInstr = cmd->nextInstr;
+#ifdef NATIVE
+            ModsAbilityChangesCommitted(changes, 2, RHH_ABILITY_MUTATION_SWAP, gBattlerAttacker, gCurrentMove);
+#endif
         }
     }
 }
@@ -7488,7 +7666,14 @@ static void Cmd_switchoutabilities(void)
 
     if (gBattleMons[battler].volatiles.neutralizingGas)
     {
+#ifdef NATIVE
+        struct ModsGasChangeCapture gasChange;
+        ModsGasChangeCapture(&gasChange);
+#endif
         gBattleMons[battler].volatiles.neutralizingGas = FALSE;
+#ifdef NATIVE
+        ModsGasChangeCommitted(&gasChange, RHH_GAS_SWITCHED_OUT, battler, 0);
+#endif
         if (!IsNeutralizingGasOnField())
         {
             BattleScriptPush(gBattlescriptCurrInstr);
@@ -7500,6 +7685,10 @@ static void Cmd_switchoutabilities(void)
     switch (GetBattlerAbility(battler))
     {
     case ABILITY_NATURAL_CURE:
+    {
+#ifdef NATIVE
+        u32 beforeCure = gBattleMons[battler].status1;
+#endif
         if (gBattleMons[battler].status1 & STATUS1_SLEEP)
             TryDeactivateSleepClause(battler, gBattlerPartyIndexes[battler]);
 
@@ -7509,7 +7698,11 @@ static void Cmd_switchoutabilities(void)
                                         sizeof(gBattleMons[battler].status1),
                                         &gBattleMons[battler].status1);
         MarkBattlerForControllerExec(battler);
+#ifdef NATIVE
+        ModsBattleAbilityStatusCured(battler, ABILITY_NATURAL_CURE, beforeCure, RHH_BATTLE_CURE_SWITCH_ABILITY, FALSE);
+#endif
         break;
+    }
     case ABILITY_REGENERATOR:
     {
         u32 regenerate = GetNonDynamaxMaxHP(battler) / 3;
@@ -7527,7 +7720,14 @@ static void Cmd_switchoutabilities(void)
         break;
     }
 
+#ifdef NATIVE
+    struct ModsWeatherPresenceCapture weatherPresence;
+    ModsWeatherPresenceCapture(&weatherPresence);
+#endif
     gBattleStruct->battlerState[battler].notOnField = TRUE;
+#ifdef NATIVE
+    ModsWeatherPresenceCommitted(&weatherPresence, RHH_WEATHER_PRESENCE_SWITCHED_OUT, battler);
+#endif
 
     if (gBattleStruct->battlerState[battler].originalBattlerPartyId == PARTY_SIZE)
         gBattleStruct->battlerState[battler].originalBattlerPartyId = gBattlerPartyIndexes[battler];
@@ -7623,15 +7823,17 @@ static void Cmd_pickup(void)
 }
 
 // Water and Mud Sport
-static void Cmd_settypebasedhalvers(void)
+static bool32 TrySetTypeBasedHalver(bool32 mud)
 {
-    CMD_ARGS(const u8 *failInstr);
-
+#ifdef NATIVE
+    struct RhhBattleFieldRules before;
+    bool32 captured = ModsBattleFieldRulesCapture(&before);
+#endif
     bool8 worked = FALSE;
 
     if (!gBattleStruct->isSkyBattle)
     {
-        if (GetMoveEffect(gCurrentMove) == EFFECT_MUD_SPORT)
+        if (mud)
         {
             if (B_SPORT_TURNS >= GEN_6)
             {
@@ -7677,7 +7879,16 @@ static void Cmd_settypebasedhalvers(void)
         }
     }
 
-    if (worked)
+#ifdef NATIVE
+    if (captured) ModsBattleFieldRulesCommitted(&before, RHH_BATTLE_FIELD_CAUSE_MOVE, gBattlerAttacker, gCurrentMove);
+#endif
+    return worked;
+}
+
+static void Cmd_settypebasedhalvers(void)
+{
+    CMD_ARGS(const u8 *failInstr);
+    if (TrySetTypeBasedHalver(GetMoveEffect(gCurrentMove) == EFFECT_MUD_SPORT))
         gBattlescriptCurrInstr = cmd->nextInstr;
     else
         gBattlescriptCurrInstr = cmd->failInstr;
@@ -8279,13 +8490,97 @@ static void Cmd_handleballthrow(void)
     }
 }
 
+#ifdef NATIVE
+static void CaptureOccupiedCatchSlots(u8 party[PARTY_SIZE], u8 boxes[TOTAL_BOXES_COUNT][IN_BOX_COUNT])
+{
+    for (u32 slot = 0; slot < PARTY_SIZE; ++slot) party[slot] = gParties[B_TRAINER_PLAYER][slot].box.hasSpecies;
+    for (u32 box = 0; box < TOTAL_BOXES_COUNT; ++box)
+        for (u32 slot = 0; slot < IN_BOX_COUNT; ++slot)
+            boxes[box][slot] = gPokemonStoragePtr->boxes[box][slot].hasSpecies;
+}
+#endif
+bool32 IsFollowerCatchFullParty(void)
+{ return gBattleStruct && gBattleStruct->followerCatchFullParty; }
+static int FollowerCatchReducedSlot(u32 fieldSlot)
+{
+    if (!IsFollowerCatchFullParty() || !gSaveBlock2Ptr || fieldSlot >= PARTY_SIZE) return -1;
+    for (u32 i = 0; i < MAX_FRONTIER_PARTY_SIZE; ++i)
+        if (gSaveBlock2Ptr->frontier.selectedPartyMons[i] == fieldSlot + 1) return i;
+    return -1;
+}
+bool32 FollowerCatchCanSend(u32 fieldSlot)
+{
+    int reduced = FollowerCatchReducedSlot(fieldSlot);
+    if (reduced < 0) return TRUE;
+    for (u32 battler = 0; battler < gBattlersCount; ++battler)
+        if (IsOnPlayerSide(battler) && GetBattlerParty(battler) == gParties[B_TRAINER_PLAYER]
+            && gBattlerPartyIndexes[battler] == reduced && !(gAbsentBattlerFlags & (1u << battler))
+            && gBattleMons[battler].hp) return FALSE;
+    return TRUE;
+}
+static void RevertFollowerCatchMon(u32 fieldSlot)
+{
+    int reduced = FollowerCatchReducedSlot(fieldSlot);
+    if (reduced == (int)fieldSlot) { TryRevertPartyMonFormChange(fieldSlot); return; }
+    struct PartyState saved = gBattleStruct->partyState[B_SIDE_PLAYER][fieldSlot];
+    gBattleStruct->partyState[B_SIDE_PLAYER][fieldSlot] = reduced < 0
+        ? (struct PartyState){0} : gBattleStruct->partyState[B_SIDE_PLAYER][reduced];
+    TryRevertPartyMonFormChange(fieldSlot);
+    if (reduced >= 0) gBattleStruct->partyState[B_SIDE_PLAYER][reduced] = gBattleStruct->partyState[B_SIDE_PLAYER][fieldSlot];
+    gBattleStruct->partyState[B_SIDE_PLAYER][fieldSlot] = saved;
+}
+#if defined(NATIVE) && defined(RHH_OWNED_IDENTITY_TEST)
+static bool32 sOwnedCatchFollowerTest;
+void ModsOwnedCatchTestFollower(bool32 enabled) { sOwnedCatchFollowerTest = enabled; }
+#endif
+static bool32 FollowerCatchEnabled(void)
+{
+#if defined(NATIVE) && defined(RHH_OWNED_IDENTITY_TEST)
+    if (sOwnedCatchFollowerTest) return TRUE;
+#endif
+    return IsNPCFollowerWildBattle();
+}
+static bool32 FollowerCatchUsesReducedParty(void)
+{
+#if defined(NATIVE) && defined(RHH_OWNED_IDENTITY_TEST)
+    if (sOwnedCatchFollowerTest) return TRUE;
+#endif
+    return !AreMultiPartiesFullTeams();
+}
 static void Cmd_givecaughtmon(void)
 {
     CMD_ARGS(const u8 *passInstr);
     enum GiveCaughtMonStates state = gBattleCommunication[MULTIUSE_STATE];
-    // Restore players party in order to handle properly the case when a wild mon is caught.
-    if (IsNPCFollowerWildBattle())
+#ifdef NATIVE
+    struct RhhCatchPlacement placement;
+    struct BoxPokemon *placementDestination = NULL;
+    u32 placementLocation = 0, placementBox = 0, placementSlot = 0;
+    bool32 notifyPlacement = FALSE;
+    bool32 ownedMutation = FALSE;
+    u8 occupiedParty[PARTY_SIZE], occupiedBoxes[TOTAL_BOXES_COUNT][IN_BOX_COUNT];
+#endif
+    bool32 followerCatch = FollowerCatchEnabled() || IsFollowerCatchFullParty();
+    bool32 reducedFollower = IsFollowerCatchFullParty() || (followerCatch && FollowerCatchUsesReducedParty());
+    // Preserve the selected battlers before temporarily loading the full party.
+    if (followerCatch)
+    {
+        if (reducedFollower && !IsFollowerCatchFullParty())
+        {
+#ifdef NATIVE
+            ModsOwnedFollowerCatchBeforeLoad();
+#endif
+            for (u32 i = 0; i < MAX_FRONTIER_PARTY_SIZE; ++i)
+            {
+                u16 field = gSaveBlock2Ptr->frontier.selectedPartyMons[i];
+                if (field && field <= PARTY_SIZE) SavePlayerPartyMon(field - 1, &gParties[B_TRAINER_PLAYER][i]);
+            }
+            gBattleStruct->followerCatchFullParty = TRUE;
+        }
         LoadPlayerParty();
+#ifdef NATIVE
+        if (reducedFollower) ModsOwnedFollowerCatchLoaded();
+#endif
+    }
 
     switch (state)
     {
@@ -8363,21 +8658,52 @@ static void Cmd_givecaughtmon(void)
             }
             else
             {
+#ifdef NATIVE
+                notifyPlacement = ModsCatchPlacementCapture(&gParties[B_TRAINER_PLAYER][gSelectedMonPartyId].box,
+                                                              RHH_CATCH_DISPLACED_PARTY, gSelectedMonPartyId, &placement);
+                if (notifyPlacement) CaptureOccupiedCatchSlots(occupiedParty, occupiedBoxes);
+#endif
                 //Before sending to PC, we revert battle form
-                TryRevertPartyMonFormChange(gSelectedMonPartyId);
+                if (reducedFollower) RevertFollowerCatchMon(gSelectedMonPartyId);
+                else TryRevertPartyMonFormChange(gSelectedMonPartyId);
                 // Mon chosen, try to put it in the PC
-                if (CopyMonToPC(&gParties[B_TRAINER_PLAYER][gSelectedMonPartyId]) == MON_GIVEN_TO_PC)
+#ifdef NATIVE
+                u8 copied = notifyPlacement ? CopyMonToPCWithOwnedReceipt(&gParties[B_TRAINER_PLAYER][gSelectedMonPartyId])
+                                            : CopyMonToPC(&gParties[B_TRAINER_PLAYER][gSelectedMonPartyId]);
+#else
+                u8 copied = CopyMonToPC(&gParties[B_TRAINER_PLAYER][gSelectedMonPartyId]);
+#endif
+                if (copied == MON_GIVEN_TO_PC)
                 {
+#ifdef NATIVE
+                    ownedMutation = TRUE;
+                    placementBox = gSpecialVar_MonBoxId; placementSlot = gSpecialVar_MonBoxPos;
+                    notifyPlacement = notifyPlacement && placementBox < TOTAL_BOXES_COUNT && placementSlot < IN_BOX_COUNT
+                        && !occupiedBoxes[placementBox][placementSlot];
+                    if (notifyPlacement)
+                    {
+                        placementLocation = RHH_MON_BOX;
+                        placementDestination = GetBoxedMonPtr(placementBox, placementSlot);
+                    }
+#endif
                     GetMonNickname(&gParties[B_TRAINER_PLAYER][gSelectedMonPartyId], gStringVar2);
                     StringCopy(gStringVar1, GetBoxNamePtr(GetPCBoxToSendMon()));
+#ifdef NATIVE
+                    if (notifyPlacement) ZeroMonDataWithOwnedReceipt(&gParties[B_TRAINER_PLAYER][gSelectedMonPartyId]);
+                    else
+#endif
                     ZeroMonData(&gParties[B_TRAINER_PLAYER][gSelectedMonPartyId]);
-                    gBattleStruct->itemLost[B_TRAINER_PLAYER][gSelectedMonPartyId].originalItem = ITEM_NONE;
+                    int reducedSlot = reducedFollower ? FollowerCatchReducedSlot(gSelectedMonPartyId) : gSelectedMonPartyId;
+                    if (reducedSlot >= 0) gBattleStruct->itemLost[B_TRAINER_PLAYER][reducedSlot].originalItem = ITEM_NONE;
                     gBattleCommunication[MULTISTRING_CHOOSER] = B_MSG_SWAPPED_INTO_PARTY;
                     gSelectedMonPartyId = PARTY_SIZE;
                     gBattleCommunication[MULTIUSE_STATE] = GIVECAUGHTMON_GIVE_AND_SHOW_MSG;
                 }
                 else
                 {
+#ifdef NATIVE
+                    notifyPlacement = FALSE;
+#endif
                     gSelectedMonPartyId = PARTY_SIZE;
                     gBattleCommunication[MULTIUSE_STATE] = GIVECAUGHTMON_GIVE_AND_SHOW_MSG;
                 }
@@ -8394,7 +8720,34 @@ static void Cmd_givecaughtmon(void)
                 break;
         }
 
-        if (GiveCapturedMonToPlayer(caughtMon) != MON_GIVEN_TO_PARTY
+#ifdef NATIVE
+        notifyPlacement = ModsCatchPlacementCapture(&caughtMon->box, RHH_CATCH_ACQUIRED, GetCatchingBattler(), &placement);
+        if (notifyPlacement) CaptureOccupiedCatchSlots(occupiedParty, occupiedBoxes);
+#endif
+#ifdef NATIVE
+        u8 giveResult = notifyPlacement ? GiveCapturedMonToPlayerWithOwnedReceipt(caughtMon)
+                                        : GiveCapturedMonToPlayer(caughtMon);
+#else
+        u8 giveResult = GiveCapturedMonToPlayer(caughtMon);
+#endif
+#ifdef NATIVE
+        ownedMutation = giveResult == MON_GIVEN_TO_PARTY || giveResult == MON_GIVEN_TO_PC;
+        if (notifyPlacement && giveResult == MON_GIVEN_TO_PARTY && emptySlot < PARTY_SIZE && !occupiedParty[emptySlot])
+        {
+            placementLocation = RHH_MON_PARTY; placementSlot = emptySlot;
+            placementDestination = &gParties[B_TRAINER_PLAYER][emptySlot].box;
+        }
+        else if (notifyPlacement && giveResult == MON_GIVEN_TO_PC)
+        {
+            placementBox = gSpecialVar_MonBoxId; placementSlot = gSpecialVar_MonBoxPos;
+            if (placementBox < TOTAL_BOXES_COUNT && placementSlot < IN_BOX_COUNT && !occupiedBoxes[placementBox][placementSlot])
+            {
+                placementLocation = RHH_MON_BOX;
+                placementDestination = GetBoxedMonPtr(placementBox, placementSlot);
+            }
+        }
+#endif
+        if (giveResult != MON_GIVEN_TO_PARTY
          && gBattleCommunication[MULTISTRING_CHOOSER] != B_MSG_SWAPPED_INTO_PARTY)
         {
             if (!ShouldShowBoxWasFullMessage())
@@ -8418,7 +8771,11 @@ static void Cmd_givecaughtmon(void)
 
         // Copy changedSpecies to allow caught mon to revert to its original species.
         if (emptySlot != PARTY_SIZE)
-            gBattleStruct->partyState[B_SIDE_PLAYER][emptySlot].changedSpecies = GetBattlerPartyState(GetCatchingBattler())->changedSpecies;
+        {
+            int reducedSlot = reducedFollower ? FollowerCatchReducedSlot(emptySlot) : emptySlot;
+            if (reducedSlot >= 0)
+                gBattleStruct->partyState[B_SIDE_PLAYER][reducedSlot].changedSpecies = GetBattlerPartyState(GetCatchingBattler())->changedSpecies;
+        }
 
         gBattleResults.caughtMonSpecies = GetMonData(caughtMon, MON_DATA_SPECIES);
         GetMonData(caughtMon, MON_DATA_NICKNAME, gBattleResults.caughtMonNick);
@@ -8435,9 +8792,39 @@ static void Cmd_givecaughtmon(void)
     }
     }
     // Save the player's party again to not interferes with RestorePartyAfterFollowerNPCBattle() called after battle.
-    if (IsNPCFollowerWildBattle())
+    if (followerCatch)
         SavePlayerParty();
+#ifdef NATIVE
+    if (notifyPlacement && placementDestination)
+        ModsCatchPlacementCommitted(placementDestination, placementLocation, placementBox, placementSlot, &placement);
+    else if (ownedMutation)
+        NativeOwnedTrackerUnsupported();
+#endif
+    if (reducedFollower && state == GIVECAUGHTMON_GIVE_AND_SHOW_MSG)
+    {
+#ifdef NATIVE
+        ModsOwnedFollowerCatchBeforeReduce();
+#endif
+        for (u32 i = 0; i < MAX_FRONTIER_PARTY_SIZE; ++i)
+            gSelectedOrderFromParty[i] = gSaveBlock2Ptr->frontier.selectedPartyMons[i];
+        ReducePlayerPartyToSelectedMons();
+#ifdef NATIVE
+        ModsOwnedFollowerCatchReduced();
+#endif
+        gBattleStruct->followerCatchFullParty = FALSE;
+    }
 }
+
+#if defined(NATIVE) && defined(RHH_OWNED_IDENTITY_TEST)
+void ModsOwnedCatchTestStep(bool32 place, u32 selected)
+{
+    static const struct __attribute__((packed)) { u8 opcode; const u8 *pass; } script = {0, NULL};
+    gBattlescriptCurrInstr = (const u8 *)&script;
+    gBattleCommunication[MULTIUSE_STATE] = place ? GIVECAUGHTMON_GIVE_AND_SHOW_MSG : GIVECAUGHTMON_HANDLE_CHOSEN_MON;
+    gSelectedMonPartyId = selected;
+    Cmd_givecaughtmon();
+}
+#endif
 
 static void Cmd_trysetcaughtmondexflags(void)
 {
@@ -8810,10 +9197,17 @@ static void Cmd_tryoverwriteability(void)
     }
     else
     {
+#ifdef NATIVE
+        struct ModsAbilityChangeCapture change;
+        ModsAbilityChangeCapture(gBattlerTarget, &change);
+#endif
         RemoveAbilityFlags(gBattlerTarget);
         gBattleScripting.abilityPopupOverwrite = gBattleMons[gBattlerTarget].ability;
         gBattleMons[gBattlerTarget].ability = gBattleMons[gBattlerTarget].volatiles.overwrittenAbility = GetMoveOverwriteAbility(gCurrentMove);
         gBattlescriptCurrInstr = cmd->nextInstr;
+#ifdef NATIVE
+        ModsAbilityChangesCommitted(&change, 1, RHH_ABILITY_MUTATION_OVERWRITE, gBattlerAttacker, gCurrentMove);
+#endif
     }
 }
 
@@ -8933,6 +9327,7 @@ static void SetStatChangeFlags(struct StatChange *st, u32 flags)
     st->stickyWeb = SET_FLAG(STAT_CHANGE_STICKY_WEB);
     st->mirrorHerbActivation = SET_FLAG(STAT_CHANGE_MIRROR_HERB);
     st->opportunistActivation = SET_FLAG(STAT_CHANGE_OPPORTUNIST);
+    st->ignoreSubstitute = SET_FLAG(STAT_CHANGE_IGNORE_SUBSTITUTE);
 }
 #undef SET_FLAG
 
@@ -9123,6 +9518,321 @@ void RestoreTarget(void)
     gBattleStruct->savedTargetCount--;
     gBattlerTarget = gBattleStruct->savedBattlerTarget[gBattleStruct->savedTargetCount];
 }
+
+#ifdef NATIVE
+void BS_ModMoveEffect(void)
+{
+    NATIVE_ARGS();
+    ModsMoveEffectApply();
+    gBattlescriptCurrInstr = cmd->nextInstr;
+}
+void BS_ModMoveDamageEffect(void)
+{
+    NATIVE_ARGS();
+    gBattlescriptCurrInstr = ModsMoveDamageEffectApply() ? BattleScript_ModEffectNextAction : cmd->nextInstr;
+}
+void BS_ModMoveEffectAction(void)
+{
+    NATIVE_ARGS();
+    u32 value = 0; s32 stages = 0;
+    enum ModMoveEffectAction action = ModsMoveEffectNextAction(&value, &stages);
+    switch (action)
+    {
+    case MOD_EFFECT_HEAL:
+        gBattlescriptCurrInstr = cmd->nextInstr;
+        break;
+    case MOD_EFFECT_HEAL_USER:
+        gBattlescriptCurrInstr = BattleScript_ModEffectHealUser;
+        break;
+    case MOD_EFFECT_HEAL_BATTLER:
+        gBattlescriptCurrInstr = BattleScript_ModEffectHealBattler;
+        break;
+    case MOD_EFFECT_DAMAGE_BATTLER:
+        gBattlescriptCurrInstr = BattleScript_ModEffectDamageBattler;
+        break;
+    case MOD_EFFECT_ANIMATION:
+        gBattlescriptCurrInstr = BattleScript_ModEffectAnimation;
+        break;
+    case MOD_EFFECT_DRAIN_USER:
+    {
+        struct BattleCalcValues cv = {.battlerAtk = gBattlerAttacker, .battlerDef = gBattlerTarget, .move = gCurrentMove};
+        for (u32 battler = 0; battler < gBattlersCount; ++battler)
+        {
+            cv.abilities[battler] = GetBattlerAbility(battler);
+            cv.holdEffects[battler] = GetBattlerHoldEffect(battler);
+        }
+        ModsApplyDrainAmount(&cv, BattleScript_ModEffectNextAction, value);
+        break;
+    }
+    case MOD_EFFECT_STATUS:
+        SetMoveEffectHelper(gBattlerAttacker, gBattlerTarget, value, BattleScript_ModEffectNextAction, EFFECT_PRIMARY);
+        break;
+    case MOD_EFFECT_STATUS_BATTLER:
+        SetMoveEffectHelper(gBattlerAttacker, ModsMoveEffectRecipient(), value, BattleScript_ModEffectNextAction, EFFECT_PRIMARY);
+        break;
+    case MOD_EFFECT_FIELD_RULE:
+        SetMoveEffectHelper(gBattlerAttacker, gBattlerAttacker, value, BattleScript_ModEffectNextAction, EFFECT_PRIMARY);
+        break;
+    case MOD_EFFECT_ROOM_TOGGLE:
+        switch (value)
+        {
+        case RHH_BATTLE_FIELD_TRICK_ROOM:
+            HandleRoomMove(STATUS_FIELD_TRICK_ROOM, &gFieldTimers.trickRoomTimer, 0);
+            gBattlescriptCurrInstr = BattleScript_ModEffectTrickRoom;
+            break;
+        case RHH_BATTLE_FIELD_WONDER_ROOM:
+            HandleRoomMove(STATUS_FIELD_WONDER_ROOM, &gFieldTimers.wonderRoomTimer, 2);
+            gBattlescriptCurrInstr = BattleScript_ModEffectRoom;
+            break;
+        case RHH_BATTLE_FIELD_MAGIC_ROOM:
+            HandleRoomMove(STATUS_FIELD_MAGIC_ROOM, &gFieldTimers.magicRoomTimer, 4);
+            gBattlescriptCurrInstr = BattleScript_ModEffectRoom;
+            break;
+        default:
+            gBattlescriptCurrInstr = BattleScript_ModEffectNextAction;
+            break;
+        }
+        break;
+    case MOD_EFFECT_FIELD_MOVE:
+        if (value == RHH_BATTLE_FIELD_MUD_SPORT || value == RHH_BATTLE_FIELD_WATER_SPORT)
+            gBattlescriptCurrInstr = TrySetTypeBasedHalver(value == RHH_BATTLE_FIELD_MUD_SPORT)
+                ? BattleScript_ModEffectSport : BattleScript_ModEffectNextAction;
+        else if (value == RHH_BATTLE_FIELD_FAIRY_LOCK)
+            gBattlescriptCurrInstr = TrySetFairyLock() ? BattleScript_ModEffectFairyLock : BattleScript_ModEffectNextAction;
+        else
+            gBattlescriptCurrInstr = BattleScript_ModEffectNextAction;
+        break;
+    case MOD_EFFECT_STAT:
+    case MOD_EFFECT_STAT_BATTLER:
+    {
+        u32 magnitude = stages < 0 ? -stages : stages;
+        struct AdditionalEffect effect = {.moveEffect = stages < 0 ? MOVE_EFFECT_STAT_MINUS : MOVE_EFFECT_STAT_PLUS};
+        switch (value)
+        {
+        case RHH_STAT_ATTACK: effect.attack = magnitude; break;
+        case RHH_STAT_DEFENSE: effect.defense = magnitude; break;
+        case RHH_STAT_SPEED: effect.speed = magnitude; break;
+        case RHH_STAT_SP_ATTACK: effect.spAtk = magnitude; break;
+        case RHH_STAT_SP_DEFENSE: effect.spDef = magnitude; break;
+        case RHH_BATTLE_ACCURACY: effect.accuracy = magnitude; break;
+        case RHH_BATTLE_EVASION: effect.evasion = magnitude; break;
+        }
+        u32 recipient = action == MOD_EFFECT_STAT_BATTLER ? ModsMoveEffectRecipient() : gBattlerTarget;
+        struct BattleCalcValues cv = {.battlerAtk = gBattlerAttacker, .battlerDef = recipient, .move = gCurrentMove};
+        for (u32 battler = 0; battler < gBattlersCount; ++battler)
+        {
+            cv.abilities[battler] = GetBattlerAbility(battler);
+            cv.holdEffects[battler] = GetBattlerHoldEffect(battler);
+        }
+        struct SetEffect se = {.script = BattleScript_ModEffectNextAction, .additionalEffect = &effect,
+            .moveEffect = effect.moveEffect, .effectBattler = recipient, .primary = TRUE};
+        SetMoveEffect(&cv, &se);
+        break;
+    }
+    default:
+        gBattlescriptCurrInstr = BattleScript_ModEffectNextMessage;
+        break;
+    }
+}
+void BS_ModMoveEffectMessage(void)
+{
+    NATIVE_ARGS();
+    if (ModsMoveEffectNextMessage())
+    {
+        PrepareStringBattleWithWait(STRINGID_MOD_EFFECT_MESSAGE, gBattlerAttacker);
+        gBattlescriptCurrInstr = cmd->nextInstr;
+    }
+    else
+        gBattlescriptCurrInstr = ModsMoveEffectIsDamage() ? BattleScript_MoveEnd : BattleScript_ModEffectAfterMessages;
+}
+void BS_ModMoveEffectItemBegin(void)
+{
+    NATIVE_ARGS(); ModsMoveEffectItemBegin(); gBattlescriptCurrInstr = cmd->nextInstr;
+}
+void BS_ModMoveEffectItemEnd(void)
+{
+    NATIVE_ARGS(); ModsMoveEffectItemEnd(); gBattlescriptCurrInstr = cmd->nextInstr;
+}
+void BS_ModConditionMessage(void)
+{
+    NATIVE_ARGS();
+    if (ModsConditionExpiryNextAnimation())
+        gBattlescriptCurrInstr = BattleScript_ModConditionAnimation;
+    else if (ModsMoveEffectNextMessage())
+    {
+        PrepareStringBattleWithWait(STRINGID_MOD_EFFECT_MESSAGE, GetBattlerAtPosition(B_POSITION_PLAYER_LEFT));
+        gBattlescriptCurrInstr = cmd->nextInstr;
+    }
+    else
+    {
+        ModsEndTurnMessagesDone();
+        gBattlescriptCurrInstr = BattleScript_ModConditionMessagesEnd;
+    }
+}
+void BS_ModResolutionCue(void)
+{
+    NATIVE_ARGS();
+    if (ModsMoveResolutionNextCue()) gBattlescriptCurrInstr = cmd->nextInstr;
+    else { ModsMoveResolutionCuesDone(); gBattlescriptCurrInstr = BattleScript_ModResolutionCuesEnd; }
+}
+void BS_ModStatusReaction(void)
+{
+    NATIVE_ARGS();
+    if (gBattleControllerExecFlags) return;
+    u32 status = 0, source = 0;
+    switch (ModsStatusReactionNext(&status, &source))
+    {
+    case MOD_STATUS_ANIMATION: gBattlescriptCurrInstr = cmd->nextInstr; break;
+    case MOD_STATUS_HEAL: gBattlescriptCurrInstr = BattleScript_ModStatusReactionHeal; break;
+    case MOD_STATUS_STAT: gBattlescriptCurrInstr = BattleScript_ModStatusReactionStat; break;
+    case MOD_STATUS_STAT_FROM: gBattlescriptCurrInstr = BattleScript_ModStatusReactionSourcedStat; break;
+    case MOD_STATUS_DAMAGE: gBattlescriptCurrInstr = BattleScript_ModStatusReactionDamage; break;
+    case MOD_STATUS_CURE:
+        ModsStatusReactionCure(); gBattlescriptCurrInstr = BattleScript_ModStatusReactionCure; break;
+    case MOD_STATUS_INFLICT:
+    {
+        u32 target = ModsMoveEffectRecipient();
+        bool32 savedIgnoreOrb = gBattleStruct->ignoreOrbFailure;
+        gBattleStruct->ignoreOrbFailure = FALSE;
+        bool32 allowed = gBattleResources && gBattleResources->battleScriptsStack
+            && gBattleResources->battleScriptsStack->size < ARRAY_COUNT(gBattleResources->battleScriptsStack->ptr)
+            && CanSetNonVolatileStatus(source, target, ABILITY_NONE,
+                GetBattlerAbilityIgnoreMoldBreaker(target), status, CHECK_TRIGGER);
+        if (allowed) SetNonVolatileStatus(source, target, status, BattleScript_ModStatusReaction, TRIGGER_ON_ABILITY);
+        else gBattlescriptCurrInstr = BattleScript_ModStatusReaction;
+        gBattleStruct->ignoreOrbFailure = savedIgnoreOrb;
+        break;
+    }
+    default: gBattlescriptCurrInstr = ModsStatusReactionContinuation(); break;
+    }
+}
+void BS_ModStatusCureForm(void)
+{
+    NATIVE_ARGS();
+    u32 battler = ModsMoveEffectRecipient();
+    if (gBattleResources->battleScriptsStack->size < ARRAY_COUNT(gBattleResources->battleScriptsStack->ptr)
+        && TryBattleFormChange(battler, FORM_CHANGE_STATUS, GetBattlerAbility(battler)))
+    {
+        gBattleScripting.battler = battler;
+        BattleScriptPush(cmd->nextInstr);
+        gBattlescriptCurrInstr = BattleScript_TargetFormChangeWithStringNoPopup;
+    }
+    else gBattlescriptCurrInstr = cmd->nextInstr;
+}
+void BS_ModCaptureJungleCureActor(void)
+{
+    NATIVE_ARGS(); ModsCaptureScriptCureActor(gBattlerAttacker, RHH_BATTLE_CURE_MOVE, 0);
+    gBattlescriptCurrInstr = cmd->nextInstr;
+}
+void BS_ModCapturePastelCureActor(void)
+{
+    NATIVE_ARGS(); ModsCaptureScriptCureActor(gBattlerTarget, RHH_BATTLE_CURE_SCRIPT_ABILITY, ABILITY_PASTEL_VEIL);
+    gBattlescriptCurrInstr = cmd->nextInstr;
+}
+void BS_ModMoveCureBegin(void)
+{
+    NATIVE_ARGS(); ModsBeginScriptCure(RHH_BATTLE_CURE_MOVE, gBattlerAttacker, 0, FALSE, cmd->nextInstr);
+    gBattlescriptCurrInstr = cmd->nextInstr;
+}
+void BS_ModJungleCureBegin(void)
+{
+    NATIVE_ARGS(); ModsBeginScriptCure(RHH_BATTLE_CURE_MOVE, gBattlerAttacker, 0, TRUE, cmd->nextInstr);
+    gBattlescriptCurrInstr = cmd->nextInstr;
+}
+void BS_ModPastelCureBegin(void)
+{
+    NATIVE_ARGS(); ModsBeginScriptCure(RHH_BATTLE_CURE_SCRIPT_ABILITY, gBattlerTarget, ABILITY_PASTEL_VEIL, TRUE, cmd->nextInstr);
+    gBattlescriptCurrInstr = cmd->nextInstr;
+}
+void BS_ModHealerCureBegin(void)
+{
+    NATIVE_ARGS(); ModsBeginScriptCure(RHH_BATTLE_CURE_SCRIPT_ABILITY, gBattlerAttacker, ABILITY_HEALER, FALSE, cmd->nextInstr);
+    gBattlescriptCurrInstr = cmd->nextInstr;
+}
+void BS_ModScriptCureReactions(void)
+{
+    NATIVE_ARGS();
+    if (gBattleControllerExecFlags) return;
+    gBattlescriptCurrInstr = ModsStartScriptCureReactions(cmd->nextInstr) ? BattleScript_ModStatusReaction : cmd->nextInstr;
+}
+void BS_ModBagStatusReactions(void)
+{
+    NATIVE_ARGS();
+    if (gBattleControllerExecFlags) return;
+    gBattlescriptCurrInstr = ModsStartBagStatusReactions(cmd->nextInstr) ? BattleScript_ModStatusReaction : cmd->nextInstr;
+}
+void BS_ModInnateHeal(void)
+{
+    NATIVE_ARGS();
+    gBattlescriptCurrInstr = ModsInnateNextHeal() ? cmd->nextInstr : BattleScript_ModInnateStat;
+}
+static void ApplyModInnateStatus(u32 status, u32 source, const u8 *resume)
+{
+    u32 target = gBattleScripting.battler;
+    bool32 savedIgnoreOrb = gBattleStruct->ignoreOrbFailure;
+    gBattleStruct->ignoreOrbFailure = FALSE;
+    bool32 allowed = CanSetNonVolatileStatus(source, target, ABILITY_NONE,
+        GetBattlerAbilityIgnoreMoldBreaker(target), status, CHECK_TRIGGER);
+    if (allowed) SetNonVolatileStatus(source, target, status, resume, TRIGGER_ON_ABILITY);
+    else gBattlescriptCurrInstr = resume;
+    ModsInnateStatusFinished();
+    gBattleStruct->ignoreOrbFailure = savedIgnoreOrb;
+}
+void BS_ModInnateTurnAction(void)
+{
+    NATIVE_ARGS();
+    u32 status = 0, source = 0;
+    switch (ModsInnateTurnNextAction(&status, &source))
+    {
+    case MOD_INNATE_TURN_HEAL: gBattlescriptCurrInstr = cmd->nextInstr; break;
+    case MOD_INNATE_TURN_STAT: gBattlescriptCurrInstr = BattleScript_ModInnateTurnStat; break;
+    case MOD_INNATE_TURN_STAT_SOURCE: gBattlescriptCurrInstr = BattleScript_ModInnateTurnSourcedStat; break;
+    case MOD_INNATE_TURN_ANIMATION: gBattlescriptCurrInstr = BattleScript_ModInnateTurnAnimation; break;
+    case MOD_INNATE_TURN_STATUS:
+        ApplyModInnateStatus(status, source, BattleScript_ModInnateTurnAction);
+        break;
+    case MOD_INNATE_TURN_WEATHER:
+        BattleScriptPush(BattleScript_ModInnateTurnAction);
+        gBattlescriptCurrInstr = BattleScript_ModInnateEnvironmentWeather; break;
+    case MOD_INNATE_TURN_TERRAIN:
+        BattleScriptPush(BattleScript_ModInnateTurnAction);
+        gBattlescriptCurrInstr = BattleScript_ModInnateEnvironmentTerrain; break;
+    default:
+        ModsFinishInnateTurnActions();
+        gBattlescriptCurrInstr = BattleScript_ModConditionMessages;
+        break;
+    }
+}
+void BS_ModInnateStat(void)
+{
+    NATIVE_ARGS();
+    if (!ModsInnateNextStat()) gBattlescriptCurrInstr = BattleScript_ModInnateMessages;
+    else gBattlescriptCurrInstr = ModsInnateStatSourced() ? BattleScript_ModInnateSourcedStat : cmd->nextInstr;
+}
+void BS_ModInnateMessage(void)
+{
+    NATIVE_ARGS();
+    u32 status = 0, source = 0;
+    enum ModInnateEnvironmentAction environment;
+    if (ModsInnateNextStatus(&status, &source))
+        ApplyModInnateStatus(status, source, BattleScript_ModInnateMessages);
+    else if ((environment = ModsInnateNextEnvironment()) != MOD_INNATE_ENV_DONE)
+    {
+        BattleScriptPush(BattleScript_ModInnateMessages);
+        gBattlescriptCurrInstr = environment == MOD_INNATE_ENV_WEATHER
+            ? BattleScript_ModInnateEnvironmentWeather : BattleScript_ModInnateEnvironmentTerrain;
+    }
+    else if (ModsInnateNextAnimation())
+        gBattlescriptCurrInstr = BattleScript_ModInnateAnimation;
+    else if (ModsMoveEffectNextMessage())
+    {
+        PrepareStringBattleWithWait(STRINGID_MOD_EFFECT_MESSAGE, GetBattlerAtPosition(B_POSITION_PLAYER_LEFT));
+        gBattlescriptCurrInstr = cmd->nextInstr;
+    }
+    else
+        gBattlescriptCurrInstr = BattleScript_ModInnateMessagesEnd;
+}
+#endif
 
 void BS_SaveTarget(void)
 {
@@ -9385,6 +10095,9 @@ void BS_ItemRestoreHP(void)
 void BS_ItemCureStatus(void)
 {
     NATIVE_ARGS(const u8 *noStatusInstr, const u8 *restoreBattlerInstr);
+#ifdef NATIVE
+    ModsBeginBagStatusReactions();
+#endif
     u32 targetBattler = MAX_BATTLERS_COUNT;
     bool32 statusChanged = FALSE;
     struct Pokemon *party = GetBattlerParty(gBattlerAttacker);
@@ -9403,11 +10116,23 @@ void BS_ItemCureStatus(void)
     }
 
     // Heal Status1 conditions.
+#ifdef NATIVE
+    u32 beforeStatus = targetBattler < MAX_BATTLERS_COUNT ? gBattleMons[targetBattler].status1 : 0;
+    struct ModsPartyItemCureCapture partyCure = {0};
+    if (targetBattler == MAX_BATTLERS_COUNT)
+        ModsCapturePartyItemCure(&partyCure, gBattlerAttacker, gBattleStruct->itemPartyIndex[gBattlerAttacker]);
+#endif
     if (!HealStatusConditions(&party[gBattleStruct->itemPartyIndex[gBattlerAttacker]], GetItemStatus1Mask(gLastUsedItem), targetBattler))
     {
         statusChanged = TRUE;
-        if (GetItemStatus1Mask(gLastUsedItem) & STATUS1_SLEEP)
+        if (targetBattler < MAX_BATTLERS_COUNT && (GetItemStatus1Mask(gLastUsedItem) & STATUS1_SLEEP))
             gBattleMons[targetBattler].volatiles.nightmare = FALSE;
+#ifdef NATIVE
+        if (targetBattler < MAX_BATTLERS_COUNT)
+            ModsBattleItemStatusChanged(targetBattler, gLastUsedItem, RHH_BATTLE_ITEM_BAG, beforeStatus, FALSE);
+        else
+            ModsCommitPartyItemCure(&partyCure, gLastUsedItem);
+#endif
     }
 
     if (!statusChanged)
@@ -9541,7 +10266,7 @@ void BS_SetTerrain(void)
     }
     else if (terrain != B_TERRAIN_NONE)
     {
-        TryChangeBattleTerrain(gBattlerAttacker, terrain);
+        TryChangeBattleTerrainFromMove(gBattlerAttacker, terrain, gCurrentMove);
         gBattlescriptCurrInstr = cmd->nextInstr;
     }
     else
@@ -9571,14 +10296,17 @@ void BS_TryReflectType(void)
     if (targetBaseSpecies == SPECIES_ARCEUS || targetBaseSpecies == SPECIES_SILVALLY)
     {
         gBattlescriptCurrInstr = cmd->failInstr;
+        return;
     }
     else if (GetActiveGimmick(gBattlerAttacker) == GIMMICK_TERA)
     {
         gBattlescriptCurrInstr = cmd->failInstr;
+        return;
     }
     else if (IS_BATTLER_TYPELESS(gBattlerTarget))
     {
         gBattlescriptCurrInstr = cmd->failInstr;
+        return;
     }
     else if (targetTypes[0] == TYPE_MYSTERY && targetTypes[1] == TYPE_MYSTERY && targetTypes[2] != TYPE_MYSTERY)
     {
@@ -9608,6 +10336,25 @@ void BS_TryReflectType(void)
         gBattleMons[gBattlerAttacker].types[2] = targetTypes[2];
         gBattlescriptCurrInstr = cmd->nextInstr;
     }
+#ifdef NATIVE
+    {
+        bool32 hasOverflow = gBattleMons[gBattlerTarget].extraTypeCount != 0;
+        struct BattleTypeList full;
+        GetBattlerTypeList(gBattlerTarget, FALSE, &full);
+        gBattleMons[gBattlerAttacker].extraTypeCount = 0;
+        if (hasOverflow || full.count > 3)
+        {
+            gBattleMons[gBattlerAttacker].types[0] = full.types[0];
+            gBattleMons[gBattlerAttacker].types[1] = full.count > 1 ? full.types[1] : full.types[0];
+            gBattleMons[gBattlerAttacker].types[2] = full.count > 2 ? full.types[2] : TYPE_MYSTERY;
+            for (u32 i = 3; i < full.count; ++i)
+                gBattleMons[gBattlerAttacker].extraTypes[gBattleMons[gBattlerAttacker].extraTypeCount++] = full.types[i];
+        }
+        gBattleMons[gBattlerAttacker].addedType = gBattleMons[gBattlerTarget].addedType;
+        gBattleMons[gBattlerAttacker].addedTypeValid = gBattleMons[gBattlerTarget].addedTypeValid
+            && BattleTypeListContains(&full, gBattleMons[gBattlerTarget].addedType);
+    }
+#endif
 }
 
 void BS_TrySetOctolock(void)
@@ -9790,7 +10537,14 @@ void BS_TryQuash(void)
 void BS_RemoveWeather(void)
 {
     NATIVE_ARGS();
-    RemoveAllWeather();
+    RemoveAllWeather(MAX_BATTLERS_COUNT, MOVE_NONE, ABILITY_NONE);
+    gBattlescriptCurrInstr = cmd->nextInstr;
+}
+
+void BS_RemoveWeatherTeraformZero(void)
+{
+    NATIVE_ARGS();
+    RemoveAllWeather(gBattlerAttacker, MOVE_NONE, ABILITY_TERAFORM_ZERO);
     gBattlescriptCurrInstr = cmd->nextInstr;
 }
 
@@ -10068,7 +10822,21 @@ void BS_WaitFanfare(void)
 void BS_RemoveTerrain(void)
 {
     NATIVE_ARGS();
-    RemoveAllTerrains();
+    RemoveAllTerrains(MAX_BATTLERS_COUNT, MOVE_NONE, ABILITY_NONE);
+    gBattlescriptCurrInstr = cmd->nextInstr;
+}
+
+void BS_RemoveTerrainMove(void)
+{
+    NATIVE_ARGS();
+    RemoveAllTerrains(gBattlerAttacker, gCurrentMove, ABILITY_NONE);
+    gBattlescriptCurrInstr = cmd->nextInstr;
+}
+
+void BS_RemoveTerrainTeraformZero(void)
+{
+    NATIVE_ARGS();
+    RemoveAllTerrains(gBattlerAttacker, MOVE_NONE, ABILITY_TERAFORM_ZERO);
     gBattlescriptCurrInstr = cmd->nextInstr;
 }
 
@@ -10498,19 +11266,25 @@ void BS_SetLastUsedItem(void)
     gBattlescriptCurrInstr = cmd->nextInstr;
 }
 
+static bool32 TrySetFairyLock(void)
+{
+    if (gFieldStatuses & STATUS_FIELD_FAIRY_LOCK) return FALSE;
+#ifdef NATIVE
+    struct RhhBattleFieldRules before;
+    bool32 captured = ModsBattleFieldRulesCapture(&before);
+#endif
+    gFieldStatuses |= STATUS_FIELD_FAIRY_LOCK;
+    gFieldTimers.fairyLockTimer = 2;
+#ifdef NATIVE
+    if (captured) ModsBattleFieldRulesCommitted(&before, RHH_BATTLE_FIELD_CAUSE_MOVE, gBattlerAttacker, gCurrentMove);
+#endif
+    return TRUE;
+}
+
 void BS_TrySetFairyLock(void)
 {
     NATIVE_ARGS(const u8 *failInstr);
-    if (gFieldStatuses & STATUS_FIELD_FAIRY_LOCK)
-    {
-        gBattlescriptCurrInstr = cmd->failInstr;
-    }
-    else
-    {
-        gFieldStatuses |= STATUS_FIELD_FAIRY_LOCK;
-        gFieldTimers.fairyLockTimer = 2;
-        gBattlescriptCurrInstr = cmd->nextInstr;
-    }
+    gBattlescriptCurrInstr = TrySetFairyLock() ? cmd->nextInstr : cmd->failInstr;
 }
 
 void BS_JumpIfFullHp(void)
@@ -10552,8 +11326,15 @@ void BS_SetTracedAbility(void)
 {
     NATIVE_ARGS(u8 battler);
     enum BattlerId battler = GetBattlerForBattleScript(cmd->battler);
+#ifdef NATIVE
+    struct ModsAbilityChangeCapture change;
+    ModsAbilityChangeCapture(battler, &change);
+#endif
     gBattleMons[battler].ability = gBattleMons[battler].volatiles.overwrittenAbility = gBattleStruct->tracedAbility[battler];
     gBattlescriptCurrInstr = cmd->nextInstr;
+#ifdef NATIVE
+    ModsAbilityChangesCommitted(&change, 1, RHH_ABILITY_MUTATION_TRACE, RHH_BATTLE_NO_BATTLER, 0);
+#endif
 }
 
 void BS_TryIllusionOff(void)
@@ -10670,7 +11451,7 @@ void BS_PalaceFlavorText(void)
     {
         gBattleStruct->palaceFlags |= 1u << battler;
         gBattleCommunication[0] = TRUE;
-        gBattleCommunication[MULTISTRING_CHOOSER] = gNaturesInfo[GetNatureFromPersonality(gBattleMons[battler].personality)].battlePalaceFlavorText;
+        gBattleCommunication[MULTISTRING_CHOOSER] = gNaturesInfo[GetBattlerNature(battler)].battlePalaceFlavorText;
     }
     gBattlescriptCurrInstr = cmd->nextInstr;
 }
@@ -11091,9 +11872,16 @@ void BS_TryEntrainment(void)
         }
         else
         {
+#ifdef NATIVE
+            struct ModsAbilityChangeCapture change;
+            ModsAbilityChangeCapture(gBattlerTarget, &change);
+#endif
             RemoveAbilityFlags(gBattlerTarget);
             gBattleMons[gBattlerTarget].ability = gBattleMons[gBattlerTarget].volatiles.overwrittenAbility = gBattleMons[gBattlerAttacker].ability;
             gBattlescriptCurrInstr = cmd->nextInstr;
+#ifdef NATIVE
+            ModsAbilityChangesCommitted(&change, 1, RHH_ABILITY_MUTATION_ENTRAINMENT, gBattlerAttacker, gCurrentMove);
+#endif
         }
     }
 }
@@ -11135,10 +11923,10 @@ void BS_TryElectrify(void)
 void BS_TrySoak(void)
 {
     NATIVE_ARGS(const u8 *failInstr);
-    enum Type types[3];
-    GetBattlerTypes(gBattlerTarget, FALSE, types);
+    struct BattleTypeList types;
+    GetBattlerTypeList(gBattlerTarget, FALSE, &types);
     enum Type typeToSet = GetMoveArgType(gCurrentMove);
-    if ((types[0] == typeToSet && types[1] == typeToSet)
+    if ((types.count == 1 && types.types[0] == typeToSet)
      || GetActiveGimmick(gBattlerTarget) == GIMMICK_TERA)
     {
         gBattlescriptCurrInstr = cmd->failInstr;
@@ -11335,6 +12123,9 @@ void BS_TryPsychoShift(void)
 void BS_CureStatus(void)
 {
     NATIVE_ARGS(u8 battler);
+#ifdef NATIVE
+    const u8 *cureInstruction = gBattlescriptCurrInstr;
+#endif
     enum BattlerId battler = GetBattlerForBattleScript(cmd->battler);
     u32 status = gBattleMons[battler].status1;
 
@@ -11360,6 +12151,9 @@ void BS_CureStatus(void)
     BtlController_EmitSetMonData(battler, B_COMM_TO_CONTROLLER, REQUEST_STATUS_BATTLE, 0, sizeof(gBattleMons[battler].status1), &gBattleMons[battler].status1);
     MarkBattlerForControllerExec(battler);
     gBattlescriptCurrInstr = cmd->nextInstr;
+#ifdef NATIVE
+    ModsRecordScriptCure(battler, status, cureInstruction);
+#endif
 }
 
 void BS_PowerTrick(void)
@@ -11715,7 +12509,50 @@ void BS_TryThirdType(void)
     }
     else
     {
+#ifdef NATIVE
+        /* The engine normally has one replaceable third slot. Preserve that
+         * rule when inherent types also occupy the extended slots. */
+        if (!(gBattleTypeFlags & (BATTLE_TYPE_LINK | BATTLE_TYPE_RECORDED | BATTLE_TYPE_RECORDED_LINK))
+            && gBattleMons[gBattlerTarget].addedTypeValid)
+        {
+            u32 oldType = gBattleMons[gBattlerTarget].addedType;
+            bool32 replaced = FALSE;
+            for (u32 i = 0; i < 3; ++i)
+                if (gBattleMons[gBattlerTarget].types[i] == oldType)
+                { gBattleMons[gBattlerTarget].types[i] = type; replaced = TRUE; }
+            for (u32 i = 0; i < gBattleMons[gBattlerTarget].extraTypeCount; ++i)
+                if (gBattleMons[gBattlerTarget].extraTypes[i] == oldType)
+                { gBattleMons[gBattlerTarget].extraTypes[i] = type; replaced = TRUE; }
+            if (replaced)
+            {
+                gBattleMons[gBattlerTarget].addedType = type;
+                PREPARE_TYPE_BUFFER(gBattleTextBuff1, type);
+                gBattlescriptCurrInstr = cmd->nextInstr;
+                return;
+            }
+            gBattleMons[gBattlerTarget].addedTypeValid = FALSE;
+        }
+        /* A third type without an added-type marker belongs to the current
+         * type list, including one copied from a different species. */
+        bool32 occupiedThird = gBattleMons[gBattlerTarget].types[2] != TYPE_MYSTERY
+            && gBattleMons[gBattlerTarget].types[2] != TYPE_NONE;
+        if (!(gBattleTypeFlags & (BATTLE_TYPE_LINK | BATTLE_TYPE_RECORDED | BATTLE_TYPE_RECORDED_LINK))
+            && (gBattleMons[gBattlerTarget].extraTypeCount || occupiedThird))
+        {
+            if (gBattleMons[gBattlerTarget].extraTypeCount >= sizeof(gBattleMons[gBattlerTarget].extraTypes))
+            {
+                gBattlescriptCurrInstr = cmd->failInstr;
+                return;
+            }
+            gBattleMons[gBattlerTarget].extraTypes[gBattleMons[gBattlerTarget].extraTypeCount++] = type;
+        }
+        else
+#endif
         gBattleMons[gBattlerTarget].types[2] = type;
+#ifdef NATIVE
+        if (!(gBattleTypeFlags & (BATTLE_TYPE_LINK | BATTLE_TYPE_RECORDED | BATTLE_TYPE_RECORDED_LINK)))
+        { gBattleMons[gBattlerTarget].addedType = type; gBattleMons[gBattlerTarget].addedTypeValid = TRUE; }
+#endif
         PREPARE_TYPE_BUFFER(gBattleTextBuff1, type);
         gBattlescriptCurrInstr = cmd->nextInstr;
     }
@@ -11819,6 +12656,10 @@ void BS_TryToClearPrimalWeather(void)
 {
     NATIVE_ARGS();
     bool32 shouldNotClear = FALSE;
+#ifdef NATIVE
+    struct RhhBattleEnvironmentState before;
+    bool32 captured = ModsBattleEnvironmentCapture(&before);
+#endif
 
     for (enum BattlerId i = 0; i < gBattlersCount; i++)
     {
@@ -11844,6 +12685,9 @@ void BS_TryToClearPrimalWeather(void)
         gBattleWeather &= ~B_WEATHER_STRONG_WINDS;
         PrepareStringBattleWithWait(STRINGID_STRONGWINDSDISSIPATED, gBattlerAttacker);
     }
+#ifdef NATIVE
+    if (captured) ModsBattleEnvironmentCommitted(&before, RHH_BATTLE_ENV_CAUSE_PRIMAL_ENDED, RHH_BATTLE_NO_BATTLER, MOVE_NONE, ABILITY_NONE);
+#endif
     gBattlescriptCurrInstr = cmd->nextInstr;
 }
 
@@ -11856,7 +12700,14 @@ void BS_TryEndNeutralizingGas(void)
     {
         if (gBattleMons[battler].volatiles.neutralizingGas)
         {
+#ifdef NATIVE
+            struct ModsGasChangeCapture gasChange;
+            ModsGasChangeCapture(&gasChange);
+#endif
             gBattleMons[battler].volatiles.neutralizingGas = FALSE;
+#ifdef NATIVE
+            ModsGasChangeCommitted(&gasChange, RHH_GAS_REPLACED, battler, 0);
+#endif
             if (!IsNeutralizingGasOnField())
             {
                 // Other Abilities resume before this battler gains its replacement
@@ -12115,6 +12966,10 @@ void BS_TryWakeBattlersUproar(void)
 
         if (IsBattlerAlive(battler) && gBattleMons[battler].status1 & STATUS1_SLEEP && !hasSoundproof)
         {
+#ifdef NATIVE
+            struct ModsStatusCureCapture cure;
+            ModsCaptureStatusCure(&cure, battler);
+#endif
             TryDeactivateSleepClause(battler, gBattlerPartyIndexes[battler]);
             gBattleMons[battler].status1 = 0;
             gEffectBattler = battler;
@@ -12122,6 +12977,9 @@ void BS_TryWakeBattlersUproar(void)
             MarkBattlerForControllerExec(battler);
 
             BattleScriptCall(BattleScript_TargetWokeUp);
+#ifdef NATIVE
+            ModsFinishEngineStatusCure(&cure, battler, RHH_BATTLE_CURE_UPROAR, RHH_BATTLE_NO_BATTLER, MOVE_NONE);
+#endif
             return;
         }
     }

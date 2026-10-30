@@ -2494,7 +2494,6 @@ enum
 
 enum
 {
-    TAG_ABILITY_POP_UP = 0xD720, // Only used for the SpritePalette, the rest below is for the SpriteSheets.
     TAG_ABILITY_POP_UP_PLAYER1 = TAG_ABILITY_POP_UP,
     TAG_ABILITY_POP_UP_OPPONENT1,
     TAG_ABILITY_POP_UP_PLAYER2,

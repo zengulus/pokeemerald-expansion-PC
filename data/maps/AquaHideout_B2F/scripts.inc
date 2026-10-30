@@ -111,7 +111,7 @@ AquaHideout_B2F_Text_MattPostBattle:
 	.string "some cave under the sea!\p"
 	.string "If you're going to give chase, you'd\n"
 	.string "better search the big, wide sea beyond\l"
-	.string "LILYCOVE.\p"
+	.string "Lilycove.\p"
 	.string "But will you find it then?\n"
 	.string "Hehehe!$"
 
@@ -146,7 +146,7 @@ AquaHideout_B2F_Text_Grunt6PostBattle:
 	.string "chew me out…$"
 
 AquaHideout_B2F_Text_Grunt8Intro:
-	.string "When I joined TEAM AQUA, the first\n"
+	.string "When I joined Team Aqua, the first\n"
 	.string "thing I had to learn was how these\l"
 	.string "warp panels connected.$"
 

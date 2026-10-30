@@ -16,6 +16,15 @@ struct HallofFameTeam
     struct HallofFameMon mon[PARTY_SIZE];
 };
 
+#ifdef NATIVE
+extern size_t gHoFSaveCount;
+bool32 NativeHallOfFameAppend(const struct HallofFameTeam *team);
+#define HALL_OF_FAME_STORAGE_SIZE (sizeof(struct HallofFameTeam) * gHoFSaveCount)
+#else
+#define HALL_OF_FAME_MAX_TEAMS 30
+#define HALL_OF_FAME_STORAGE_SIZE (SECTOR_SIZE * NUM_HOF_SECTORS)
+#endif
+
 extern struct HallofFameTeam *gHoFSaveBuffer;
 
 void CB2_DoHallOfFameScreen(void);

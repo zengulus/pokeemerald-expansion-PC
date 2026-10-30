@@ -46,6 +46,10 @@
 #include "constants/pokemon_icon.h"
 #include "chooseboxmon.h"
 #include "party_menu.h"
+#ifdef NATIVE
+#include "mods.h"
+#include "owned_identity_ledger.h"
+#endif
 
 /*
     NOTE: This file is large. Some general groups of functions have
@@ -542,6 +546,9 @@ static u32 sItemIconGfxBuffer[98];
 EWRAM_DATA static u8 sPreviousBoxOption = 0;
 EWRAM_DATA static struct ChooseBoxMenu *sChooseBoxMenu = NULL;
 EWRAM_DATA static struct PokemonStorageSystemData *sStorage = NULL;
+#ifdef NATIVE
+bool32 ModsOwnedStorageBusy(void) { return sStorage != NULL; }
+#endif
 EWRAM_DATA static bool8 sInPartyMenu = 0;
 EWRAM_DATA static u8 sCurrentBoxOption = 0;
 EWRAM_DATA static u8 sDepositBoxId = 0;
@@ -643,7 +650,10 @@ static void PlaceMon(void);
 static void RefreshDisplayMon(void);
 static void SetMovingMonData(u8, u8);
 static void SetPlacedMonData(u8, u8);
-static void PurgeMonOrBoxMon(u8, u8);
+static void PurgeMonOrBoxMon(u8, u8, bool32);
+#ifdef NATIVE
+static void ZeroBoxMonAtWithOwnedReceipt(u8, u8);
+#endif
 static void SetShiftedMonData(u8, u8);
 static bool8 TryStorePartyMonInBox(u8);
 static void ResetSelectionAfterDeposit(void);
@@ -858,7 +868,7 @@ void SetMonFormPSS(struct BoxPokemon *boxMon, enum FormChanges method);
 void SetMonFormPSS_ItemHold(struct BoxPokemon *boxMon);
 void UpdateSpeciesSpritePSS(struct BoxPokemon *boxmon);
 
-static const u8 gText_JustOnePkmn[] = _("There is just one POKéMON with you.");
+static const u8 gText_JustOnePkmn[] = _("There is just one Pokémon with you.");
 static const u8 gText_PartyFull[] = _("Your party is full!");
 static const u8 gText_Box[] = _("BOX");
 
@@ -867,10 +877,10 @@ struct {
     const u8 *desc;
 } static const sMainMenuTexts[OPTIONS_COUNT] =
 {
-    [OPTION_WITHDRAW]   = {COMPOUND_STRING("WITHDRAW POKéMON"), COMPOUND_STRING("Move POKéMON stored in BOXES to\nyour party.")},
-    [OPTION_DEPOSIT]    = {COMPOUND_STRING("DEPOSIT POKéMON"),  COMPOUND_STRING("Store POKéMON in your party in BOXES.")},
-    [OPTION_MOVE_MONS]  = {COMPOUND_STRING("MOVE POKéMON"),     COMPOUND_STRING("Organize the POKéMON in BOXES and\nin your party.")},
-    [OPTION_MOVE_ITEMS] = {COMPOUND_STRING("MOVE ITEMS"),       COMPOUND_STRING("Move items held by any POKéMON\nin a BOX or your party.")},
+    [OPTION_WITHDRAW]   = {COMPOUND_STRING("WITHDRAW Pokémon"), COMPOUND_STRING("Move Pokémon stored in BOXES to\nyour party.")},
+    [OPTION_DEPOSIT]    = {COMPOUND_STRING("DEPOSIT Pokémon"),  COMPOUND_STRING("Store Pokémon in your party in BOXES.")},
+    [OPTION_MOVE_MONS]  = {COMPOUND_STRING("MOVE Pokémon"),     COMPOUND_STRING("Organize the Pokémon in BOXES and\nin your party.")},
+    [OPTION_MOVE_ITEMS] = {COMPOUND_STRING("MOVE ITEMS"),       COMPOUND_STRING("Move items held by any Pokémon\nin a BOX or your party.")},
     [OPTION_EXIT]       = {COMPOUND_STRING("SEE YA!"),          COMPOUND_STRING("Return to the previous menu.")}
 };
 
@@ -1057,13 +1067,13 @@ static const struct StorageMessage sMessages[] =
     [MSG_DEPOSIT_IN_WHICH_BOX] = {COMPOUND_STRING("Deposit in which BOX?"),      MSG_VAR_NONE},
     [MSG_WAS_DEPOSITED]        = {COMPOUND_STRING("{DYNAMIC 0} was deposited."), MSG_VAR_MON_NAME_1},
     [MSG_BOX_IS_FULL]          = {COMPOUND_STRING("The BOX is full."),           MSG_VAR_NONE},
-    [MSG_RELEASE_POKE]         = {COMPOUND_STRING("Release this POKéMON?"),      MSG_VAR_NONE},
+    [MSG_RELEASE_POKE]         = {COMPOUND_STRING("Release this Pokémon?"),      MSG_VAR_NONE},
     [MSG_WAS_RELEASED]         = {COMPOUND_STRING("{DYNAMIC 0} was released."),  MSG_VAR_RELEASE_MON_1},
     [MSG_BYE_BYE]              = {COMPOUND_STRING("Bye-bye, {DYNAMIC 0}!"),      MSG_VAR_RELEASE_MON_3},
-    [MSG_MARK_POKE]            = {COMPOUND_STRING("Mark your POKéMON."),         MSG_VAR_NONE},
-    [MSG_LAST_POKE]            = {COMPOUND_STRING("That's your last POKéMON!"),  MSG_VAR_NONE},
+    [MSG_MARK_POKE]            = {COMPOUND_STRING("Mark your Pokémon."),         MSG_VAR_NONE},
+    [MSG_LAST_POKE]            = {COMPOUND_STRING("That's your last Pokémon!"),  MSG_VAR_NONE},
     [MSG_PARTY_FULL]           = {gText_YourPartysFull,                          MSG_VAR_NONE},
-    [MSG_HOLDING_POKE]         = {COMPOUND_STRING("You're holding a POKéMON!"),  MSG_VAR_NONE},
+    [MSG_HOLDING_POKE]         = {COMPOUND_STRING("You're holding a Pokémon!"),  MSG_VAR_NONE},
     [MSG_WHICH_ONE_WILL_TAKE]  = {COMPOUND_STRING("Which one will you take?"),   MSG_VAR_NONE},
     [MSG_CANT_RELEASE_EGG]     = {COMPOUND_STRING("You can't release an EGG."),  MSG_VAR_NONE},
     [MSG_CONTINUE_BOX]         = {COMPOUND_STRING("Continue BOX operations?"),   MSG_VAR_NONE},
@@ -1072,7 +1082,7 @@ static const struct StorageMessage sMessages[] =
     [MSG_SURPRISE]             = {COMPOUND_STRING("… … … … !"),                  MSG_VAR_NONE},
     [MSG_PLEASE_REMOVE_MAIL]   = {COMPOUND_STRING("Please remove the MAIL."),    MSG_VAR_NONE},
     [MSG_IS_SELECTED2]         = {gText_PkmnIsSelected,                          MSG_VAR_ITEM_NAME},
-    [MSG_GIVE_TO_MON]          = {COMPOUND_STRING("GIVE to a POKéMON?"),         MSG_VAR_NONE},
+    [MSG_GIVE_TO_MON]          = {COMPOUND_STRING("GIVE to a Pokémon?"),         MSG_VAR_NONE},
     [MSG_PLACED_IN_BAG]        = {COMPOUND_STRING("Placed item in the BAG."),    MSG_VAR_ITEM_NAME},
     [MSG_BAG_FULL]             = {COMPOUND_STRING("The BAG is full."),           MSG_VAR_NONE},
     [MSG_PUT_IN_BAG]           = {COMPOUND_STRING("Put this item in the BAG?"),  MSG_VAR_NONE},
@@ -1992,6 +2002,57 @@ static void EnterPokeStorage(u8 boxOption)
         SetMainCallback2(CB2_PokeStorage);
     }
 }
+#if defined(NATIVE) && defined(RHH_OWNED_IDENTITY_TEST)
+bool32 ModsOwnedStorageTestOpen(void)
+{
+    if (sStorage) return FALSE;
+    EnterPokeStorage(OPTION_MOVE_MONS);
+    return sStorage != NULL;
+}
+void ModsOwnedStorageTestClose(void)
+{
+    FREE_AND_SET_NULL(sStorage);
+    ResetTasks();
+}
+bool32 ModsOwnedStorageTestPrepareRelease(u32 location, u32 box, u32 slot, bool32 moving)
+{
+    if (!sStorage || (location != RHH_MON_PARTY && location != RHH_MON_BOX)
+        || (location == RHH_MON_PARTY && (box || slot >= PARTY_SIZE))
+        || (location == RHH_MON_BOX && (box >= TOTAL_BOXES_COUNT || slot >= IN_BOX_COUNT))) return FALSE;
+    sCursorArea = location == RHH_MON_PARTY ? CURSOR_AREA_IN_PARTY : CURSOR_AREA_IN_BOX;
+    sCursorPosition = slot; gPokemonStoragePtr->currentBox = box;
+    sStorage->movingMonSprite = NULL; sStorage->releaseMonSpritePtr = &sStorage->movingMonSprite;
+    sIsMonBeingMoved = FALSE;
+    if (moving)
+    {
+        SetMovingMonData(location == RHH_MON_PARTY ? TOTAL_BOXES_COUNT : box, slot);
+        sIsMonBeingMoved = TRUE;
+    }
+    return TRUE;
+}
+void ModsOwnedStorageTestRelease(void) { if (sStorage) ReleaseMon(); }
+bool32 ModsOwnedStorageTestPick(u32 location, u32 box, u32 slot)
+{
+    if (!sStorage || sIsMonBeingMoved || (location != RHH_MON_PARTY && location != RHH_MON_BOX)
+        || (location == RHH_MON_PARTY && (box || slot >= PARTY_SIZE))
+        || (location == RHH_MON_BOX && (box >= TOTAL_BOXES_COUNT || slot >= IN_BOX_COUNT))) return FALSE;
+    sCursorArea = location == RHH_MON_PARTY ? CURSOR_AREA_IN_PARTY : CURSOR_AREA_IN_BOX;
+    sCursorPosition = slot; gPokemonStoragePtr->currentBox = box;
+    SetMovingMonData(location == RHH_MON_PARTY ? TOTAL_BOXES_COUNT : box, slot);
+    sIsMonBeingMoved = TRUE; return TRUE;
+}
+bool32 ModsOwnedStorageTestPlace(u32 location, u32 box, u32 slot, bool32 shift)
+{
+    if (!sStorage || !sIsMonBeingMoved || (location != RHH_MON_PARTY && location != RHH_MON_BOX)
+        || (location == RHH_MON_PARTY && (box || slot >= PARTY_SIZE))
+        || (location == RHH_MON_BOX && (box >= TOTAL_BOXES_COUNT || slot >= IN_BOX_COUNT))) return FALSE;
+    sCursorArea = location == RHH_MON_PARTY ? CURSOR_AREA_IN_PARTY : CURSOR_AREA_IN_BOX;
+    sCursorPosition = slot; gPokemonStoragePtr->currentBox = box;
+    if (shift) SetShiftedMonData(location == RHH_MON_PARTY ? TOTAL_BOXES_COUNT : box, slot);
+    else { SetPlacedMonData(location == RHH_MON_PARTY ? TOTAL_BOXES_COUNT : box, slot); sIsMonBeingMoved = FALSE; }
+    return TRUE;
+}
+#endif
 
 static void CB2_ReturnToPokeStorage(void)
 {
@@ -6431,6 +6492,14 @@ static void RefreshDisplayMon(void)
 
 static void SetMovingMonData(u8 boxId, u8 position)
 {
+#ifdef NATIVE
+    struct RhhOwnedPickup pickup;
+    u32 location = boxId == TOTAL_BOXES_COUNT ? RHH_MON_PARTY : RHH_MON_BOX;
+    struct BoxPokemon *source = location == RHH_MON_PARTY ? &gParties[B_TRAINER_PLAYER][position].box
+        : GetBoxedMonPtr(boxId, position);
+    bool32 notify = ModsOwnedPickupCapture(source, location, location == RHH_MON_PARTY ? 0 : boxId,
+                                           position, FALSE, &pickup);
+#endif
     if (boxId == TOTAL_BOXES_COUNT)
     {
         sStorage->movingMon = gParties[B_TRAINER_PLAYER][sCursorPosition];
@@ -6442,13 +6511,33 @@ static void SetMovingMonData(u8 boxId, u8 position)
         BoxMonAtToMon(boxId, position, &sStorage->movingMon);
     }
 
-    PurgeMonOrBoxMon(boxId, position);
+    PurgeMonOrBoxMon(boxId, position,
+#ifdef NATIVE
+                       notify
+#else
+                       FALSE
+#endif
+                       );
     sMovingMonOrigBoxId = boxId;
     sMovingMonOrigBoxPos = position;
+#ifdef NATIVE
+    if (notify) ModsOwnedPickupCommitted(&pickup);
+    else NativeOwnedTrackerUnsupported();
+#endif
 }
 
 static void SetPlacedMonData(u8 boxId, u8 position)
 {
+#ifdef NATIVE
+    u32 sourceLocation = sMovingMonOrigBoxId == TOTAL_BOXES_COUNT ? RHH_MON_PARTY : RHH_MON_BOX;
+    u32 destinationLocation = boxId == TOTAL_BOXES_COUNT ? RHH_MON_PARTY : RHH_MON_BOX;
+    struct BoxPokemon *destination = boxId == TOTAL_BOXES_COUNT ? &gParties[B_TRAINER_PLAYER][position].box
+        : GetBoxedMonPtr(boxId, position);
+    struct RhhOwnedMove move;
+    bool32 notify = ModsOwnedMoveCapture(&sStorage->movingMon.box, sourceLocation,
+        sourceLocation == RHH_MON_PARTY ? 0 : sMovingMonOrigBoxId, sMovingMonOrigBoxPos, destination,
+        destinationLocation, destinationLocation == RHH_MON_PARTY ? 0 : boxId, position, FALSE, &move);
+#endif
     if (OW_PC_HEAL <= GEN_7)
         HealPokemon(&sStorage->movingMon);
 
@@ -6462,17 +6551,39 @@ static void SetPlacedMonData(u8 boxId, u8 position)
     }
     else
     {
+#ifdef NATIVE
+        if (notify) CopyMonWithOwnedReceipt(destination, &sStorage->movingMon.box, sizeof(sStorage->movingMon.box));
+        else
+#endif
         SetBoxMonAt(boxId, position, &sStorage->movingMon.box);
         SetMonFormPSS(&gPokemonStoragePtr->boxes[boxId][position], FORM_CHANGE_DEPOSIT);
     }
+#ifdef NATIVE
+    if (notify) ModsOwnedMoveCommitted(destination, &move);
+    else NativeOwnedTrackerUnsupported();
+#endif
 }
 
-static void PurgeMonOrBoxMon(u8 boxId, u8 position)
+static void PurgeMonOrBoxMon(u8 boxId, u8 position, bool32 tracked)
 {
     if (boxId == TOTAL_BOXES_COUNT)
+    {
+#ifdef NATIVE
+        if (tracked) ZeroMonDataWithOwnedReceipt(&gParties[B_TRAINER_PLAYER][position]);
+        else
+#endif
         ZeroMonData(&gParties[B_TRAINER_PLAYER][position]);
+    }
     else
+    {
+#ifdef NATIVE
+        if (tracked) ZeroBoxMonAtWithOwnedReceipt(boxId, position);
+        else
+#else
+        (void)tracked;
+#endif
         ZeroBoxMonAt(boxId, position);
+    }
 }
 
 static void SetShiftedMonData(u8 boxId, u8 position)
@@ -6553,6 +6664,18 @@ static void ReleaseMon(void)
 {
     u8 boxId;
     enum Item item = ITEM_NONE;
+#ifdef NATIVE
+    u32 source = sIsMonBeingMoved ? sMovingMonOrigBoxId
+        : sCursorArea == CURSOR_AREA_IN_PARTY ? TOTAL_BOXES_COUNT : StorageGetCurrentBox();
+    u32 slot = sIsMonBeingMoved ? sMovingMonOrigBoxPos : sCursorPosition;
+    struct BoxPokemon *released = sIsMonBeingMoved ? &sStorage->movingMon.box
+        : source == TOTAL_BOXES_COUNT ? &gParties[B_TRAINER_PLAYER][slot].box
+        : &gPokemonStoragePtr->boxes[source][slot];
+    bool32 hadReleased = sIsMonBeingMoved || released->hasSpecies;
+    struct RhhOwnedRelease release;
+    bool32 notify = ModsOwnedReleaseCapture(released, source == TOTAL_BOXES_COUNT ? RHH_MON_PARTY : RHH_MON_BOX,
+        source == TOTAL_BOXES_COUNT ? 0 : source, slot, sIsMonBeingMoved, &release);
+#endif
 
     DestroyReleaseMonIcon();
     if (sIsMonBeingMoved)
@@ -6574,10 +6697,20 @@ static void ReleaseMon(void)
                 item = GetBoxMonDataAt(boxId, sCursorPosition, MON_DATA_HELD_ITEM);
         }
 
-        PurgeMonOrBoxMon(boxId, sCursorPosition);
+        PurgeMonOrBoxMon(boxId, sCursorPosition,
+#ifdef NATIVE
+                           notify
+#else
+                           FALSE
+#endif
+                           );
         if (item != ITEM_NONE)
             AddBagItem(item, 1);
     }
+#ifdef NATIVE
+    if (notify) ModsOwnedReleaseCommitted(&release);
+    else if (hadReleased) NativeOwnedTrackerUnsupported();
+#endif
     TryRefreshDisplayMon();
 }
 
@@ -6838,6 +6971,12 @@ s16 CompactPartySlots(void)
 {
     s16 retVal = -1;
     u16 i, last;
+#ifdef NATIVE
+    struct RhhPartyReorder batch;
+    bool32 skyPreparation = ModsOwnedSkyPartyPreparing();
+    bool32 notify = !skyPreparation && ModsPartyReorderBegin(RHH_PARTY_REORDER_COMPACT, &batch);
+    bool32 changed = FALSE;
+#endif
 
     for (i = 0, last = 0; i < PARTY_SIZE; i++)
     {
@@ -6845,7 +6984,13 @@ s16 CompactPartySlots(void)
         if (species != SPECIES_NONE)
         {
             if (i != last)
+            {
+#ifdef NATIVE
+                changed = TRUE;
+                if (notify) ModsPartyReorderAdd(&batch, i, last);
+#endif
                 gParties[B_TRAINER_PLAYER][last] = gParties[B_TRAINER_PLAYER][i];
+            }
             last++;
         }
         else if (retVal == -1)
@@ -6854,7 +6999,26 @@ s16 CompactPartySlots(void)
         }
     }
     for (; last < PARTY_SIZE; last++)
+    {
+#ifdef NATIVE
+        bool32 accounted = FALSE;
+        if (notify)
+            for (u32 n = 0; n < batch.count; ++n)
+                if (batch.moves[n].source_slot == last) accounted = TRUE;
+        if (gParties[B_TRAINER_PLAYER][last].box.hasSpecies)
+        {
+            if (!accounted && !skyPreparation) NativeOwnedTrackerUnsupported();
+        }
+        if (accounted || skyPreparation) ZeroMonDataWithOwnedReceipt(&gParties[B_TRAINER_PLAYER][last]);
+        else
+#endif
         ZeroMonData(&gParties[B_TRAINER_PLAYER][last]);
+    }
+
+#ifdef NATIVE
+    if (notify) ModsPartyReorderCommitted(&batch);
+    else if (changed && !skyPreparation) NativeOwnedTrackerUnsupported();
+#endif
 
     return retVal;
 }
@@ -8239,6 +8403,9 @@ EWRAM_DATA static struct
     u16 bgY;
     u16 bgMoveSteps;
     struct BoxPokemon boxMons[IN_BOX_COUNT];
+#ifdef NATIVE
+    u8 sourceBox, sourceSlots[IN_BOX_COUNT];
+#endif
 } *sMultiMove = NULL;
 
 static bool8 MultiMove_Init(void)
@@ -8640,6 +8807,9 @@ static void MultiMove_GetMonsFromSelection(void)
     sMultiMove->columnsTotal = abs(sMultiMove->fromColumn - sMultiMove->toColumn) + 1;
     sMultiMove->rowsTotal = abs(sMultiMove->fromRow - sMultiMove->toRow) + 1;
     boxId = StorageGetCurrentBox();
+#ifdef NATIVE
+    sMultiMove->sourceBox = boxId;
+#endif
     monArrayId = 0;
     columnCount = sMultiMove->minColumn + sMultiMove->columnsTotal;
     rowCount = sMultiMove->minRow + sMultiMove->rowsTotal;
@@ -8654,6 +8824,10 @@ static void MultiMove_GetMonsFromSelection(void)
             if (boxMon != NULL)
 #endif
                 sMultiMove->boxMons[monArrayId] = *boxMon;
+
+#ifdef NATIVE
+            sMultiMove->sourceSlots[monArrayId] = boxPosition;
+#endif
 
             monArrayId++;
             boxPosition++;
@@ -8675,8 +8849,23 @@ static void MultiMove_RemoveMonsFromBox(void)
         u8 boxPosition = (IN_BOX_COLUMNS * i) + sMultiMove->minColumn;
         for (j = sMultiMove->minColumn; j < columnCount; j++)
         {
+#ifdef NATIVE
+            struct RhhOwnedPickup pickup;
+            struct BoxPokemon *source = GetBoxedMonPtr(boxId, boxPosition);
+            bool32 hadSource = source && source->hasSpecies;
+            bool32 notify = ModsOwnedPickupCapture(source, RHH_MON_BOX,
+                                                   boxId, boxPosition, TRUE, &pickup);
+#endif
             DestroyBoxMonIconAtPosition(boxPosition);
+#ifdef NATIVE
+            if (notify) ZeroBoxMonAtWithOwnedReceipt(boxId, boxPosition);
+            else
+#endif
             ZeroBoxMonAt(boxId, boxPosition);
+#ifdef NATIVE
+            if (notify) ModsOwnedPickupCommitted(&pickup);
+            else if (hadSource) NativeOwnedTrackerUnsupported();
+#endif
             boxPosition++;
         }
     }
@@ -8715,15 +8904,49 @@ static void MultiMove_SetPlacedMonData(void)
         u8 boxPosition = (IN_BOX_COLUMNS * i) + sMultiMove->minColumn;
         for (j = sMultiMove->minColumn; j < columnCount; j++)
         {
+#ifdef NATIVE
+            struct RhhOwnedMove move;
+            struct BoxPokemon *destination = GetBoxedMonPtr(boxId, boxPosition);
+            bool32 notify = ModsOwnedMoveCapture(&sMultiMove->boxMons[monArrayId], RHH_MON_BOX,
+                sMultiMove->sourceBox, sMultiMove->sourceSlots[monArrayId], destination, RHH_MON_BOX,
+                boxId, boxPosition, TRUE, &move);
+#endif
             if (OW_PC_HEAL <= GEN_7)
                 HealBoxPokemon(&sMultiMove->boxMons[monArrayId]);
             if (GetBoxMonData(&sMultiMove->boxMons[monArrayId], MON_DATA_SANITY_HAS_SPECIES))
+            {
+#ifdef NATIVE
+                if (notify) CopyMonWithOwnedReceipt(destination, &sMultiMove->boxMons[monArrayId], sizeof(*destination));
+                else
+#endif
                 SetBoxMonAt(boxId, boxPosition, &sMultiMove->boxMons[monArrayId]);
+#ifdef NATIVE
+                if (notify) ModsOwnedMoveCommitted(destination, &move);
+                else NativeOwnedTrackerUnsupported();
+#endif
+            }
             boxPosition++;
             monArrayId++;
         }
     }
 }
+#if defined(NATIVE) && defined(RHH_OWNED_IDENTITY_TEST)
+bool32 ModsOwnedStorageTestGroupMove(u32 sourceBox, u32 destinationBox)
+{
+    if (!sStorage || sMultiMove || sourceBox >= TOTAL_BOXES_COUNT || destinationBox >= TOTAL_BOXES_COUNT) return FALSE;
+    sMultiMove = Alloc(sizeof(*sMultiMove)); if (!sMultiMove) return FALSE;
+    memset(sMultiMove, 0, sizeof(*sMultiMove));
+    gPokemonStoragePtr->currentBox = sourceBox;
+    sMultiMove->fromColumn = 0; sMultiMove->toColumn = 1;
+    MultiMove_GetMonsFromSelection();
+    sStorage->boxMonsSprites[0] = sStorage->boxMonsSprites[1] = NULL;
+    MultiMove_RemoveMonsFromBox();
+    gPokemonStoragePtr->currentBox = destinationBox;
+    sMultiMove->minColumn = 0; sMultiMove->minRow = 1;
+    MultiMove_SetPlacedMonData();
+    FREE_AND_SET_NULL(sMultiMove); return TRUE;
+}
+#endif
 
 static void MultiMove_ResetBg(void)
 {
@@ -9580,14 +9803,31 @@ u32 GetAndCopyBoxMonDataAt(u8 boxId, u8 boxPosition, s32 request, void *dst)
 void SetBoxMonAt(u8 boxId, u8 boxPosition, struct BoxPokemon *src)
 {
     if (boxId < TOTAL_BOXES_COUNT && boxPosition < IN_BOX_COUNT)
+    {
+#ifdef NATIVE
+        NativeOwnedTrackUnreportedCopy(&gPokemonStoragePtr->boxes[boxId][boxPosition], src, sizeof(*src));
+#endif
         gPokemonStoragePtr->boxes[boxId][boxPosition] = *src;
+    }
 }
 
 void ZeroBoxMonAt(u8 boxId, u8 boxPosition)
 {
     if (boxId < TOTAL_BOXES_COUNT && boxPosition < IN_BOX_COUNT)
+    {
+#ifdef NATIVE
+        NativeOwnedTrackUnreportedBoxClear(boxId, boxPosition);
+#endif
         ZeroBoxMonData(&gPokemonStoragePtr->boxes[boxId][boxPosition]);
+    }
 }
+#ifdef NATIVE
+static void ZeroBoxMonAtWithOwnedReceipt(u8 boxId, u8 boxPosition)
+{
+    if (boxId < TOTAL_BOXES_COUNT && boxPosition < IN_BOX_COUNT)
+        ZeroBoxMonDataWithOwnedReceipt(&gPokemonStoragePtr->boxes[boxId][boxPosition]);
+}
+#endif
 
 void BoxMonAtToMon(u8 boxId, u8 boxPosition, struct Pokemon *dst)
 {
@@ -10090,3 +10330,11 @@ void RemoveSelectedPcMon(struct Pokemon *mon)
     BoxMonToMon(boxmon, mon);
     ZeroBoxMonData(boxmon);
 }
+#ifdef NATIVE
+void RemoveSelectedPcMonWithOwnedReceipt(struct Pokemon *mon)
+{
+    struct BoxPokemon *boxmon = GetBoxedMonPtr(gSpecialVar_MonBoxId, gSpecialVar_MonBoxPos);
+    BoxMonToMon(boxmon, mon);
+    ZeroBoxMonDataWithOwnedReceipt(boxmon);
+}
+#endif

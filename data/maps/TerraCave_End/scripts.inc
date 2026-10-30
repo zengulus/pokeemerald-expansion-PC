@@ -33,7 +33,11 @@ TerraCave_End_EventScript_Groudon::
 	delay 40
 	waitmoncry
 	setvar VAR_LAST_TALKED, LOCALID_TERRA_CAVE_GROUDON
+TerraCave_End_EventScript_PrepareGroudon::
+	identifywildencounter "rhh:encounter/terra_cave_end/groudon"
 	setwildbattle SPECIES_GROUDON, 70
+	specialvar VAR_RESULT, ScriptedWildBattleAllowed
+	goto_if_eq VAR_RESULT, FALSE, TerraCave_End_EventScript_GroudonCancelled
 	setflag FLAG_SYS_CTRL_OBJ_DELETE
 	special BattleSetup_StartLegendaryBattle
 	clearflag FLAG_SYS_CTRL_OBJ_DELETE
@@ -44,6 +48,13 @@ TerraCave_End_EventScript_Groudon::
 	goto_if_eq VAR_RESULT, B_OUTCOME_PLAYER_TELEPORTED, TerraCave_End_EventScript_RanFromGroudon
 	setvar VAR_SHOULD_END_ABNORMAL_WEATHER, 1
 	setflag FLAG_DEFEATED_GROUDON
+	releaseall
+	end
+
+TerraCave_End_EventScript_GroudonCancelled::
+	setvar VAR_0x8004, LOCALID_TERRA_CAVE_GROUDON
+	special ScriptRestoreEncounterObject
+	setobjectxy LOCALID_TERRA_CAVE_GROUDON, 17, 22
 	releaseall
 	end
 

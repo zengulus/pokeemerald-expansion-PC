@@ -304,6 +304,27 @@ static enum StatChangeResult CanDecreaseStat(struct BattleCalcValues *cv, struct
     return STAT_CHANGE_WORKED;
 }
 
+#ifdef NATIVE
+/* Pure counterpart to the ability stat script. It reports reflection
+ * separately so a switch preview can apply it to the simulated source. */
+enum ModAbilityStatPreview PreviewAbilityStatChange(struct BattleCalcValues *cv, enum Stat stat, s32 *stage,
+                                                     bool32 certain, bool32 ignoreMirror, bool32 ignoreSubstitute)
+{
+    if (!cv || !stage || stat <= STAT_HP || stat >= NUM_BATTLE_STATS || !*stage) return MOD_ABILITY_STAT_BLOCKED;
+    struct StatChange st = {.stat = stat, .stage = *stage, .onlyChecking = TRUE, .certain = certain,
+        .ignoreMirrorArmored = ignoreMirror, .ignoreSubstitute = ignoreSubstitute};
+    AdjustStatStage(cv, &st); *stage = st.stage;
+    if (IsSubstituteBlocked(cv, &st)) return MOD_ABILITY_STAT_BLOCKED;
+    if (st.stage < 0)
+    {
+        if (IsMistProtected(cv, &st) || IsIntimidateBlocked(cv, &st) || IsFlowerVeilBlocked(cv, &st)
+            || IsClearAmuletBlocked(cv, &st) || IsAbilityBlocked(cv, &st)) return MOD_ABILITY_STAT_BLOCKED;
+        if (IsMirrorArmorReflected(cv, &st)) return MOD_ABILITY_STAT_REFLECTED;
+    }
+    return MOD_ABILITY_STAT_APPLIED;
+}
+#endif
+
 static enum StatChangeResult DecreaseStat(struct BattleCalcValues *cv, struct StatChange *st)
 {
     u32 currStage = gBattleMons[cv->battlerDef].statStages[st->stat];
@@ -539,6 +560,8 @@ static void TryPlayStatChangeAnimation(struct BattleCalcValues *cv, struct StatC
 
 static bool32 IsSubstituteBlocked(struct BattleCalcValues *cv, struct StatChange *st)
 {
+    if (st->ignoreSubstitute)
+        return FALSE;
     if (st->ignoreCertainFailure)
         return FALSE;
 

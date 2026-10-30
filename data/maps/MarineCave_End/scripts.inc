@@ -33,7 +33,11 @@ MarineCave_End_EventScript_Kyogre::
 	delay 40
 	waitmoncry
 	setvar VAR_LAST_TALKED, LOCALID_MARINE_CAVE_KYOGRE
+MarineCave_End_EventScript_PrepareKyogre::
+	identifywildencounter "rhh:encounter/marine_cave_end/kyogre"
 	setwildbattle SPECIES_KYOGRE, 70
+	specialvar VAR_RESULT, ScriptedWildBattleAllowed
+	goto_if_eq VAR_RESULT, FALSE, MarineCave_End_EventScript_KyogreCancelled
 	setflag FLAG_SYS_CTRL_OBJ_DELETE
 	special BattleSetup_StartLegendaryBattle
 	clearflag FLAG_SYS_CTRL_OBJ_DELETE
@@ -44,6 +48,13 @@ MarineCave_End_EventScript_Kyogre::
 	goto_if_eq VAR_RESULT, B_OUTCOME_PLAYER_TELEPORTED, MarineCave_End_EventScript_RanFromKyogre
 	setvar VAR_SHOULD_END_ABNORMAL_WEATHER, 1
 	setflag FLAG_DEFEATED_KYOGRE
+	releaseall
+	end
+
+MarineCave_End_EventScript_KyogreCancelled::
+	setvar VAR_0x8004, LOCALID_MARINE_CAVE_KYOGRE
+	special ScriptRestoreEncounterObject
+	setobjectxy LOCALID_MARINE_CAVE_KYOGRE, 9, 22
 	releaseall
 	end
 

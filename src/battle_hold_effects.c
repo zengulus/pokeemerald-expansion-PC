@@ -11,6 +11,9 @@
 #include "string_util.h"
 #include "data/hold_effects.h"
 #include "constants/berry.h"
+#ifdef NATIVE
+#include "mods.h"
+#endif
 
 bool32 IsOnSwitchInActivation(enum HoldEffect holdEffect)          { return gHoldEffectsInfo[holdEffect].onSwitchIn; }
 bool32 IsMirrorHerbActivation(enum HoldEffect holdEffect)          { return gHoldEffectsInfo[holdEffect].mirrorHerb; }
@@ -909,7 +912,7 @@ static enum ItemEffect HealConfuseBerry(enum BattlerId battler, enum Item itemId
         if (ability == ABILITY_RIPEN)
             healAmount *= 2;
         SetHealAmount(battler, healAmount);
-        if (GetFlavorRelationByPersonality(gBattleMons[battler].personality, flavorId) < 0)
+        if (GetFlavorRelationByNature(GetBattlerNature(battler), flavorId) < 0)
             BattleScriptCall(BattleScript_BerryConfuseHeal);
         else
             BattleScriptCall(BattleScript_ItemHealHP_RemoveBerry);
@@ -1016,6 +1019,12 @@ enum ItemEffect ItemBattleEffects(enum BattlerId itemBattler, enum BattlerId bat
 {
     enum ItemEffect effect = ITEM_NO_EFFECT;
     enum Item item;
+#ifdef NATIVE
+    u32 beforeStatus = gBattleMons[itemBattler].status1;
+    struct BattleScriptsStack *statusStack = gBattleResources ? gBattleResources->battleScriptsStack : NULL;
+    u32 previousStackSize = statusStack ? statusStack->size : 0;
+    const u8 *previousScript = gBattlescriptCurrInstr;
+#endif
 
     if (timing == IsOnBerryActivation || timing == IsOnFlingActivation)
         item = gLastUsedItem;
@@ -1206,6 +1215,18 @@ enum ItemEffect ItemBattleEffects(enum BattlerId itemBattler, enum BattlerId bat
         if (gItemsInfo[item].pocket == POCKET_BERRIES)
             GetBattlerPartyState(itemBattler)->ateBerry = TRUE;
     }
+
+#ifdef NATIVE
+    if (effect == ITEM_STATUS_CHANGE && beforeStatus != gBattleMons[itemBattler].status1)
+    {
+        u32 origin = timing == IsOnFlingActivation ? RHH_BATTLE_ITEM_LAST_USED_FLING
+            : timing == IsOnBerryActivation ? RHH_BATTLE_ITEM_LAST_USED_BERRY : RHH_BATTLE_ITEM_HELD;
+        bool32 presentationReady = statusStack && gBattleResources && gBattleResources->battleScriptsStack == statusStack
+            && previousStackSize < ARRAY_COUNT(statusStack->ptr) && statusStack->size == previousStackSize + 1
+            && statusStack->ptr[previousStackSize] == previousScript;
+        ModsBattleItemStatusChanged(itemBattler, item, origin, beforeStatus, presentationReady);
+    }
+#endif
 
     return effect;
 }

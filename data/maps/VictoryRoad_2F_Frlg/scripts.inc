@@ -86,11 +86,11 @@ VictoryRoad_2F_Text_DawsonDefeat::
 
 VictoryRoad_2F_Text_DawsonPostBattle::
 	.string "I can beat you when it comes to\n"
-	.string "knowledge about POKéMON!$"
+	.string "knowledge about Pokémon!$"
 
 VictoryRoad_2F_Text_DaisukeIntro::
 	.string "This here is VICTORY ROAD.\n"
-	.string "It's the final test for TRAINERS!$"
+	.string "It's the final test for Trainers!$"
 
 VictoryRoad_2F_Text_DaisukeDefeat::
 	.string "Atcho!$"
@@ -127,7 +127,7 @@ VictoryRoad_2F_Text_GregoryDefeat::
 	.string "Well done!$"
 
 VictoryRoad_2F_Text_GregoryPostBattle::
-	.string "Many TRAINERS give up their\n"
+	.string "Many Trainers give up their\n"
 	.string "challenge here and go home.$"
 
 @ Unused, old text for Moltres

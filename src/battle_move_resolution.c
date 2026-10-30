@@ -1,4 +1,7 @@
 #include "global.h"
+#ifdef NATIVE
+#include "mods.h"
+#endif
 #include "battle.h"
 #include "battle_arena.h"
 #include "battle_environment.h"
@@ -122,6 +125,10 @@ static void DefrostBattler(enum BattlerId battler, u32 status)
 static enum CancelerResult CancelerAsleepOrFrozen(struct BattleCalcValues *cv)
 {
     enum CancelerResult result = CANCELER_RESULT_RUN_SCRIPT_AND_INCREMENT;
+#ifdef NATIVE
+    struct ModsStatusCureCapture statusCure;
+    ModsCaptureStatusCure(&statusCure, cv->battlerAtk);
+#endif
 
     if (gBattleMons[cv->battlerAtk].status1 & STATUS1_SLEEP)
     {
@@ -194,6 +201,9 @@ static enum CancelerResult CancelerAsleepOrFrozen(struct BattleCalcValues *cv)
         }
     }
 
+#ifdef NATIVE
+    ModsFinishEngineStatusCure(&statusCure, cv->battlerAtk, RHH_BATTLE_CURE_NATURAL, RHH_BATTLE_NO_BATTLER, MOVE_NONE);
+#endif
     return result;
 }
 
@@ -599,6 +609,10 @@ static enum CancelerResult CancelerCallSubmove(struct BattleCalcValues *cv)
 static enum CancelerResult CancelerThaw(struct BattleCalcValues *cv)
 {
     enum CancelerResult result = CANCELER_RESULT_RUN_SCRIPT_AND_INCREMENT;
+#ifdef NATIVE
+    struct ModsStatusCureCapture statusCure;
+    ModsCaptureStatusCure(&statusCure, cv->battlerAtk);
+#endif
 
     if (MoveThawsUser(cv->move))
     {
@@ -631,6 +645,9 @@ static enum CancelerResult CancelerThaw(struct BattleCalcValues *cv)
             }
         }
     }
+#ifdef NATIVE
+    ModsFinishEngineStatusCure(&statusCure, cv->battlerAtk, RHH_BATTLE_CURE_MOVE, cv->battlerAtk, cv->move);
+#endif
     return result;
 }
 
@@ -914,7 +931,13 @@ static bool32 WasOriginalTargetAlly(enum BattlerId battlerAtk, enum BattlerId ba
 
 static enum CancelerResult CancelerSetTargets(struct BattleCalcValues *cv)
 {
+#ifdef NATIVE
+    ModsMoveTargetCaptureBegin(cv->battlerAtk, cv->move);
+#endif
     enum MoveTarget moveTarget = GetBattlerMoveTargetType(cv->battlerAtk, cv->move);
+#ifdef NATIVE
+    ModsMoveTargetCaptureEnd(cv->battlerAtk, cv->move, moveTarget);
+#endif
     bool32 isDoubleBattle = IsDoubleBattle();
 
     if (!HandleMoveTargetRedirection(cv, moveTarget))
@@ -1028,6 +1051,12 @@ static enum CancelerResult CancelerPPDeduction(struct BattleCalcValues *cv)
              ppToDeduct++;
     }
 
+#ifdef NATIVE
+    u32 nativeBasePPCost = ppToDeduct;
+    ppToDeduct = ModsMovePPCost(cv, movePosition, moveTarget, ppToDeduct);
+    u32 nativePPBefore = gBattleMons[cv->battlerAtk].pp[movePosition];
+    bool32 nativePermanentPP = MOVE_IS_PERMANENT(cv->battlerAtk, movePosition);
+#endif
     // For item Metronome, echoed voice
     if (cv->move != gLastResultingMoves[cv->battlerAtk] || gBattleStruct->unableToUseMove)
         gBattleMons[cv->battlerAtk].volatiles.metronomeItemCounter = 0;
@@ -1050,6 +1079,10 @@ static enum CancelerResult CancelerPPDeduction(struct BattleCalcValues *cv)
             &gBattleMons[cv->battlerAtk].pp[movePosition]);
         MarkBattlerForControllerExec(cv->battlerAtk);
     }
+#ifdef NATIVE
+    ModsMovePPDeducted(cv, movePosition, moveTarget, nativeBasePPCost, ppToDeduct, nativePPBefore,
+                       gBattleMons[cv->battlerAtk].pp[movePosition], nativePermanentPP);
+#endif
 
     if (gBattleStruct->submoveAnnouncement != SUBMOVE_NO_EFFECT)
     {
@@ -2320,6 +2353,9 @@ static void SetRandomMultiHitCounter(enum HoldEffect holdEffect)
 
 static enum CancelerResult CancelerMultihitMoves(struct BattleCalcValues *cv)
 {
+#ifdef NATIVE
+    gBattleStruct->beatUpContributorValid = FALSE;
+#endif
     SetPossibleNewSmartTarget(cv->move);
 
     if (IsBattlerUnaffectedByMove(gBattlerTarget))
@@ -2366,6 +2402,12 @@ static enum CancelerResult CancelerMultihitMoves(struct BattleCalcValues *cv)
         gBattleStruct->beatUpSlot = 0;
         gMultiHitCounter = 0;
         memset(gBattleStruct->beatUpSpecies, 0xFF, sizeof(gBattleStruct->beatUpSpecies));
+#ifdef NATIVE
+        memset(gBattleStruct->beatUpPartySlots, 0xFF, sizeof(gBattleStruct->beatUpPartySlots));
+        gBattleStruct->beatUpContributorCount = 0;
+        gBattleStruct->beatUpContributorBattler = cv->battlerAtk;
+        gBattleStruct->beatUpContributorValid = GetConfig(B_BEAT_UP) >= GEN_5;
+#endif
 
         for (i = 0; i < PARTY_SIZE; i++)
         {
@@ -2379,9 +2421,15 @@ static enum CancelerResult CancelerMultihitMoves(struct BattleCalcValues *cv)
                     gBattleStruct->beatUpSpecies[gMultiHitCounter] = species;
                 else
                     gBattleStruct->beatUpSpecies[gMultiHitCounter] = i;
+#ifdef NATIVE
+                gBattleStruct->beatUpPartySlots[gMultiHitCounter] = i;
+#endif
                 gMultiHitCounter++;
             }
         }
+#ifdef NATIVE
+        gBattleStruct->beatUpContributorCount = gMultiHitCounter;
+#endif
 
         PREPARE_BYTE_NUMBER_BUFFER(gBattleScripting.multihitString, 1, 0)
     }
@@ -2494,10 +2542,14 @@ static enum CancelerResult CancelerAccuracyCheck(struct BattleCalcValues *cv)
         if (ShouldSkipFailureCheckOnBattler(cv->battlerAtk, cv->battlerDef))
             continue;
 
-        if (DoesMoveMissTarget(cv))
-        {
+        bool32 missed = DoesMoveMissTarget(cv);
+        if (missed)
             gBattleStruct->moveResultFlags[cv->battlerDef] |= MOVE_RESULT_MISSED;
-
+#ifdef NATIVE
+        ModsMoveAccuracyChecked(cv, missed);
+#endif
+        if (missed)
+        {
             if (cv->holdEffects[cv->battlerAtk] == HOLD_EFFECT_BLUNDER_POLICY
              && cv->moveEffect != EFFECT_OHKO
              && !isMultiHitOn)
@@ -2696,10 +2748,7 @@ static enum CancelerResult CancelerPreAnimActivations(struct BattleCalcValues *c
                 if (ShouldSkipBattlerForDamage(cv->battlerAtk, battlerDef))
                     continue;
 
-                enum Type types[3];
-                GetBattlerTypes(battlerDef, FALSE, types);
-
-                if (types[0] != TYPE_FLYING && types[1] != TYPE_FLYING && types[2] != TYPE_FLYING)
+                if (!IS_BATTLER_OF_TYPE(battlerDef, TYPE_FLYING))
                     continue;
 
                 if (GetTypeModifier(GetBattleMoveType(cv->move), TYPE_FLYING) > UQ_4_12(1.0))
@@ -2965,6 +3014,10 @@ static enum CancelerResult CancelerHealthBarUpdate(struct BattleCalcValues *cv)
 
 static bool32 TryMoveDamageUpdate(struct BattleCalcValues *cv)
 {
+#ifdef NATIVE
+    u32 oldHp = gBattleMons[cv->battlerDef].hp;
+    u32 oldSubHp = gBattleMons[cv->battlerDef].volatiles.substituteHP;
+#endif
     if (DoesSubstituteBlockMove(cv->battlerAtk, cv->battlerDef, cv->move) && gBattleMons[cv->battlerDef].volatiles.substituteHP)
     {
         if (gBattleMons[cv->battlerDef].volatiles.substituteHP >= gBattleStruct->moveDamage[cv->battlerDef])
@@ -2979,6 +3032,11 @@ static bool32 TryMoveDamageUpdate(struct BattleCalcValues *cv)
             gBattleMons[cv->battlerDef].volatiles.substituteHP = 0;
         }
         // check substitute fading
+#ifdef NATIVE
+        ModsRecordMoveDamage(cv->battlerAtk, cv->battlerDef, cv->move, 0,
+            oldSubHp > gBattleMons[cv->battlerDef].volatiles.substituteHP
+                ? oldSubHp - gBattleMons[cv->battlerDef].volatiles.substituteHP : 0);
+#endif
         if (gBattleMons[cv->battlerDef].volatiles.substituteHP == 0)
         {
             gBattleScripting.battler = cv->battlerDef;
@@ -3043,6 +3101,11 @@ static bool32 TryMoveDamageUpdate(struct BattleCalcValues *cv)
         MarkBattlerForControllerExec(cv->battlerDef);
     }
 
+#ifdef NATIVE
+    ModsRecordMoveDamage(cv->battlerAtk, cv->battlerDef, cv->move,
+        oldHp > gBattleMons[cv->battlerDef].hp ? oldHp - gBattleMons[cv->battlerDef].hp : 0, 0);
+    ModsRecordMoveHealth(cv->battlerDef, oldHp, gBattleMons[cv->battlerDef].hp, FALSE);
+#endif
     // Note: While physicalDmg/specialDmg below are only distinguished between for Counter/Mirror Coat,
     //       they are used in combination as general damage trackers for other purposes.
     if (GetConfig(B_COUNTER_MIRROR_COAT_ALLY) <= GEN_4 || !IsBattlerAlly(cv->battlerDef, cv->battlerAtk))
@@ -3690,7 +3753,14 @@ static enum MoveEndResult MoveEndFaintBlock(struct BattleCalcValues *cv)
         case FAINT_BLOCK_END_NEUTRALIZING_GAS:
             if (gBattleMons[cv->battlerDef].volatiles.neutralizingGas)
             {
+#ifdef NATIVE
+                struct ModsGasChangeCapture gasChange;
+                ModsGasChangeCapture(&gasChange);
+#endif
                 gBattleMons[cv->battlerDef].volatiles.neutralizingGas = FALSE;
+#ifdef NATIVE
+                ModsGasChangeCommitted(&gasChange, RHH_GAS_FAINTED, cv->battlerDef, 0);
+#endif
                 if (!IsNeutralizingGasOnField())
                 {
                     BattleScriptCall(BattleScript_NeutralizingGasExits);
@@ -4084,12 +4154,19 @@ static enum MoveEndResult MoveEndDefrost(struct BattleCalcValues *cv)
             battleScript = BattleScript_BattlerDefrosted;
         else
             battleScript = BattleScript_BattlerFrostbiteHealed;
+#ifdef NATIVE
+        struct ModsStatusCureCapture statusCure;
+        ModsCaptureStatusCure(&statusCure, battler);
+#endif
 
         if ((CanFireMoveThawTarget(cv->move, GetBattleMoveType(cv->move)) || CanBurnHitThaw(cv->move)) && gBattleMons[battler].status1 & STATUS1_FREEZE)
         {
             DefrostBattler(battler, gBattleMons[battler].status1);
             BattleScriptCall(battleScript);
             gBattleCommunication[MULTISTRING_CHOOSER] = B_MSG_DEFROSTED;
+#ifdef NATIVE
+            ModsFinishEngineStatusCure(&statusCure, battler, RHH_BATTLE_CURE_MOVE, cv->battlerAtk, cv->move);
+#endif
             return MOVEEND_RESULT_RUN_SCRIPT;
         }
         else if (IsBattlerAlive(cv->battlerAtk)
@@ -4098,6 +4175,9 @@ static enum MoveEndResult MoveEndDefrost(struct BattleCalcValues *cv)
             DefrostBattler(battler, gBattleMons[battler].status1);
             BattleScriptCall(battleScript);
             gBattleCommunication[MULTISTRING_CHOOSER] = B_MSG_DEFROSTED;
+#ifdef NATIVE
+            ModsFinishEngineStatusCure(&statusCure, battler, RHH_BATTLE_CURE_MOVE, cv->battlerAtk, cv->move);
+#endif
             return MOVEEND_RESULT_RUN_SCRIPT;
         }
     }
@@ -5246,6 +5326,10 @@ static enum MoveEndResult MoveEndClearBits(struct BattleCalcValues *cv)
         ExpendTypeStellarBoost(cv->battlerAtk, moveType);
     memset(gQueuedStatBoosts, 0, sizeof(gQueuedStatBoosts));
 
+#ifdef NATIVE
+    ModsMoveResolved(cv);
+    ModsMoveEffectReset();
+#endif
     for (enum BattlerId i = 0; i < gBattlersCount; i++)
     {
         gBattleStruct->battlerState[cv->battlerAtk].targetsDone[i] = FALSE;
@@ -5263,6 +5347,9 @@ static enum MoveEndResult MoveEndClearBits(struct BattleCalcValues *cv)
 
     // Need to check a specific battler during the end turn
     gBattleMons[cv->battlerAtk].volatiles.unableToUseMove = gBattleStruct->unableToUseMove;
+#ifdef NATIVE
+    gBattleStruct->beatUpContributorValid = FALSE;
+#endif
     ClearDamageCalcResults();
 
     gBattleScripting.moveendState++;
@@ -5385,12 +5472,23 @@ enum MoveEndResult DoMoveEnd(enum MoveEndState endMode, enum MoveEndState endSta
 
     do
     {
+#ifdef NATIVE
+        enum MoveEndState priorState = gBattleScripting.moveendState;
+#endif
         result = sMoveEndHandlers[gBattleScripting.moveendState](&cv);
 
         if (endMode == 1 && result == MOVEEND_RESULT_CONTINUE)
             gBattleScripting.moveendState = MOVEEND_COUNT;
         if (endMode == 2 && endState == gBattleScripting.moveendState)
             gBattleScripting.moveendState = MOVEEND_COUNT;
+
+#ifdef NATIVE
+        if (priorState == MOVEEND_CLEAR_BITS && result == MOVEEND_RESULT_CONTINUE && ModsMoveResolutionCuesPending())
+        {
+            BattleScriptCall(BattleScript_ModResolutionCues);
+            return MOVEEND_RESULT_RUN_SCRIPT;
+        }
+#endif
 
     } while (gBattleScripting.moveendState != MOVEEND_COUNT && result == MOVEEND_RESULT_CONTINUE);
 
@@ -5617,6 +5715,10 @@ static enum MoveResult StatChangeBeforeChange(struct BattleCalcValues *cv)
     case EFFECT_TAKE_HEART:
         if (WillAnyStatChange() || gBattleMons[cv->battlerAtk].status1 != 0)
         {
+#ifdef NATIVE
+            struct ModsStatusCureCapture cure;
+            ModsCaptureStatusCure(&cure, cv->battlerAtk);
+#endif
             u32 status = gBattleMons[cv->battlerAtk].status1;
             if (status & STATUS1_SLEEP)
                 TryDeactivateSleepClause(cv->battlerAtk, gBattlerPartyIndexes[cv->battlerAtk]);
@@ -5639,6 +5741,9 @@ static enum MoveResult StatChangeBeforeChange(struct BattleCalcValues *cv)
             BtlController_EmitSetMonData(cv->battlerAtk, B_COMM_TO_CONTROLLER, REQUEST_STATUS_BATTLE, 0, sizeof(gBattleMons[cv->battlerAtk].status1), &gBattleMons[cv->battlerAtk].status1);
             MarkBattlerForControllerExec(cv->battlerAtk);
             BattleScriptCall(BattleScript_TakeHeart);
+#ifdef NATIVE
+            ModsFinishEngineStatusCure(&cure, cv->battlerAtk, RHH_BATTLE_CURE_MOVE, cv->battlerAtk, cv->move);
+#endif
             return MOVE_RESULT_RUN_SCRIPT_INCREMENT;
         }
         break;
@@ -6073,7 +6178,7 @@ static enum Move GetSleepTalkMove(void)
             unusableMovesBits |= (1 << (i));
     }
 
-    unusableMovesBits = CheckMoveLimitations(gBattlerAttacker, unusableMovesBits, ~(MOVE_LIMITATION_PP | MOVE_LIMITATION_CHOICE_ITEM | MOVE_LIMITATION_UNUSABLE));
+    unusableMovesBits = CheckMoveLimitations(gBattlerAttacker, unusableMovesBits, ~(MOVE_LIMITATION_PP | MOVE_LIMITATION_CHOICE_ITEM | MOVE_LIMITATION_UNUSABLE | MOVE_LIMITATION_MOD_SELECTION));
     if (unusableMovesBits == ALL_MOVES_MASK) // all 4 moves cannot be chosen
         return move;
 

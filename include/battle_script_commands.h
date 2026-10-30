@@ -29,6 +29,8 @@ u32 GetBattlerRawSpeedOrder(enum BattlerId battler);
 bool32 NoAliveMonsForBattlerSide(enum BattlerId battler);
 bool32 NoAliveMonsForPlayer(void);
 bool32 NoAliveMonsForEitherParty(void);
+bool32 IsFollowerCatchFullParty(void);
+bool32 FollowerCatchCanSend(u32 fieldSlot);
 bool32 TrySetReflect(enum BattlerId battler);
 bool32 TrySetLightScreen(enum BattlerId battler);
 void TrySynchronizeActivation(enum BattlerId battlerAtk, enum BattlerId effectBattler, enum MoveEffect effect);

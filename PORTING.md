@@ -97,7 +97,7 @@ make -f Makefile.native TARGET=windows64 all -j8
 ```
 
 The output directory is `build/native/windows64/`. Keep
-`pokeemerald-expansion.exe` and `SDL2.dll` together. Launch the executable
+`pokeemerald-expansion.exe`, `SDL2.dll`, `rhhgme.dll` and the `music` folder together. Launch the executable
 directly on Windows, or use Wine to test it on Linux. It does not load a game
 ROM. Assets and the authoritative game C/data are linked into the executable.
 The SDL archive URL and SHA-256 are pinned in `native/setup_sdl2.sh`.
@@ -107,8 +107,12 @@ For Linux x64, install the C runtime and SDL2 development library, then run
 `TARGET=linux32` and `TARGET=windows32` builds remain available; Linux x86 needs
 32-bit C and SDL2 development libraries.
 
-Controls: arrow keys move, Z is A, X is B, Enter is Start, Backspace is Select,
-and A/S are L/R. The window resizes with the original 240×160 logical display.
+Controls: arrow keys move, Z is A, X is B, Enter is Start, either Shift is
+Select, and A/S are L/R. Rebind keyboard controls in Options → Controls;
+Escape cancels key capture, and Reset Defaults restores the original mapping.
+Bindings are saved in the SDL user preferences directory, independently of
+game saves. `--controls PATH` selects another settings file. The window resizes
+with the original 240×160 logical display.
 The default save is `pokeemerald-expansion.sav` in the working directory;
 `--save PATH` selects another writable location. The platform writes a temporary
 file, flushes it and atomically replaces the save. RHH retains its checksums,
@@ -121,15 +125,16 @@ wine build/native/windows64/gameplay-tests.exe
 python3 native/tests/run.py --target windows64
 python3 native/tests/run.py --target linux64
 python3 native/tests/replay.py --target windows64
-python3 native/tests/reproducible.py --target windows64
+python3 native/tests/reproducible.py --target windows64 --output build/native/reproducible
 # Package the matching verified EXE/DLL (use the result.json path printed above).
 python3 native/package.py --target windows64 --reproducible-report build/native/reproducible/RUN/result.json
 ```
 
 `replay.py` starts with an empty save, supplies real button events and checks
 reports from new processes. It covers new game, maps, NPC scenes, menus, the
-starter battle, Bag, party/summary menus and repeated saving/loading. It creates a fresh artifact
-directory beneath `build/native/replays/` with saves, screenshots and logs.
+starter battle, Bag, party/summary menus and repeated saving/loading. Its saves,
+screenshots and logs are temporary by default. Pass `--output PATH` to retain
+them in a fresh directory under PATH when investigating a run.
 `--fixed-rtc 2026-10-28T12:00:00` is a diagnostic option used by this replay;
 ordinary gameplay reads the host clock. `--frames N` runs without pacing unless
 `--realtime` is also supplied. `--report`, `--trace`, `--audio-capture`,
@@ -139,7 +144,10 @@ ordinary gameplay reads the host clock. `--frames N` runs without pacing unless
 independent clean exports, prepares all tools/data, builds each Windows target,
 and compares executable/DLL hashes. It records toolchain versions and source,
 dependency and artifact hashes in `result.json`. Supply `--sdl-archive PATH`
-to use a previously downloaded archive offline. Reproducibility is scoped to
+to use a previously downloaded archive offline. Temporary source and build
+trees, logs and report are removed after the check, including when it fails.
+Pass `--output PATH` to retain logs and the report for packaging or review.
+Reproducibility is scoped to
 the recorded compiler/toolchain; different compiler releases are not expected
 to emit identical machine code.
 
@@ -154,10 +162,14 @@ make -f Makefile.native TARGET=linux64 OBJ_DIR=build/native/linux64-asan \
   LDFLAGS='-m64 -pie -fsanitize=address -Wl,-z,noexecstack' all gameplay-tests -j8
 ASAN_OPTIONS=detect_leaks=0:halt_on_error=1 SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy build/native/linux64-asan/gameplay-tests
 ASAN_OPTIONS=detect_leaks=0:halt_on_error=1 python3 native/tests/replay.py --target linux64 --executable build/native/linux64-asan/pokeemerald-expansion --timeout 600
+rm -rf -- build/native/linux64-asan
 ```
 
 Address and global bounds checks remain enabled. Leak detection is disabled for
 the full-game replay because engine caches remain allocated at process exit.
+After other gameplay or gallery tests, run `make -f Makefile.native
+TARGET=windows64 clean-test-builds` (or the target you tested) to remove their
+test executables and test-only objects while keeping the runnable game build.
 
 ## Persistent data and remaining modernization
 
@@ -170,27 +182,23 @@ pin these values. On x64, SaveBlock1 is 15840 bytes (flag offset 4976, variables
 5276), because saved object templates and Enigma Berry descriptors contain
 pointers. SaveBlock2, SaveBlock3 and Pokémon retain the sizes above.
 
-The file begins with a 32-byte little-endian native header: eight-byte magic
-`RHHNATV\0`, format version, header length, payload length, pointer bits, layout
-signature and a reserved zero word. The payload is RHH's 128 KiB sector image.
-The header identifies the current structure/configuration layout before the
-engine reads it. Truncated, oversized, unversioned, foreign-architecture and
-incompatible-layout files are rejected without writing to them. RHH's sector
-checksums and rotating-slot recovery remain authoritative; a whole-file payload
-checksum would interfere with that recovery. Semantic format changes require
-an explicit format-version bump, even if structure sizes do not change.
+The PC save starts with the versioned `RHHPCS01` header. It stores two
+independently checksummed, length-delimited game generations and a checksummed
+shared section containing mod snapshots, archives and special records. Writes
+use a flushed temporary file and atomic replacement; a damaged game generation
+can fall back to the other one. Damage to the shared section currently rejects
+the file. The Hall of Fame grows with the number of teams instead of using the
+cartridge's 30-team limit. Previous native saves are not accepted.
 
 Continue rebinds saved map scripts from the current map descriptors, including
 clone objects, and clears unused script slots. Fresh-process PIE and Windows
 replays verify this with relocated runtime addresses. This container provides
 ABI safety, rather than a portable interchange format: importing raw GBA saves,
 cross-architecture migration and independent engine-version migration are not
-implemented. Earlier raw development saves need a deliberate importer; the
-acceptance replay always starts from a new save.
+implemented. The acceptance replay starts from a new save.
 
 The next serialization step is a field-based schema with stable script/content
-IDs, excluding runtime pointers entirely. Move save records out of fixed sector
-budgets as that schema is introduced. External e-Reader Berry descriptions need
+IDs, excluding runtime pointers entirely. External e-Reader Berry descriptions need
 owned validated strings instead of their historical pointers. Generate native
 C descriptors or validated serialized assets behind typed registries before
 introducing pack loading. Keep the existing signed 16-bit gameplay counters and

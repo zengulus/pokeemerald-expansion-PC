@@ -87,10 +87,10 @@ MtMoon_1F_Text_JovanIntro::
 	.string "Don't sneak up on me!$"
 
 MtMoon_1F_Text_JovanDefeat::
-	.string "My POKéMON won't do!$"
+	.string "My Pokémon won't do!$"
 
 MtMoon_1F_Text_JovanPostBattle::
-	.string "I have to find stronger POKéMON.\n"
+	.string "I have to find stronger Pokémon.\n"
 	.string "Where might they be?$"
 
 MtMoon_1F_Text_IrisIntro::
@@ -114,11 +114,11 @@ MtMoon_1F_Text_KentDefeat::
 
 MtMoon_1F_Text_KentPostBattle::
 	.string "I saw them!\n"
-	.string "I'm sure they're from TEAM ROCKET!$"
+	.string "I'm sure they're from Team Rocket!$"
 
 MtMoon_1F_Text_RobbyIntro::
 	.string "You need to go through this cave\n"
-	.string "to get to CERULEAN CITY.$"
+	.string "to get to CERULEAN City.$"
 
 MtMoon_1F_Text_RobbyDefeat::
 	.string "I lost.$"
@@ -135,5 +135,5 @@ MtMoon_1F_Text_ZubatIsABloodsucker::
 MtMoon_1F_Text_BrockHelpsExcavateFossils::
 	.string "Hi, I'm excavating for fossils here\n"
 	.string "under MT. MOON.\p"
-	.string "Sometimes, BROCK of PEWTER GYM\n"
+	.string "Sometimes, BROCK of PEWTER Gym\n"
 	.string "lends me a hand.$"

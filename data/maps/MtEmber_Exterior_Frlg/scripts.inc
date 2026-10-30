@@ -136,7 +136,7 @@ Text_ExplosionDeclined::
 
 Text_ExplosionWhichMon::
 	.string "You're terribly brave!\p"
-	.string "Which POKéMON should I teach\n"
+	.string "Which Pokémon should I teach\n"
 	.string "EXPLOSION?$"
 
 Text_ExplosionTaught::
@@ -162,7 +162,7 @@ MtEmber_Exterior_Text_WhatsPasswordAgain::
 	.string "Any treasure we find, we haul back\n"
 	.string "to the WAREHOUSE, understood?\p"
 	.string "…Oh, and what're the passwords?\n"
-	.string "At the ROCKET WAREHOUSE, I mean.$"
+	.string "At the Rocket WAREHOUSE, I mean.$"
 
 MtEmber_Exterior_Text_FirstPasswordGoldeen::
 	.string "What, you forgot the password?\n"

@@ -935,7 +935,11 @@ static u32 GetRelearnerLevelUpMoves(struct BoxPokemon *mon, u16 *moves)
                     alreadyInList = TRUE;
             }
             if (!alreadyInList)
+            {
+                if (numMoves == MAX_RELEARNER_MOVES)
+                    return numMoves;
                 moves[numMoves++] = learnset[i].move;
+            }
         }
 
         species = (P_PRE_EVO_MOVES ? GetSpeciesPreEvolution(species) : SPECIES_NONE);
@@ -959,7 +963,11 @@ static u32 GetRelearnerEggMoves(struct BoxPokemon *mon, u16 *moves)
     for (u32 i = 0; eggMoves[i] != MOVE_UNAVAILABLE; i++)
     {
         if (!BoxMonKnowsMove(mon, eggMoves[i]))
+        {
+            if (numMoves == MAX_RELEARNER_MOVES)
+                return numMoves;
             moves[numMoves++] = eggMoves[i];
+        }
     }
 
     return numMoves;
@@ -985,7 +993,11 @@ static u32 GetRelearnerTMMoves(struct BoxPokemon *mon, u16 *moves)
             continue;
 
         if (!BoxMonKnowsMove(mon, move))
+        {
+            if (numMoves == MAX_RELEARNER_MOVES)
+                return numMoves;
             moves[numMoves++] = move;
+        }
     }
 
     return numMoves;
@@ -1004,11 +1016,22 @@ static u32 GetRelearnerTutorMoves(struct BoxPokemon *mon, u16 *moves)
             continue;
 
         if (!BoxMonKnowsMove(mon, move))
+        {
+            if (numMoves == MAX_RELEARNER_MOVES)
+                return numMoves;
             moves[numMoves++] = move;
+        }
     }
 
     return numMoves;
 }
+
+#if defined(NATIVE) && defined(RHH_BATTLE_TYPE_ICON_TEST)
+u32 RhhTestRelearnerLevelMoves(struct BoxPokemon *mon, u16 *moves)
+{ return GetRelearnerLevelUpMoves(mon, moves); }
+u32 RhhTestRelearnerEggMoves(struct BoxPokemon *mon, u16 *moves)
+{ return GetRelearnerEggMoves(mon, moves); }
+#endif
 
 void Special_HasMoveToRelearn(void)
 {

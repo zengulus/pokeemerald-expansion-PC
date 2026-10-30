@@ -75,6 +75,16 @@ struct FieldEffectInfoOWE
 extern const struct FieldEffectInfoOWE gOverworldWildEncounterFieldEffectInfo[];
 
 void UpdateOverworldWildEncounter(void);
+#ifdef NATIVE
+u32 PreflightModOverworldWildEncounter(s32 x, s32 y, u32 *spawnSlot, bool32 *water);
+u32 PreflightModOverworldWildSpecies(s32 x, s32 y, u32 species, u32 level, u32 *spawnSlot, bool32 *water);
+u32 TrySpawnModOverworldWildEncounter(s32 x, s32 y, u32 *slot);
+u32 TrySpawnModOverworldWildSpecies(s32 x, s32 y, u32 species, u32 level, u32 *slot);
+bool32 IsOrdinaryGeneratedOverworldWildEncounter(struct ObjectEvent *object);
+bool32 NativeOWEReplacesRandom(u16 metatileBehavior);
+struct Pokemon;
+u32 TrySpawnModOverworldWildPreserved(s32 x, s32 y, const struct Pokemon *source, u32 facing, u32 elevation, bool32 noDespawn, u32 *slot);
+#endif
 bool32 IsOverworldWildEncounter(struct ObjectEvent *owe, enum TypeOWE oweType);
 void SetMinimumOWESpawnTimer(void);
 void TryTriggerOverworldWildEncounter(struct ObjectEvent *obstacle, struct ObjectEvent *collider);
@@ -91,6 +101,12 @@ void RestoreSavedOWEBehaviorState(struct ObjectEvent *owe, struct Sprite *sprite
 void SetSavedOWEMovementState(struct ObjectEvent *owe);
 void ClearSavedOWEMovementState(struct ObjectEvent *owe);
 bool32 CheckRestrictedOWEMovement(struct ObjectEvent *owe, enum Direction direction);
+#ifdef NATIVE
+bool32 CheckRestrictedOWEMovementNoEffects(struct ObjectEvent *owe, enum Direction direction, u8 *overwrite);
+bool32 CheckRestrictedOWEMovementFromNoEffects(const struct ObjectEvent *owe, s16 x, s16 y,
+                                                u8 elevation, u8 behavior, u8 facing,
+                                                enum Direction direction, u8 *overwrite);
+#endif
 bool32 CanAwareOWESeePlayer(struct ObjectEvent *owe);
 bool32 IsPlayerInsideOWEActiveDistance(struct ObjectEvent *owe);
 bool32 IsOWENextToPlayer(struct ObjectEvent *owe);
@@ -99,6 +115,9 @@ u32 GetApproachingOWEDistanceToPlayer(struct ObjectEvent *owe, bool32 *equalDist
 u32 GetOWEWalkMovementActionInDirectionWithSpeed(enum Direction direction, enum SpeedOWE speed);
 bool32 TryPlayAmbientCryOWE(void);
 u32 GetNumberOfActiveOWEs(enum TypeOWE oweType);
+#ifdef NATIVE
+u32 ModsWildGeneratedFreeSlot(void);
+#endif
 const struct ObjectEventTemplate TryGetObjectEventTemplateForOWE(const struct ObjectEventTemplate *template);
 struct SpritePalette GetOWESpawnDespawnAnimFldEffPalette(enum SpawnDespawnTypeOWE spawnAnim);
 u32 RemoveOldestGeneratedOWE(void);

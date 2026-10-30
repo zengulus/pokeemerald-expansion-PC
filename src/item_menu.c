@@ -1,4 +1,5 @@
 #include "global.h"
+#include "battle_main.h"
 #include "item_menu.h"
 #include "battle.h"
 #include "battle_controllers.h"
@@ -2702,7 +2703,11 @@ static void PrintTMHMMoveData(enum Item itemId)
     else
     {
         move = ItemIdToBattleMoveId(itemId);
-        BlitMenuInfoIcon(WIN_TMHM_INFO, GetMoveType(move) + 1, 0, 0);
+        enum Type type = GetMoveType(move);
+        if (type < NUMBER_OF_MON_TYPES)
+            BlitMenuInfoIcon(WIN_TMHM_INFO, type + 1, 0, 0);
+        else
+            BagMenu_Print(WIN_TMHM_INFO, FONT_NARROW, GetTypeName(type), 0, 0, 0, 0, TEXT_SKIP_DRAW, COLORID_TMHM_INFO);
 
         // Print TMHM power
         u32 power = GetMovePower(move);

@@ -129,6 +129,12 @@ static u8 setup##_callback(struct ObjectEvent *objectEvent, struct Sprite *sprit
 static EWRAM_DATA u8 sCurrentReflectionType = 0;
 static EWRAM_DATA u16 sCurrentSpecialObjectPaletteTag = 0;
 static EWRAM_DATA struct LockedAnimObjectEvents *sLockedAnimObjectEvents = {0};
+#ifdef NATIVE
+/* Collision queries used by mod commands must not trigger encounters or
+ * remove actors. The normal engine path retains its existing behavior. */
+static bool8 sCollisionReadOnly;
+static const struct ObjectEvent *sCollisionIgnore;
+#endif
 
 static void MoveCoordsInDirection(u32, s16 *, s16 *, s16, s16);
 static bool8 ObjectEventExecSingleMovementAction(struct ObjectEvent *, struct Sprite *);
@@ -353,6 +359,15 @@ static void (*const sMovementTypeCallbacks[])(struct Sprite *) =
     [MOVEMENT_TYPE_APPROACH_PLAYER_OWE] = MovementType_OverworldWildEncounter_ApproachPlayer,
     [MOVEMENT_TYPE_DESPAWN_OWE] = MovementType_OverworldWildEncounter_Despawn,
 };
+
+#ifdef NATIVE
+bool8 ObjectEventUsesStandardMovementCallback(const struct ObjectEvent *objectEvent, const struct Sprite *sprite)
+{
+    return objectEvent && sprite && objectEvent->movementType < ARRAY_COUNT(sMovementTypeCallbacks)
+        && sMovementTypeCallbacks[objectEvent->movementType]
+        && sprite->callback == sMovementTypeCallbacks[objectEvent->movementType];
+}
+#endif
 
 static const bool8 sMovementTypeHasRange[NUM_MOVEMENT_TYPES] = {
     [MOVEMENT_TYPE_WANDER_AROUND] = TRUE,
@@ -594,6 +609,31 @@ static const struct SpritePalette sObjectEventSpritePalettes[] = {
 #endif
 };
 
+#ifdef NATIVE
+u32 RhhModsAuthoredFrameCount(const struct SpriteFrameImage *images)
+{
+    if (!images) return 0;
+#include "authored_object_frames.inc"
+    return 0;
+}
+#include "authored_object_anims.inc"
+
+/* Bounded lookup: the original loader's sentinel may be absent in non-BUGFIX
+ * builds. Do not expose the engine's palette pointer through the mod ABI. */
+bool32 RhhModsCopyObjectPalette(u16 tag, u16 *out)
+{
+    if (!out || tag == OBJ_EVENT_PAL_TAG_NONE || tag == OBJ_EVENT_PAL_TAG_DYNAMIC || tag == TAG_NONE)
+        return FALSE;
+    for (u32 i = 0; i < ARRAY_COUNT(sObjectEventSpritePalettes); ++i)
+        if (sObjectEventSpritePalettes[i].data && sObjectEventSpritePalettes[i].tag == tag)
+        {
+            memcpy(out, sObjectEventSpritePalettes[i].data, 16 * sizeof(*out));
+            return TRUE;
+        }
+    return FALSE;
+}
+#endif
+
 static const u16 sReflectionPaletteTags_Brendan[] = {
     OBJ_EVENT_PAL_TAG_BRENDAN_REFLECTION,
     OBJ_EVENT_PAL_TAG_BRENDAN_REFLECTION,
@@ -776,6 +816,25 @@ static const u16 *const sObjectPaletteTagSets[] = {
 };
 
 #include "data/object_events/berry_tree_graphics_tables.h"
+#ifdef NATIVE
+u32 RhhModsBerryFrameCount(const struct SpriteFrameImage *images)
+{
+    if (!images) return 0;
+#include "berry_object_frames.inc"
+    return 0;
+}
+bool32 RhhModsCopyBerryObjectPalette(u32 slot, u16 *out)
+{
+    if (!out || slot < 2 || slot > 5 || !sObjectEventSpritePalettes[slot - 2].data) return FALSE;
+    memcpy(out, sObjectEventSpritePalettes[slot - 2].data, 16 * sizeof(*out));
+    return TRUE;
+}
+u32 RhhModsBerryObjectGraphicsId(u32 stage)
+{
+    if (!stage || stage > ARRAY_COUNT(gBerryTreeObjectEventGraphicsIdTable)) return UINT32_MAX;
+    return gBerryTreeObjectEventGraphicsIdTable[stage - 1];
+}
+#endif
 #include "data/field_effects/field_effect_objects.h"
 
 static const s16 sMovementDelaysMedium[] = {32, 64,  96, 128};
@@ -1375,11 +1434,18 @@ static const u8 sPlayerDirectionToCopyDirection[][4] = {
 
 void ClearObjectEvent(struct ObjectEvent *objectEvent)
 {
+#ifdef NATIVE
+    struct RhhWildActorSnapshot wildActor = {.struct_size = sizeof(wildActor)};
+    bool32 hadWildActor = ModsWildActorBeforeRemove(objectEvent, &wildActor);
+#endif
     *objectEvent = (struct ObjectEvent){};
     objectEvent->localId = LOCALID_PLAYER;
     objectEvent->mapNum = MAP_NUM(MAP_UNDEFINED);
     objectEvent->mapGroup = MAP_GROUP(MAP_UNDEFINED);
     objectEvent->movementActionId = MOVEMENT_ACTION_NONE;
+#ifdef NATIVE
+    ModsWildActorAfterRemove(objectEvent, hadWildActor ? &wildActor : NULL, RHH_WILD_ACTOR_CLEAR);
+#endif
 }
 
 static void ClearAllObjectEvents(void)
@@ -1677,11 +1743,18 @@ static u32 GetAvailableObjectEventId(u16 localId, u8 mapNum, u8 mapGroup)
 
 void RemoveObjectEvent(struct ObjectEvent *objectEvent)
 {
+#ifdef NATIVE
+    struct RhhWildActorSnapshot wildActor = {.struct_size = sizeof(wildActor)};
+    bool32 hadWildActor = ModsWildActorBeforeRemove(objectEvent, &wildActor);
+#endif
     OnOverworldWildEncounterDespawn(objectEvent);
     objectEvent->active = FALSE;
     RemoveObjectEventInternal(objectEvent);
     // zero potential species info
     objectEvent->graphicsId = objectEvent->shiny = 0;
+#ifdef NATIVE
+    ModsWildActorAfterRemove(objectEvent, hadWildActor ? &wildActor : NULL, RHH_WILD_ACTOR_REMOVE);
+#endif
 }
 
 void RemoveObjectEventByLocalIdAndMap(u8 localId, u8 mapNum, u8 mapGroup)
@@ -2426,7 +2499,7 @@ bool32 IsFollowerVisible(void)
 
 static bool8 SpeciesHasType(enum Species species, u8 type)
 {
-    return GetSpeciesType(species, 0) == type || GetSpeciesType(species, 1) == type;
+    return IsSpeciesOfType(species, type);
 }
 
 // Display an emote above an object event
@@ -3392,6 +3465,10 @@ static void UNUSED IncrementObjectEventCoords(struct ObjectEvent *objectEvent, s
 
 void ShiftObjectEventCoords(struct ObjectEvent *objectEvent, s16 x, s16 y)
 {
+#ifdef NATIVE
+    if (objectEvent->currentCoords.x != x || objectEvent->currentCoords.y != y)
+        ModsWildActorNoteStep(objectEvent);
+#endif
     objectEvent->previousCoords.x = objectEvent->currentCoords.x;
     objectEvent->previousCoords.y = objectEvent->currentCoords.y;
     objectEvent->currentCoords.x = x;
@@ -6331,6 +6408,29 @@ u8 GetCollisionInDirection(struct ObjectEvent *objectEvent, enum Direction direc
     return GetCollisionAtCoords(objectEvent, x, y, direction);
 }
 
+#ifdef NATIVE
+u8 GetCollisionInDirectionNoEffects(struct ObjectEvent *objectEvent, enum Direction direction, u8 *overwrite)
+{
+    u8 previous = objectEvent->directionOverwrite;
+    bool8 oldReadOnly = sCollisionReadOnly;
+    sCollisionReadOnly = TRUE;
+    u8 collision = GetCollisionInDirection(objectEvent, direction);
+    *overwrite = objectEvent->directionOverwrite;
+    objectEvent->directionOverwrite = previous;
+    sCollisionReadOnly = oldReadOnly;
+    return collision;
+}
+u8 GetCollisionInDirectionNoEffectsIgnoring(struct ObjectEvent *objectEvent, const struct ObjectEvent *ignore,
+                                             enum Direction direction, u8 *overwrite)
+{
+    const struct ObjectEvent *previous = sCollisionIgnore;
+    sCollisionIgnore = ignore;
+    u8 collision = GetCollisionInDirectionNoEffects(objectEvent, direction, overwrite);
+    sCollisionIgnore = previous;
+    return collision;
+}
+#endif
+
 enum Collision GetSidewaysStairsCollision(struct ObjectEvent *objectEvent, enum Direction dir, u8 currentBehavior, u8 nextBehavior, enum Collision collision)
 {
     if ((dir == DIR_SOUTH || dir == DIR_NORTH) && collision != COLLISION_NONE)
@@ -6544,6 +6644,9 @@ u32 GetObjectObjectCollidesWith(struct ObjectEvent *objectEvent, s16 x, s16 y, b
     {
         curObject = &gObjectEvents[i];
         if (curObject->active && (curObject->movementType != MOVEMENT_TYPE_FOLLOW_PLAYER || objectEvent != &gObjectEvents[gPlayerAvatar.objectEventId]) && curObject != objectEvent
+#ifdef NATIVE
+         && (!sCollisionReadOnly || curObject != sCollisionIgnore)
+#endif
          && !FollowerNPC_IsCollisionExempt(curObject, objectEvent)
          )
         {
@@ -6552,10 +6655,14 @@ u32 GetObjectObjectCollidesWith(struct ObjectEvent *objectEvent, s16 x, s16 y, b
             {
                 if (AreElevationsCompatible(objectEvent->currentElevation, curObject->currentElevation))
                 {
-                    if (DespawnOWEDueToNPCCollision(curObject, objectEvent))
-                        continue;
-
-                    TryTriggerOverworldWildEncounter(objectEvent, curObject);
+#ifdef NATIVE
+                    if (!sCollisionReadOnly)
+#endif
+                    {
+                        if (DespawnOWEDueToNPCCollision(curObject, objectEvent))
+                            continue;
+                        TryTriggerOverworldWildEncounter(objectEvent, curObject);
+                    }
                     return i;
                 }
             }
@@ -8770,19 +8877,23 @@ bool8 MovementAction_ClearFixedPriority_Step0(struct ObjectEvent *objectEvent, s
     return TRUE;
 }
 
+extern bool8 TryInitSpriteAffineAnim(struct Sprite *sprite);
 bool8 MovementAction_InitAffineAnim_Step0(struct ObjectEvent *objectEvent, struct Sprite *sprite)
 {
     sprite->oam.affineMode = ST_OAM_AFFINE_DOUBLE;
-    InitSpriteAffineAnim(sprite);
-    sprite->affineAnimPaused = TRUE;
-    sprite->subspriteMode = SUBSPRITES_OFF;
+    if (TryInitSpriteAffineAnim(sprite))
+    {
+        sprite->affineAnimPaused = TRUE;
+        sprite->subspriteMode = SUBSPRITES_OFF;
+    }
+    else
+        sprite->oam.affineMode = ST_OAM_AFFINE_OFF;
     return TRUE;
 }
 
 bool8 MovementAction_ClearAffineAnim_Step0(struct ObjectEvent *objectEvent, struct Sprite *sprite)
 {
-    FreeOamMatrix(sprite->oam.matrixNum);
-    sprite->oam.affineMode = ST_OAM_AFFINE_OFF;
+    FreeSpriteOamMatrix(sprite);
     CalcCenterToCornerVec(sprite, sprite->oam.shape, sprite->oam.size, sprite->oam.affineMode);
     return TRUE;
 }
@@ -8802,8 +8913,11 @@ bool8 MovementAction_ShowReflection_Step0(struct ObjectEvent *objectEvent, struc
 bool8 MovementAction_WalkDownStartAffine_Step0(struct ObjectEvent *objectEvent, struct Sprite *sprite)
 {
     InitWalkSlow(objectEvent, sprite, DIR_SOUTH);
-    sprite->affineAnimPaused = FALSE;
-    StartSpriteAffineAnimIfDifferent(sprite, 0);
+    if (sprite->oam.affineMode & ST_OAM_AFFINE_ON_MASK)
+    {
+        sprite->affineAnimPaused = FALSE;
+        StartSpriteAffineAnimIfDifferent(sprite, 0);
+    }
     return MovementAction_WalkDownStartAffine_Step1(objectEvent, sprite);
 }
 
@@ -8821,8 +8935,11 @@ bool8 MovementAction_WalkDownStartAffine_Step1(struct ObjectEvent *objectEvent, 
 bool8 MovementAction_WalkDownAffine_Step0(struct ObjectEvent *objectEvent, struct Sprite *sprite)
 {
     InitWalkSlow(objectEvent, sprite, DIR_SOUTH);
-    sprite->affineAnimPaused = FALSE;
-    ChangeSpriteAffineAnimIfDifferent(sprite, 1);
+    if (sprite->oam.affineMode & ST_OAM_AFFINE_ON_MASK)
+    {
+        sprite->affineAnimPaused = FALSE;
+        ChangeSpriteAffineAnimIfDifferent(sprite, 1);
+    }
     return MovementAction_WalkDownAffine_Step1(objectEvent, sprite);
 }
 
@@ -8840,8 +8957,11 @@ bool8 MovementAction_WalkDownAffine_Step1(struct ObjectEvent *objectEvent, struc
 bool8 MovementAction_WalkLeftAffine_Step0(struct ObjectEvent *objectEvent, struct Sprite *sprite)
 {
     InitMovementNormal(objectEvent, sprite, DIR_WEST, MOVE_SPEED_FAST_1);
-    sprite->affineAnimPaused = FALSE;
-    ChangeSpriteAffineAnimIfDifferent(sprite, 2);
+    if (sprite->oam.affineMode & ST_OAM_AFFINE_ON_MASK)
+    {
+        sprite->affineAnimPaused = FALSE;
+        ChangeSpriteAffineAnimIfDifferent(sprite, 2);
+    }
     return MovementAction_WalkLeftAffine_Step1(objectEvent, sprite);
 }
 
@@ -8859,8 +8979,11 @@ bool8 MovementAction_WalkLeftAffine_Step1(struct ObjectEvent *objectEvent, struc
 bool8 MovementAction_WalkRightAffine_Step0(struct ObjectEvent *objectEvent, struct Sprite *sprite)
 {
     InitMovementNormal(objectEvent, sprite, DIR_EAST, MOVE_SPEED_FAST_1);
-    sprite->affineAnimPaused = FALSE;
-    ChangeSpriteAffineAnimIfDifferent(sprite, 3);
+    if (sprite->oam.affineMode & ST_OAM_AFFINE_ON_MASK)
+    {
+        sprite->affineAnimPaused = FALSE;
+        ChangeSpriteAffineAnimIfDifferent(sprite, 3);
+    }
     return MovementAction_WalkRightAffine_Step1(objectEvent, sprite);
 }
 
@@ -9593,7 +9716,11 @@ static void UpdateObjectEventOffscreen(struct ObjectEvent *objectEvent, struct S
 static void UpdateObjectEventSpriteVisibility(struct ObjectEvent *objectEvent, struct Sprite *sprite)
 {
     sprite->invisible = FALSE;
-    if (objectEvent->invisible || objectEvent->offScreen)
+    if (objectEvent->invisible || objectEvent->offScreen
+#ifdef NATIVE
+        || ModsWildActorHidden(objectEvent)
+#endif
+        )
         sprite->invisible = TRUE;
 }
 
@@ -9903,7 +10030,11 @@ enum Direction GetLedgeJumpDirection(s16 x, s16 y, enum Direction direction)
 
 static void SetObjectEventSpriteOamTableForLongGrass(struct ObjectEvent *objEvent, struct Sprite *sprite)
 {
-    if (objEvent->disableCoveringGroundEffects)
+    if (objEvent->disableCoveringGroundEffects
+#ifdef NATIVE
+        && !ModsWildActorGroundCover(objEvent)
+#endif
+        )
         return;
 
     if (!MetatileBehavior_IsLongGrass(objEvent->currentMetatileBehavior))
@@ -10390,7 +10521,11 @@ static void DoFlaggedGroundEffects(struct ObjectEvent *objEvent, struct Sprite *
 
 void filters_out_some_ground_effects(struct ObjectEvent *objEvent, u32 *flags)
 {
-    if (objEvent->disableCoveringGroundEffects)
+    if (objEvent->disableCoveringGroundEffects
+#ifdef NATIVE
+        && !ModsWildActorGroundCover(objEvent)
+#endif
+        )
     {
         objEvent->inShortGrass = 0;
         objEvent->inSandPile = 0;
@@ -10449,6 +10584,9 @@ static void DoGroundEffects_OnBeginStep(struct ObjectEvent *objEvent, struct Spr
         GetAllGroundEffectFlags_OnBeginStep(objEvent, &flags);
         SetObjectEventSpriteOamTableForLongGrass(objEvent, sprite);
         filters_out_some_ground_effects(objEvent, &flags);
+#ifdef NATIVE
+        flags = ModsGroundEffectFlags(objEvent, RHH_GROUND_BEGIN, flags);
+#endif
         DoFlaggedGroundEffects(objEvent, sprite, flags);
         objEvent->triggerGroundEffectsOnMove = FALSE;
         objEvent->disableCoveringGroundEffects = 0;
@@ -10470,6 +10608,9 @@ static void DoGroundEffects_OnFinishStep(struct ObjectEvent *objEvent, struct Sp
         GetAllGroundEffectFlags_OnFinishStep(objEvent, &flags);
         SetObjectEventSpriteOamTableForLongGrass(objEvent, sprite);
         FilterOutStepOnPuddleGroundEffectIfJumping(objEvent, &flags);
+#ifdef NATIVE
+        flags = ModsGroundEffectFlags(objEvent, RHH_GROUND_FINISH, flags);
+#endif
         DoFlaggedGroundEffects(objEvent, sprite, flags);
         objEvent->triggerGroundEffectsOnStop = 0;
         objEvent->landingJump = 0;

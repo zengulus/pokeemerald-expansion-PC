@@ -13,6 +13,9 @@
 #include "safari_zone.h"
 #include "sprite.h"
 #include "util.h"
+#ifdef NATIVE
+#include "mods.h"
+#endif
 #include "constants/abilities.h"
 #include "constants/rgb.h"
 
@@ -113,7 +116,12 @@ bool32 CanTerastallize(enum BattlerId battler)
 // Returns a battler's Tera type.
 enum Type GetBattlerTeraType(enum BattlerId battler)
 {
-    return GetMonData(GetBattlerMon(battler), MON_DATA_TERA_TYPE);
+    struct Pokemon *mon = GetBattlerMon(battler);
+    enum Type type = GetMonData(mon, MON_DATA_TERA_TYPE);
+#ifdef NATIVE
+    type = ModsBattleTeraType(battler, type, mon);
+#endif
+    return type;
 }
 
 // Uses up a type's Stellar boost.
@@ -121,6 +129,10 @@ void ExpendTypeStellarBoost(enum BattlerId battler, enum Type type)
 {
     if (type < 32 && gBattleMons[battler].species != SPECIES_TERAPAGOS_STELLAR) // avoid OOB access
         gBattleStruct->stellarBoostFlags[GetBattlerTrainer(battler)] |= 1u << type;
+#ifdef NATIVE
+    else if (type >= 32 && gBattleMons[battler].species != SPECIES_TERAPAGOS_STELLAR)
+        gBattleStruct->stellarCustomBoostFlags[GetBattlerTrainer(battler)][type / 32 - 1] |= 1u << (type % 32);
+#endif
 }
 
 // Checks whether a type's Stellar boost has been expended.
@@ -128,8 +140,13 @@ bool32 IsTypeStellarBoosted(enum BattlerId battler, enum Type type)
 {
     if (type < 32) // avoid OOB access
         return !(gBattleStruct->stellarBoostFlags[GetBattlerTrainer(battler)] & (1u << type));
+#ifdef NATIVE
+    else
+        return !(gBattleStruct->stellarCustomBoostFlags[GetBattlerTrainer(battler)][type / 32 - 1] & (1u << (type % 32)));
+#else
     else
         return FALSE;
+#endif
 }
 
 // Returns the STAB power multiplier to use when Terastallized.
@@ -188,5 +205,9 @@ uq4_12_t GetTeraMultiplier(struct DamageContext *ctx)
 
 u16 GetTeraTypeRGB(enum Type type)
 {
-    return gTypesInfo[type].teraTypeRGBValue;
+#ifdef NATIVE
+    u16 color;
+    if (ModsCustomTypeColor(type, &color)) return color;
+#endif
+    return gTypesInfo[type < NUMBER_OF_MON_TYPES ? type : TYPE_MYSTERY].teraTypeRGBValue;
 }

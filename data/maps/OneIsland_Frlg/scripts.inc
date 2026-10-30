@@ -145,7 +145,7 @@ OneIsland_Text_HavePCLinkageWithHoenn::
 	.string "My granddaughter was in a tizzy\n"
 	.string "over a new breakthrough.\p"
 	.string "She said we finally have PC linkage\n"
-	.string "with people in HOENN.\p"
+	.string "with people in Hoenn.\p"
 	.string "I'm not sure what that means, but\n"
 	.string "CELIO is quite the man.\p"
 	.string "He would make a fine husband for\n"
@@ -156,8 +156,8 @@ OneIsland_Text_IslandSign::
 	.string "Friends Gather at Knot Island$"
 
 OneIsland_Text_PokemonNetCenterSign::
-	.string "Expanding the POKéMON World!\n"
-	.string "POKéMON NET CENTER$"
+	.string "Expanding the Pokémon World!\n"
+	.string "Pokémon NET CENTER$"
 
 @ Unused
 OneIsland_Text_ReturnToCinnabar::

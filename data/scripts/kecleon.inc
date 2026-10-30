@@ -1,5 +1,6 @@
 Route120_EventScript_Kecleon1::
 	lock
+	identifywildencounter "rhh:encounter/route120/kecleon_1"
 	faceplayer
 	setvar VAR_0x8009, 1
 	goto EventScript_Kecleon
@@ -7,6 +8,7 @@ Route120_EventScript_Kecleon1::
 
 Route120_EventScript_Kecleon2::
 	lock
+	identifywildencounter "rhh:encounter/route120/kecleon_2"
 	faceplayer
 	setvar VAR_0x8009, 2
 	goto EventScript_Kecleon
@@ -14,6 +16,7 @@ Route120_EventScript_Kecleon2::
 
 Route120_EventScript_Kecleon3::
 	lock
+	identifywildencounter "rhh:encounter/route120/kecleon_3"
 	faceplayer
 	setvar VAR_0x8009, 3
 	goto EventScript_Kecleon
@@ -21,6 +24,7 @@ Route120_EventScript_Kecleon3::
 
 Route120_EventScript_Kecleon4::
 	lock
+	identifywildencounter "rhh:encounter/route120/kecleon_4"
 	faceplayer
 	setvar VAR_0x8009, 4
 	goto EventScript_Kecleon
@@ -28,6 +32,7 @@ Route120_EventScript_Kecleon4::
 
 Route120_EventScript_Kecleon5::
 	lock
+	identifywildencounter "rhh:encounter/route120/kecleon_5"
 	faceplayer
 	setvar VAR_0x8009, 5
 	goto EventScript_Kecleon
@@ -35,6 +40,7 @@ Route120_EventScript_Kecleon5::
 
 Route119_EventScript_Kecleon1::
 	lock
+	identifywildencounter "rhh:encounter/route119/kecleon_1"
 	faceplayer
 	setvar VAR_0x8009, 6
 	goto EventScript_Kecleon
@@ -42,6 +48,7 @@ Route119_EventScript_Kecleon1::
 
 Route119_EventScript_Kecleon2::
 	lock
+	identifywildencounter "rhh:encounter/route119/kecleon_2"
 	faceplayer
 	setvar VAR_0x8009, 7
 	goto EventScript_Kecleon
@@ -71,7 +78,10 @@ EventScript_BattleKecleon::
 	playmoncry SPECIES_KECLEON, CRY_MODE_ENCOUNTER
 	delay 40
 	waitmoncry
+EventScript_PrepareKecleon::
 	setwildbattle SPECIES_KECLEON, 30
+	specialvar VAR_RESULT, ScriptedWildBattleAllowed
+	goto_if_eq VAR_RESULT, FALSE, EventScript_KecleonCancelled
 	setflag FLAG_SYS_CTRL_OBJ_DELETE
 	dowildbattle
 	clearflag FLAG_SYS_CTRL_OBJ_DELETE
@@ -85,6 +95,16 @@ EventScript_BattleKecleon::
 EventScript_RemoveKecleon::
 	goto Common_EventScript_RemoveStaticPokemon
 	end
+
+EventScript_KecleonCancelled::
+	applymovement VAR_LAST_TALKED, Movement_KecleonConceal
+	waitmovement 0
+	release
+	end
+
+Movement_KecleonConceal::
+	set_invisible
+	step_end
 
 Movement_KecleonAppears:
 	set_visible

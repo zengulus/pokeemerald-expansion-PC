@@ -31,6 +31,9 @@
 #include "constants/battle_tent.h"
 #include "constants/songs.h"
 #include "constants/rgb.h"
+#ifdef NATIVE
+#include "owned_identity_ledger.h"
+#endif
 
 // Select_ refers to the first Pokémon selection screen where you choose your initial 3 rental Pokémon.
 // Swap_   refers to the subsequent selection screens where you can swap a Pokémon with one from the beaten trainer
@@ -1770,6 +1773,9 @@ static void Select_CopyMonsToPlayerParty(void)
         {
             if (sFactorySelectScreen->mons[j].selectedId == i + 1)
             {
+#ifdef NATIVE
+                NativeOwnedTrackUnreportedCopy(&gParties[B_TRAINER_PLAYER][i], &sFactorySelectScreen->mons[j].monData, sizeof(struct Pokemon));
+#endif
                 gParties[B_TRAINER_PLAYER][i] = sFactorySelectScreen->mons[j].monData;
                 gSaveBlock2Ptr->frontier.rentalMons[i].monId = sFactorySelectScreen->mons[j].monId;
                 gSaveBlock2Ptr->frontier.rentalMons[i].personality = GetMonData(&gParties[B_TRAINER_PLAYER][i], MON_DATA_PERSONALITY);
@@ -2305,6 +2311,10 @@ static void CopySwappedMonData(void)
 {
     u8 friendship;
 
+#ifdef NATIVE
+    NativeOwnedTrackUnreportedCopy(&gParties[B_TRAINER_PLAYER][sFactorySwapScreen->playerMonId],
+                                  &gParties[B_TRAINER_OPPONENT_A][sFactorySwapScreen->enemyMonId], sizeof(struct Pokemon));
+#endif
     gParties[B_TRAINER_PLAYER][sFactorySwapScreen->playerMonId] = gParties[B_TRAINER_OPPONENT_A][sFactorySwapScreen->enemyMonId];
     friendship = 0;
     SetMonData(&gParties[B_TRAINER_PLAYER][sFactorySwapScreen->playerMonId], MON_DATA_FRIENDSHIP, &friendship);
@@ -2313,6 +2323,31 @@ static void CopySwappedMonData(void)
     gSaveBlock2Ptr->frontier.rentalMons[sFactorySwapScreen->playerMonId].personality = GetMonData(&gParties[B_TRAINER_OPPONENT_A][sFactorySwapScreen->enemyMonId], MON_DATA_PERSONALITY);
     gSaveBlock2Ptr->frontier.rentalMons[sFactorySwapScreen->playerMonId].abilityNum = GetBoxMonData(&gParties[B_TRAINER_OPPONENT_A][sFactorySwapScreen->enemyMonId].box, MON_DATA_ABILITY_NUM);
 }
+
+#if defined(NATIVE) && defined(RHH_OWNED_IDENTITY_TEST)
+void ModsOwnedFactoryTestCopy(bool32 swap, const struct Pokemon *mon)
+{
+    if (swap)
+    {
+        struct FactorySwapScreen screen = {0};
+        struct FactorySwapScreen *previous = sFactorySwapScreen;
+        sFactorySwapScreen = &screen;
+        gParties[B_TRAINER_OPPONENT_A][0] = *mon;
+        CopySwappedMonData();
+        sFactorySwapScreen = previous;
+    }
+    else
+    {
+        struct FactorySelectScreen screen = {0};
+        struct FactorySelectScreen *previous = sFactorySelectScreen;
+        screen.mons[0].selectedId = 1;
+        screen.mons[0].monData = *mon;
+        sFactorySelectScreen = &screen;
+        Select_CopyMonsToPlayerParty();
+        sFactorySelectScreen = previous;
+    }
+}
+#endif
 
 // Main swap states
 // States for the main tasks of the Swap_ functions after initialization, including:

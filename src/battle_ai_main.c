@@ -1,7 +1,11 @@
 #include "global.h"
+#ifdef NATIVE
+#include "mods.h"
+#endif
 #include "main.h"
 #include "malloc.h"
 #include "battle.h"
+#include "battle_main.h"
 #include "battle_anim.h"
 #include "battle_ai_util.h"
 #include "battle_ai_items.h"
@@ -51,6 +55,7 @@ static struct ChosenAction ChooseMoveOrAction_Singles(enum BattlerId battler);
 static struct ChosenAction ChooseMoveOrAction_Doubles(enum BattlerId battlerAtk);
 static inline void BattleAI_DoAIProcessing(struct AiThinkingStruct *aiThink, enum BattlerId battlerAtk, enum BattlerId battlerDef);
 static inline void BattleAI_DoAIProcessing_PredictedSwitchin(struct AiThinkingStruct *aiThink, struct AiLogicData *aiData, enum BattlerId battlerAtk, enum BattlerId battlerDef);
+static inline bool32 ShouldConsiderMoveForBattler(enum BattlerId battlerAi, enum BattlerId battlerDef, enum Move move);
 static bool32 IsPinchBerryItemEffect(enum HoldEffect holdEffect);
 static bool32 DoesAbilityBenefitFromSunOrRain(enum BattlerId battler, enum Ability ability, u32 weather);
 static void AI_CompareDamagingMoves(enum BattlerId battlerAtk, enum BattlerId battlerDef);
@@ -743,8 +748,14 @@ void SetBattlerAiData(enum BattlerId battler, struct AiLogicData *aiData)
     holdEffect = aiData->holdEffects[battler] = AI_DecideHoldEffectForTurn(battler);
     aiData->lastUsedMove[battler] = (gLastMoves[battler] == MOVE_UNAVAILABLE) ? MOVE_NONE : gLastMoves[battler];
     aiData->hpPercents[battler] = GetHealthPercentage(battler);
-    aiData->moveLimitations[battler] = CheckMoveLimitations(battler, 0, ~(MOVE_LIMITATION_UNUSABLE));
-    aiData->speedStats[battler] = GetBattlerTotalSpeedStat(battler, ability, holdEffect);
+    u32 moveChecks = ~(MOVE_LIMITATION_UNUSABLE);
+#ifdef NATIVE
+    /* Player prediction uses a partial move history. Do not run mod
+     * selection callbacks on unrevealed player move slots. */
+    if (!BattlerHasAi(battler)) moveChecks &= ~MOVE_LIMITATION_MOD_SELECTION;
+#endif
+    aiData->moveLimitations[battler] = CheckMoveLimitations(battler, 0, moveChecks);
+    aiData->speedStats[battler] = GetAiBattlerTotalSpeedStat(battler, ability, holdEffect);
     aiData->dragonDartsHitsBothTarget = 0;
 
     if (IsAiBattlerAssumingStab(battler))
@@ -783,6 +794,9 @@ static u32 Ai_SetMoveAccuracy(struct AiLogicData *aiData, enum BattlerId battler
     else
     {
         accuracy = GetTotalAccuracy(&cv, weather);
+#ifdef NATIVE
+        accuracy = ModsMoveAccuracy(&cv, weather, accuracy, TRUE);
+#endif
 
         // Cap normal accuracy at 100 for ai calcs.
         // Done for comparison with moves that bypass accuracy checks (will be seen as 101 for ai calcs))
@@ -969,6 +983,23 @@ static void DoAIScoreProcessing(enum BattlerId battlerAtk, enum BattlerId battle
 
     if (gAiThinkingStruct->aiFlags[battlerAtk] & AI_FLAG_CHECK_VIABILITY)
         AI_CompareDamagingMoves(battlerAtk, battlerDef);
+#ifdef NATIVE
+    if (!(gAiThinkingStruct->aiAction & AI_ACTION_DO_NOT_ATTACK) && ModsAiMoveScoreEnabled())
+    {
+        for (u32 i = 0; i < MAX_MON_MOVES; ++i)
+        {
+            enum Move move = gBattleMons[battlerAtk].moves[i];
+            s32 score = gAiThinkingStruct->score[i];
+            if (!move || !gBattleMons[battlerAtk].pp[i] || score <= 0
+                || (gAiLogicData->moveLimitations[battlerAtk] & (1u << i))
+                || ((gBattleTypeFlags & BATTLE_TYPE_PALACE) && !((gBattleStruct->palaceFlags >> 4) & (1u << i)))
+                || !ShouldConsiderMoveForBattler(battlerAtk, battlerDef, move)
+                || !CanTargetBattler(battlerAtk, battlerDef, move)) continue;
+            s32 adjusted = ModsAiMoveScore(battlerAtk, battlerDef, move, i, score);
+            if (adjusted != score) SET_SCORE(battlerAtk, i, adjusted);
+        }
+    }
+#endif
 }
 
 static struct ChosenAction ChooseMoveOrAction_Singles(enum BattlerId battler)
@@ -1302,7 +1333,7 @@ static s32 AI_CheckBadMove(enum BattlerId battlerAtk, enum BattlerId battlerDef,
     enum Move predictedMove = GetPredictedMove(battlerAtk, battlerDef, gAiLogicData);
     enum Ability abilityAtk = aiData->abilities[battlerAtk];
     enum Ability abilityDef = aiData->abilities[battlerDef];
-    s32 atkPriority = GetBattleMovePriority(battlerAtk, abilityAtk, move);
+    s32 atkPriority = GetAiBattleMovePriority(battlerAtk, abilityAtk, move);
 
     SetTypeBeforeUsingMove(move, battlerAtk, abilityAtk, aiData->holdEffects[battlerAtk]);
     moveType = GetBattleMoveType(move);
@@ -1584,7 +1615,7 @@ static s32 AI_CheckBadMove(enum BattlerId battlerAtk, enum BattlerId battlerDef,
     default:
         break;
     case EFFECT_HIT: // only applies to Vital Throw - This probably should not be here
-        if (GetBattleMovePriority(battlerAtk, aiData->abilities[battlerAtk], move) < 0 && AI_IsFaster(battlerAtk, battlerDef, move, predictedMove, CONSIDER_PRIORITY) && aiData->hpPercents[battlerAtk] < 40)
+        if (GetAiBattleMovePriority(battlerAtk, aiData->abilities[battlerAtk], move) < 0 && AI_IsFaster(battlerAtk, battlerDef, move, predictedMove, CONSIDER_PRIORITY) && aiData->hpPercents[battlerAtk] < 40)
             ADJUST_SCORE(-2);    // don't want to move last
         break;
     case EFFECT_FINAL_GAMBIT:
@@ -2786,12 +2817,12 @@ static s32 AI_CheckBadMove(enum BattlerId battlerAtk, enum BattlerId battlerDef,
         break;
     case EFFECT_SOAK:
     {
-        enum Type types[3];
+        struct BattleTypeList types;
         enum Type typeArg = GetMoveArgType(move);
 
-        GetBattlerTypes(battlerDef, FALSE, types);
+        GetBattlerTypeList(battlerDef, FALSE, &types);
         if (PartnerMoveIsSameAsAttacker(GetPartnerBattler(battlerAtk), battlerDef, move, aiData->partnerMove)
-            || (types[0] == typeArg && types[1] == typeArg && types[2] == TYPE_MYSTERY))
+            || (types.count == 1 && types.types[0] == typeArg))
             ADJUST_SCORE(-10);    // target is already water-only
         break;
     }
@@ -2980,7 +3011,7 @@ static s32 AI_CheckBadMove(enum BattlerId battlerAtk, enum BattlerId battlerDef,
         break;
     case EFFECT_UPPER_HAND:
         {
-            u32 defPrio = GetBattleMovePriority(battlerDef, aiData->abilities[battlerDef], incomingMove);
+            u32 defPrio = GetAiBattleMovePriority(battlerDef, aiData->abilities[battlerDef], incomingMove);
             if (incomingMove == MOVE_NONE
              || IsBattleMoveStatus(incomingMove)
              || AI_IsSlower(battlerAtk, battlerDef, move, predictedMove, CONSIDER_PRIORITY)
@@ -3069,7 +3100,7 @@ static s32 AI_GetWhichBattlerFasterOrTies(enum BattlerId battlerAtk, enum Battle
     calcValues.holdEffects[battlerAtk] = gAiLogicData->holdEffects[battlerAtk];
     calcValues.holdEffects[battlerDef] = gAiLogicData->holdEffects[battlerDef];
 
-    return GetWhichBattlerFasterOrTies(&calcValues, ignoreChosenMoves);
+    return GetAiWhichBattlerFasterOrTies(&calcValues, ignoreChosenMoves);
 }
 
 static s32 AI_TryToFaint(enum BattlerId battlerAtk, enum BattlerId battlerDef, enum Move move, s32 score)
@@ -3094,7 +3125,7 @@ static s32 AI_TryToFaint(enum BattlerId battlerAtk, enum BattlerId battlerDef, e
     }
     else if (CanTargetFaintAi(battlerDef, battlerAtk)
             && AI_GetWhichBattlerFasterOrTies(battlerAtk, battlerDef, TRUE) != AI_IS_FASTER
-            && GetBattleMovePriority(battlerAtk, gAiLogicData->abilities[battlerAtk], move) > 0)
+            && GetAiBattleMovePriority(battlerAtk, gAiLogicData->abilities[battlerAtk], move) > 0)
     {
         if (RandomPercentage(RNG_AI_PRIORITIZE_LAST_CHANCE, PRIORITIZE_LAST_CHANCE_CHANCE) && !IsDoubleBattle()) // Last Chance behaviour is too easily abused in doubles
             ADJUST_SCORE(SLOW_KILL + 2); // Don't outscore Fast Kill (which gets a bonus point in AI_CompareDamagingMoves), but do outscore Slow Kill getting the same
@@ -6038,7 +6069,7 @@ static s32 AI_ForceSetupFirstTurn(enum BattlerId battlerAtk, enum BattlerId batt
     if (gAiThinkingStruct->aiFlags[battlerAtk] & AI_FLAG_SMART_SWITCHING
       && AI_IsSlower(battlerAtk, battlerDef, move, predictedMove, CONSIDER_PRIORITY)
       && CanTargetFaintAi(battlerDef, battlerAtk)
-      && GetBattleMovePriority(battlerAtk, gAiLogicData->abilities[battlerAtk], move) == 0)
+      && GetAiBattleMovePriority(battlerAtk, gAiLogicData->abilities[battlerAtk], move) == 0)
     {
         RETURN_SCORE_MINUS(20);    // No point in setting up if you will faint. Should just switch if possible..
     }
